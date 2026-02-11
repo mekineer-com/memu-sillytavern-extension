@@ -1,5 +1,23 @@
-import { memuExtras, st } from "utils/context-extra";
+import { LOCAL_USER_ID, memuExtras, st } from "utils/context-extra";
 import { estimateTokenUsage } from "utils/utils";
+
+
+function getStableLocalUserId(fallback: string | undefined): string {
+    try {
+        const existing = LOCAL_USER_ID.get();
+        if (existing && existing.trim()) return existing.trim();
+        const seed = (fallback || '').trim();
+        if (seed) {
+            LOCAL_USER_ID.set(seed);
+            return seed;
+        }
+        const id = (globalThis.crypto && 'randomUUID' in globalThis.crypto) ? (globalThis.crypto as any).randomUUID() : `memu_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        LOCAL_USER_ID.set(id);
+        return id;
+    } catch {
+        return (fallback || '').trim() || `memu_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+}
 
 export async function initChatExtraInfo(ctx: any): Promise<void> {
     if (memuExtras.baseInfo) {
@@ -13,6 +31,7 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
         characterId: `${character.name} - ${character.create_date}`,
         characterName: character.name,
         userName: ctx.name1,
+        userId: getStableLocalUserId(ctx?.name1),
     }
 
     await st.saveChat();

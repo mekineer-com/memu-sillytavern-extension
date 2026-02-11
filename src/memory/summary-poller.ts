@@ -1,10 +1,11 @@
 import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
-import { API_KEY, memuExtras, st } from 'utils/context-extra';
+import { API_KEY, PLUGIN_MODE, memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus, getTaskSummaryReady } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
 import { doSummary, retrieveMemories } from './memorize';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
+const MAX_SUMMARY_FAILURE_RETRIES = 2;
 
 let pollerTimer: ReturnType<typeof setInterval> | undefined;
 let isTerminated = false;
@@ -30,9 +31,10 @@ export function stopSummaryPolling(): void {
 
 async function tick(): Promise<void> {
     try {
-        const apiKey = API_KEY.get();
-        if (!apiKey) {
-            console.debug('memu-ext: summary-poller tick: apiKey is null, should set key first');
+        const mode = PLUGIN_MODE.get();
+        const apiKey = mode === 'local' ? '' : API_KEY.get();
+        if (mode !== 'local' && !apiKey) {
+            console.debug('memu-ext: summary-poller tick: apiKey is null (cloud mode)');
             return;
         }
 
@@ -71,10 +73,47 @@ async function tick(): Promise<void> {
                 break;
             }
             case MemuTaskStatus.FAILURE: {
-                // retry, do not wait
+                // Controlled retry (avoids infinite loops when the backend is misconfigured).
                 if (summary.summaryRange && summary.summaryRange.length === 2) {
                     const [from, to] = summary.summaryRange;
+                    const failCount = summary.failureCount ?? 0;
+                    const err = summary.lastError;
+
+                    // If we never got a taskId (request failed before a task was created),
+                    // don't keep this FAILED state around forever. After a couple failures,
+                    // clear it so the next user turn can attempt again.
+                    if (!summary.summaryTaskId && failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
+                        console.warn('memu-ext: summary-poller tick: stale summary taskId (null); clearing saved summary state');
+                        (memuExtras as any).summary = null;
+                        await st.saveChat();
+                        break;
+                    }
+
+                    // If the backend lost the task (e.g., plugin restarted and task store is in-memory),
+                    // stop spamming the console and clear the saved summary state.
+                    if (err === 'Unknown taskId') {
+                        console.warn('memu-ext: summary-poller tick: stale summary taskId; clearing saved summary state');
+                        (memuExtras as any).summary = null;
+                        await st.saveChat();
+                        break;
+                    }
+
+                    if (failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
+                        console.error('memu-ext: summary-poller tick: summary failed repeatedly; not retrying automatically', {
+                            from,
+                            to,
+                            failCount,
+                            error: err,
+                        });
+                        break;
+                    }
+
                     console.log('memu-ext: summary-poller tick: summary is failure, retry summary', from, to);
+                    memuExtras.summary = {
+                        ...summary,
+                        failureCount: failCount + 1,
+                    };
+                    await st.saveChat();
                     void doSummary(from, to);
                 } else {
                     console.log('memu-ext: summary-poller tick: summary is failure, but range is not valid, do nothing');
@@ -117,6 +156,7 @@ function fireAndUpdateTaskStatus(apiKey: string, range: [number, number], taskId
     getTaskStatus(apiKey, DEFAULT_INTERVAL_MS / 2, taskId)
         .then(async (resp) => {
             console.log('memu-ext: fireAndUpdateTaskStatus: resp', resp);
+            const err = (resp as any)?.error;
             const raw = String(resp?.status ?? '').toUpperCase();
             let mapped: MemuTaskStatus;
             switch (raw) {
@@ -134,10 +174,12 @@ function fireAndUpdateTaskStatus(apiKey: string, range: [number, number], taskId
             }
             // update summary value, do not do other logic
             memuExtras.summary = {
-                summaryRange: range,
+                summaryRange: mapped === MemuTaskStatus.FAILURE ? [range[0], range[0]] : range,
                 summaryTaskId: taskId,
                 summaryTaskStatus: mapped,
                 isReady: false,
+                lastError: mapped === MemuTaskStatus.FAILURE ? (typeof err === 'string' ? err : undefined) : undefined,
+                failureCount: mapped === MemuTaskStatus.FAILURE ? (memuExtras.summary?.failureCount ?? 0) : 0,
             };
             await st.saveChat();
         })

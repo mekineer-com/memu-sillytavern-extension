@@ -7,11 +7,6 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const sillyTavern = __dirname.substring(0, __dirname.lastIndexOf('public') + 6);
-const manifest = JSON.parse(fs.readFileSync('./manifest.json', 'utf8'));
-let { js: scriptFilepath } = manifest;
-scriptFilepath = path.dirname(path.join(__dirname, scriptFilepath));
-const relativePathToSillyTavern = path.relative(scriptFilepath, sillyTavern);
 
 const config = {
     experiments: {
@@ -114,28 +109,14 @@ const config = {
             },
         },
     },
-    externals: [
-        ({ context, request }, callback) => {
-            let scriptPath = path.join(context, request);
-            const basenameDir = path.basename(__dirname);
-            if (/^@silly-tavern/.test(request)) {
-                let script = (`${relativePathToSillyTavern}\\${request.replace('@silly-tavern/', '')}`).replace(/\\/g, '/');
+        externals: [
+        ({ request }, callback) => {
+            if (/^@silly-tavern\//.test(request)) {
+                // Absolute paths from the server root => no more ../../../../../ hacks in dist output.
+                let script = (`/${request.replace('@silly-tavern/', '')}`).replace(/\\/g, '/');
                 script = path.extname(script) === '.js' ? script : `${script}.js`;
                 return callback(null, script);
             }
-            if (!scriptPath.includes(basenameDir)) {
-                let isJs = path.extname(scriptPath) === '.js';
-                if (!isJs) {
-                    isJs = fs.existsSync(`${scriptPath}.js`);
-                    scriptPath = isJs ? `${scriptPath}.js` : scriptPath;
-                }
-                if (isJs) {
-                    const script = (relativePathToSillyTavern + scriptPath.replace(sillyTavern, '')).replace(/\\/g, '/');
-                    return callback(null, script);
-                }
-            }
-            console.log('External: ', scriptPath);
-            console.log('External: ', request);
             callback();
         },
         /^(jquery|\$)$/i,

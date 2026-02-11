@@ -1,5 +1,5 @@
 import { CategoryResponse } from "memu-js";
-import { API_KEY, memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
+import { API_KEY, PLUGIN_MODE, memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
 import { memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus, STEventData } from "utils/types";
 import { sumTokens } from "./utils";
@@ -12,8 +12,14 @@ export async function summaryIfNeed(): Promise<void> {
     }
 
     isSummarying = true;
-    const from = memuExtras.summary?.summaryRange?.[1] ?? 0;
+    const from = (memuExtras.summary?.summaryRange?.[1] ?? -1) + 1;
     const chat = st.getContext().chat;
+
+    // If a summary task is already running, let the poller handle it.
+    if (memuExtras.summary && (memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PROCESSING)) {
+        isSummarying = false;
+        return;
+    }
 
     if (AUTO_SUMMARY_BY_CONTEXT_SIZE.get()) {
         const total = await sumTokens(from);
@@ -24,7 +30,7 @@ export async function summaryIfNeed(): Promise<void> {
     } else {
         const summaryTurn = parseInt(SUMMARY_TURN.get());
         const nowTurn = chat.length - from;
-        console.log('memu-ext: now turn: %d, summary turn: %d', nowTurn, summaryTurn);
+        console.log('memu-ext: unsummarized turns: %d (cursor=%d, lastSummarized=%d), threshold: %d', nowTurn, from, from - 1, summaryTurn);
         if (nowTurn >= summaryTurn) {
             await doSummary(from, chat.length - 1);
         }
@@ -33,10 +39,10 @@ export async function summaryIfNeed(): Promise<void> {
 }
 
 export async function doSummary(from: number, to: number): Promise<void> {
-    const apiKey = API_KEY.get();
-    if (apiKey == null) {
-        // toastr.warning('Please set API key first');
-        console.log('memu-ext: API key is not set');
+    const mode = PLUGIN_MODE.get();
+    const apiKey = mode === 'local' ? '' : API_KEY.get();
+    if (mode !== 'local' && apiKey == null) {
+        console.log('memu-ext: API key is not set (cloud mode)');
         return;
     }
     if (memuExtras.baseInfo == null) {
@@ -50,7 +56,7 @@ export async function doSummary(from: number, to: number): Promise<void> {
             apiKey,
             {
                 messages: await prepareConversationData(from, to),
-                userId: memuExtras.baseInfo.userName,
+                userId: memuExtras.baseInfo.userId,
                 userName: memuExtras.baseInfo.userName,
                 characterId: memuExtras.baseInfo.characterId,
                 characterName: memuExtras.baseInfo.characterName,
@@ -63,14 +69,20 @@ export async function doSummary(from: number, to: number): Promise<void> {
             summaryTaskId: response.taskId,
             summaryTaskStatus: MemuTaskStatus.PENDING,
             isReady: false,
+            failureCount: 0,
+            lastError: undefined,
         };
         await st.saveChat();
     } catch (error) {
+        const prevRange = memuExtras.summary?.summaryRange ?? [-1, -1];
         memuExtras.summary = {
-            summaryRange: [from, to],
+            // IMPORTANT: don't advance the cursor on failure.
+            summaryRange: prevRange,
             summaryTaskId: null,
             summaryTaskStatus: MemuTaskStatus.FAILURE,
             isReady: false,
+            failureCount: (memuExtras.summary?.failureCount ?? 0) + 1,
+            lastError: error instanceof Error ? error.message : String(error),
         };
         await st.saveChat();
         console.error('memu-ext: memorize failed', error);
@@ -78,16 +90,17 @@ export async function doSummary(from: number, to: number): Promise<void> {
 }
 
 export async function retrieveMemories(summary: MemuSummary): Promise<void> {
-    const apiKey = API_KEY.get();
-    if (apiKey == null) {
-        console.log('memu-ext: API key is not set');
+    const mode = PLUGIN_MODE.get();
+    const apiKey = mode === 'local' ? '' : API_KEY.get();
+    if (mode !== 'local' && apiKey == null) {
+        console.log('memu-ext: API key is not set (cloud mode)');
         return;
     }
     console.log('memu-ext: trigger retrieve memories');
     try {
         const response = await retrieveDefaultCategories(
             apiKey,
-            memuExtras.baseInfo.userName,
+            memuExtras.baseInfo.userId,
             memuExtras.baseInfo.characterId,
         );
         console.log('memu-ext: retrieve memories response', response);

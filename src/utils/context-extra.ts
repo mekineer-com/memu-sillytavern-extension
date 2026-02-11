@@ -6,7 +6,7 @@ import { ToolManager } from '@silly-tavern/scripts/tool-calling.js';
 import { debounce } from "@silly-tavern/scripts/utils.js";
 import { appendFileContent } from '@silly-tavern/scripts/chats.js';
 import { getRegexedString, regex_placement } from '@silly-tavern/scripts/extensions/regex/engine.js';
-import { MEMU_LOCAL_STORAGE_API_KEY, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN } from "./consts";
+import { MEMU_LOCAL_STORAGE_API_KEY, MEMU_LOCAL_STORAGE_PLUGIN_MODE, MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -39,6 +39,21 @@ export {
 export const API_KEY = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_API_KEY),
     set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_API_KEY, value),
+}
+
+export const PLUGIN_MODE = {
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE) || 'cloud',
+    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE, MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, value),
+}
+
+export const SHOW_ADVANCED_MAPPING = {
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING),
+    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, value.toString()),
+}
+
+export const LOCAL_USER_ID = {
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_LOCAL_USER_ID),
+    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_LOCAL_USER_ID, value),
 }
 
 export const OVERRIDE_SUMMARIZER = {

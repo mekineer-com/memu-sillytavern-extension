@@ -1,7 +1,60 @@
 import { DefaultCategoriesResponse, MemorizeResponse, MemorizeTaskStatusResponse, MemorizeTaskSummaryReadyResponse } from "memu-js";
 import { ConversationData } from "utils/types";
+import { ConnectionProfileSummary, MemuPluginConfigV1 } from "utils/types";
 
 const ROUTER_BASE_URL = '/api/plugins/memu'
+
+export async function pingPlugin(): Promise<boolean> {
+    try {
+        const resp = await request<{ ok: boolean }>(
+            '/ping',
+            undefined,
+            'GET',
+        );
+        return !!resp?.ok;
+    } catch {
+        return false;
+    }
+}
+
+export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
+    return request<MemuPluginConfigV1>(
+        '/config',
+        undefined,
+        'GET',
+    );
+}
+
+export async function setPluginConfig(config: Partial<MemuPluginConfigV1>): Promise<{ ok: boolean; config?: MemuPluginConfigV1 }> {
+    return request<{ ok: boolean; config?: MemuPluginConfigV1 }>(
+        '/config',
+        config,
+        'POST',
+    );
+}
+
+export async function getConnectionProfiles(): Promise<{ ok: boolean; profiles: ConnectionProfileSummary[]; message?: string }> {
+    return request<{ ok: boolean; profiles: ConnectionProfileSummary[]; message?: string }>(
+        '/profiles',
+        undefined,
+        'GET',
+    );
+}
+
+export async function getProfileModels(
+    profileId: string,
+    opts?: { kind?: 'embedding' | 'chat' | 'all'; force?: boolean },
+): Promise<{ ok: boolean; models: string[]; message?: string }> {
+    const params = new URLSearchParams();
+    params.set('profileId', profileId);
+    if (opts?.kind && opts.kind !== 'all') params.set('kind', opts.kind);
+    if (opts?.force) params.set('force', '1');
+    return request<{ ok: boolean; models: string[]; message?: string }>(
+        `/models?${params.toString()}`,
+        undefined,
+        'GET',
+    );
+}
 
 export async function getTaskStatus(
     apiKey: string,
@@ -68,7 +121,7 @@ export async function memorizeConversation(
 
 async function request<T extends any>(
     url: string,
-    body: any,
+    body: any | undefined,
     method: string = 'POST',
     headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -83,10 +136,18 @@ async function request<T extends any>(
             ...headers,
             'x-csrf-token': csrfToken,
         },
-        body: JSON.stringify(body),
+        ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
     });
     if (resp.status !== 200) {
-        throw new Error(`Failed to request: ${resp.status}, ${resp.body}`);
+        // Read the error body as text so the console shows the real server message
+        // (otherwise you'll just see "[object ReadableStream]").
+        let errText = '';
+        try {
+            errText = await resp.text();
+        } catch {
+            errText = String(resp.body);
+        }
+        throw new Error(`Failed to request: ${resp.status}, ${errText}`);
     }
     return resp.json() as Promise<T>;
 }
