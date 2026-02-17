@@ -44,6 +44,11 @@ export interface MemuExtras {
     baseInfo?: MemuBaseInfo;
     summary?: MemuSummary;
     retrieve?: MemuRetrieve;
+    /**
+     * ID of the currently running local Python bridge instance (when in local mode).
+     * Used to detect when an in-memory DB was restarted so we don't keep stale cursors.
+     */
+    bridgeSessionId?: string;
 }
 
 export interface MemuBaseInfo {

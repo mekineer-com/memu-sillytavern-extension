@@ -87,7 +87,11 @@ const config = {
     },
     optimization: {
         minimize: true,
-        minimizer: [new TerserPlugin({ extractComments: false })],
+        minimizer: [new TerserPlugin({
+            extractComments: false,
+            // Avoid collisions with ESM import bindings (can crash the extension at load time).
+            terserOptions: { mangle: false },
+        })],
         splitChunks: {
             chunks: 'async',
             minSize: 20000,

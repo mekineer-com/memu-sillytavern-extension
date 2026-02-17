@@ -1,7 +1,7 @@
 <div align="center">
 
 REQUIRES:<br>
-https://github.com/mekineer-com/memu/<br>
+https://github.com/NevaMind-AI/memU/<br>
 https://github.com/mekineer-com/memu-sillytavern-plugin/
 
 Community fork (unofficial).<br>

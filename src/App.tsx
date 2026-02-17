@@ -333,7 +333,8 @@ function App() {
                                 <h4>Model Mapping</h4>
                                 <small>
                                     <span>
-                                        Pick a SillyTavern Connection Profile per memU step. (If no dropdown appears, your ST version probably stores profiles elsewhere — you can still type an ID.)
+                                        Profiles must be OpenAI-compatible. {' '}
+                                        <a href="/api/plugins/memu/troubleshooting" target="_blank" rel="noopener noreferrer">Click for Troubleshooting</a>
                                     </span>
                                 </small>
 
@@ -378,10 +379,6 @@ function App() {
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 10 }}>
                                     <h4 style={{ margin: 0 }}>Embeddings agent</h4>
-                                    <small style={{ opacity: 0.85 }}>
-                                        Profiles must be OpenAI-compatible. Model list is fetched from the embeddings profile’s <code>/v1/models</code> (or provider-equivalent) when available.
-                                    </small>
-
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                         <label>Embeddings profile <small style={{ opacity: 0.7 }}>— optional override</small></label>
                                         {renderProfilePicker(
@@ -509,15 +506,7 @@ function App() {
                                     )}
                                 </div>
                             </>
-                        ) : (
-                            <div style={{ padding: '8px 4px', opacity: 0.85 }}>
-                                <small>
-                                    <span>
-                                        Local (Python memU) mode is selected. The cloud API key is not expected to be needed once the plugin is switched to a local backend.
-                                    </span>
-                                </small>
-                            </div>
-                        )}
+                        ) : null}
                         <hr />
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             <h4>Memory</h4>

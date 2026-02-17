@@ -43,7 +43,8 @@ export const API_KEY = {
 
 export const PLUGIN_MODE = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE) || 'cloud',
-    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE, MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, value),
+    // localStorage.setItem(key, value)
+    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE, value),
 }
 
 export const SHOW_ADVANCED_MAPPING = {
@@ -81,6 +82,8 @@ export const memuExtras = new Proxy<MemuExtras>(originExtras, {
                 return (st.getContext().chatMetadata.memuExtras as MemuExtras).retrieve;
             case 'summary':
                 return (st.getContext().chatMetadata.memuExtras as MemuExtras).summary;
+            case 'bridgeSessionId':
+                return (st.getContext().chatMetadata.memuExtras as MemuExtras).bridgeSessionId;
             default:
                 throw new Error(`Unknown extra prop: ${String(prop)}`);
         }
@@ -96,6 +99,9 @@ export const memuExtras = new Proxy<MemuExtras>(originExtras, {
                 return true;
             case 'summary':
                 (st.getContext().chatMetadata.memuExtras as MemuExtras).summary = value as MemuSummary;
+                return true;
+            case 'bridgeSessionId':
+                (st.getContext().chatMetadata.memuExtras as MemuExtras).bridgeSessionId = value as string;
                 return true;
             default:
                 throw new Error(`Unknown extra prop: ${String(prop)}`);

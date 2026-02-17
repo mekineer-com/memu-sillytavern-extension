@@ -4,13 +4,26 @@ import { ConnectionProfileSummary, MemuPluginConfigV1 } from "utils/types";
 
 const ROUTER_BASE_URL = '/api/plugins/memu'
 
+export type PluginPing = {
+    ok: boolean;
+    module?: string;
+    mode?: string;
+    bridgeSessionId?: string;
+    dbProvider?: string;
+    ephemeralDb?: boolean;
+};
+
+export async function getPluginPing(): Promise<PluginPing> {
+    return request<PluginPing>(
+        '/ping',
+        undefined,
+        'GET',
+    );
+}
+
 export async function pingPlugin(): Promise<boolean> {
     try {
-        const resp = await request<{ ok: boolean }>(
-            '/ping',
-            undefined,
-            'GET',
-        );
+        const resp = await getPluginPing();
         return !!resp?.ok;
     } catch {
         return false;

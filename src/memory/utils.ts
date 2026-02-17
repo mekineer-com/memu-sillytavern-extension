@@ -23,7 +23,7 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
     if (memuExtras.baseInfo) {
         return;
     }
-    const character = ctx.characters[0];
+    const character = ctx.characters[ctx.characterId] ?? ctx.characters[0];
     if (!character) {
         return;
     }
@@ -40,12 +40,12 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
 
 export async function sumTokens(from: number): Promise<number> {
 	const chat = st.getContext().chat;
-    // length - 1 to avoid case where the last message is continued
-	if (chat == null || chat.length - 1 <= from) {
+    // We call summarization on message-received / generation-ended events, so the last message is complete.
+	if (chat == null || chat.length <= from) {
 		return 0;
 	}
 	let sum = 0;
-	for (let i = from; i < chat.length - 1; i++) {
+	for (let i = from; i < chat.length; i++) {
 		const message = chat[i];
 		const text = message.mes;
 		if (text == null || typeof text !== 'string') {
