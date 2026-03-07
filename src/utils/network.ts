@@ -19,7 +19,6 @@ export type ScopeStorageProbeResponse = {
   ok: boolean;
   userId?: string;
   soulId?: string;
-  agentId?: string;
   provider?: string;
   dbPath?: string | null;
   exists?: boolean;
@@ -87,12 +86,12 @@ export async function getTaskSummaryReady(taskId: string): Promise<MemorizeTaskS
   return request<MemorizeTaskSummaryReadyResponse>('/getTaskSummaryReady', { taskId });
 }
 
-export async function retrieveDefaultCategories(userId: string, agentId: string): Promise<DefaultCategoriesResponse> {
-  return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, soulId: agentId, agentId });
+export async function retrieveDefaultCategories(userId: string, soulId: string): Promise<DefaultCategoriesResponse> {
+  return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, soulId });
 }
 
-export async function scopeStorageProbe(userId: string, agentId: string): Promise<ScopeStorageProbeResponse> {
-  return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, soulId: agentId, agentId });
+export async function scopeStorageProbe(userId: string, soulId: string): Promise<ScopeStorageProbeResponse> {
+  return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, soulId });
 }
 
 export async function memorizeConversation(conversationData: ConversationData): Promise<MemorizeResponse> {
@@ -102,11 +101,9 @@ export async function memorizeConversation(conversationData: ConversationData): 
     userId: conversationData.userId,
     userName: conversationData.userName,
     conversationId: conversationData.conversationId,
-    // KISS: soul scope key is the character name. Keep agent* keys for compatibility.
+    // KISS: soul scope key is the character name.
     soulId: soul,
     soulName: soul,
-    agentId: soul,
-    agentName: soul,
     chatFileName: conversationData.chatFileName,
     timeZone: conversationData.timeZone,
     timeZoneOffsetMin: conversationData.timeZoneOffsetMin,

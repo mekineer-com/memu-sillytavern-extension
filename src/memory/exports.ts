@@ -18,14 +18,14 @@ const staleCursorResetOnceByScope = new Set<string>();
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
  * 1) backend restarted with ephemeral DB (in-memory reset),
- * 2) scoped backend storage (userId+agentId) is missing or empty.
+ * 2) scoped backend storage (userId+soulId) is missing or empty.
  *
  * Case (2) is one-shot per chat scope to avoid repeated wipes when backend is still warming up.
  */
 async function maybeClearStaleLocalState(): Promise<void> {
     const chatId = getChatIdSafe();
     const userId = String(memuExtras.baseInfo?.userId || '').trim();
-    const agentId = String(memuExtras.baseInfo?.characterId || '').trim();
+    const soulId = String(memuExtras.baseInfo?.characterId || '').trim();
 
     const cached = memuExtras.retrieve?.nowRetrieve?.summary;
     const hasCached = !!cached && cached.trim().length > 0;
@@ -55,12 +55,12 @@ async function maybeClearStaleLocalState(): Promise<void> {
         info(`cursor cleared (server restarted with in-memory db, old=${String(prevSession || 'none')}, new=${pingSession})`);
     }
 
-    const scopeKey = (chatId && userId && agentId) ? `${chatId}::${userId}::${agentId}` : '';
+    const scopeKey = (chatId && userId && soulId) ? `${chatId}::${userId}::${soulId}` : '';
 
     // If scoped storage is missing/empty but we still have a local cursor, clear once so digest restarts at 0.
-    if (!cursorCleared && hasCursor && userId && agentId) {
+    if (!cursorCleared && hasCursor && userId && soulId) {
         try {
-            const probe = await scopeStorageProbe(userId, agentId);
+            const probe = await scopeStorageProbe(userId, soulId);
             const missingOrEmpty = probe?.ok === true && probe?.missingOrEmpty === true;
             if (missingOrEmpty) {
                 const alreadyReset = scopeKey ? staleCursorResetOnceByScope.has(scopeKey) : false;
@@ -70,7 +70,7 @@ async function maybeClearStaleLocalState(): Promise<void> {
                     changed = true;
                     cursorCleared = true;
                     if (scopeKey) staleCursorResetOnceByScope.add(scopeKey);
-                    info(`cursor cleared (storage probe missing/empty, userId=${userId}, agentId=${agentId}, reason=${String(probe?.reason || 'none')})`);
+                    info(`cursor cleared (storage probe missing/empty, userId=${userId}, soulId=${soulId}, reason=${String(probe?.reason || 'none')})`);
                 }
             } else if (scopeKey) {
                 // Storage recovered/populated: allow a future one-shot reset if the DB is reset again.
