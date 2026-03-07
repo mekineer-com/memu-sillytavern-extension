@@ -216,12 +216,14 @@ export async function doSummary(from: number, to: number): Promise<void> {
     const timeZoneOffsetMin = new Date().getTimezoneOffset();
 
     try {
+        const conversationId = getChatIdSafe();
         const response = await memorizeConversation({
                 messages: await prepareConversationData(from, to),
                 userId: memuExtras.baseInfo.userId,
                 userName: memuExtras.baseInfo.userName,
                 characterId: memuExtras.baseInfo.characterId,
                 characterName: memuExtras.baseInfo.characterName,
+                conversationId: conversationId || undefined,
                 chatFileName: getChatFileNameRaw(),
                 timeZone,
                 timeZoneOffsetMin,

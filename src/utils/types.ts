@@ -88,6 +88,8 @@ export interface ConversationData {
   userId: string;
   characterName: string;
   characterId: string;
+  // Stable per-chat identity for backend dedupe/cursor continuity.
+  conversationId?: string;
   // Optional: the SillyTavern chat file name (used as a stable pointer on the server).
   chatFileName?: string;
   // Optional: IANA timezone name of the client (used for sleep-based daily resource splits).

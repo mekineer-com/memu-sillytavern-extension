@@ -18,6 +18,7 @@ export type DefaultCategoriesResponse = { categories: any[] };
 export type ScopeStorageProbeResponse = {
   ok: boolean;
   userId?: string;
+  soulId?: string;
   agentId?: string;
   provider?: string;
   dbPath?: string | null;
@@ -87,21 +88,25 @@ export async function getTaskSummaryReady(taskId: string): Promise<MemorizeTaskS
 }
 
 export async function retrieveDefaultCategories(userId: string, agentId: string): Promise<DefaultCategoriesResponse> {
-  return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, agentId });
+  return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, soulId: agentId, agentId });
 }
 
 export async function scopeStorageProbe(userId: string, agentId: string): Promise<ScopeStorageProbeResponse> {
-  return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, agentId });
+  return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, soulId: agentId, agentId });
 }
 
 export async function memorizeConversation(conversationData: ConversationData): Promise<MemorizeResponse> {
+  const soul = conversationData.characterName;
   return request<MemorizeResponse>('/memorizeConversation', {
     conversation: conversationData.messages,
     userId: conversationData.userId,
     userName: conversationData.userName,
-    // KISS: agent id is the character name.
-    agentId: conversationData.characterName,
-    agentName: conversationData.characterName,
+    conversationId: conversationData.conversationId,
+    // KISS: soul scope key is the character name. Keep agent* keys for compatibility.
+    soulId: soul,
+    soulName: soul,
+    agentId: soul,
+    agentName: soul,
     chatFileName: conversationData.chatFileName,
     timeZone: conversationData.timeZone,
     timeZoneOffsetMin: conversationData.timeZoneOffsetMin,
