@@ -2,7 +2,7 @@
 
 This folder includes:
 - `src/` (pre-compiled React/TS source) with:
-  - Backend Mode (cloud/local) UI
+  - Backend config UI for local memU server runtime
   - Config round-trip to the server plugin (`/api/plugins/memu/config`)
   - Profile mapping UI + per-step overrides
   - **Advanced overrides checkbox auto-enables** on refresh when overrides exist
@@ -42,3 +42,7 @@ For distribution, it’s best to commit `dist/` so users can just drop the exten
 - Change: memU-generated lorebook entries are now **disabled (not injected)** by default.
   - Reason: memU already injects its retrieved summary via `addSummaryToPrompt()`. Injecting the same content again via World Info wastes tokens and clutters prompt logs.
   - You can still manually enable a lorebook entry if you want World Info injection.
+
+## memu14only.fix23.hook-retry-retrieve-backoff (2026-02-24)
+- Fix: install background hooks with a short retry loop (handles ST builds where `eventSource` is initialized late).
+- Fix: when `/retrieveDefaultCategories` is failing repeatedly, stop poller spam by backing off after 2 failures for that taskId.

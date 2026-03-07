@@ -6,7 +6,7 @@
     "js": "dist/index.js",
     "css": "",
     "author": "MemU",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "homePage": "https://github.com/NevaMind-AI/memu-sillytavern-extension",
-    "auto_update": true
+    "auto_update": false
 }

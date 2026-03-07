@@ -1,107 +1,115 @@
 export enum MemuTaskStatus {
-    PENDING = 'PENDING',
-    PROCESSING = 'PROCESSING',
-    SUCCESS = 'SUCCESS',
-    FAILURE = 'FAILURE',
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  SUCCESS = 'SUCCESS',
+  FAILURE = 'FAILURE',
 }
 
-// --- memU local configuration (stored server-side in the plugin) ---
-export type MemuMode = 'cloud' | 'local';
+// --- memu local configuration (stored server-side in the plugin) ---
 
 export type MemuStep =
-    | 'all'
-    | 'preprocess'
-    | 'memory_extract'
-    | 'category_update'
-    | 'reflection'
-    | 'ranking'
-    | 'embeddings';
+  | 'all'
+  | 'preprocess'
+  | 'memory_extract'
+  | 'category_update'
+  | 'reflection'
+  | 'ranking'
+  | 'embeddings';
 
 export interface MemuPluginConfigV1 {
-    version: 1;
-    mode: MemuMode;
-    defaultProfileId?: string;
-    stepProfileId?: Partial<Record<MemuStep, string>>;
-    /**
-     * Effective embedding model (derived).
-     * The UI stores both a dropdown selection and an optional manual override.
-     * The plugin will prefer:
-     *   embeddingModelSelected > embeddingModelManual > embeddingModel (legacy)
-     */
-    embeddingModel?: string;
-    embeddingModelSelected?: string;
-    embeddingModelManual?: string;
-    updatedAt: string;
+  version: 4;
+  defaultProfileId?: string;
+  stepProfileId?: Partial<Record<MemuStep, string>>;
+
+  /**
+   * Effective embedding model (derived).
+   * UI stores a dropdown selection and optional manual override.
+   */
+  embeddingModel?: string;
+  embeddingModelSelected?: string;
+  embeddingModelManual?: string;
+
+  // External memu server folder (mcp-memu-server)
+  serverPath?: string;
+  autoStartServer?: boolean;
+
+  updatedAt: string;
 }
 
 export interface ConnectionProfileSummary {
-    id: string;
-    name: string;
+  id: string;
+  name: string;
 }
 
-
 export interface MemuExtras {
-    baseInfo?: MemuBaseInfo;
-    summary?: MemuSummary;
-    retrieve?: MemuRetrieve;
-    /**
-     * ID of the currently running local Python bridge instance (when in local mode).
-     * Used to detect when an in-memory DB was restarted so we don't keep stale cursors.
-     */
-    bridgeSessionId?: string;
+  baseInfo?: MemuBaseInfo;
+  summary?: MemuSummary;
+  retrieve?: MemuRetrieve;
+
+  // Used to detect server restarts so we don't keep stale cursors.
+  serverInstanceId?: string;
 }
 
 export interface MemuBaseInfo {
-    characterId: string;
-    characterName: string;
-    userName: string;
-    userId: string;
+  characterId: string;
+  characterName: string;
+  userName: string;
+  userId: string;
 }
 
 export interface MemuRetrieve {
-    nowRetrieve?: MemuRetrieveHistory;
-    history: MemuRetrieveHistory[];
+  nowRetrieve?: MemuRetrieveHistory;
+  history: MemuRetrieveHistory[];
 }
 
 export interface MemuRetrieveHistory {
-    summaryRange?: [number, number];
-    summaryTaskId?: string;
-    summary?: string;
+  summaryRange?: [number, number];
+  summaryTaskId?: string;
+  summary?: string;
 }
 
 export interface MemuSummary {
-    // [from, to)
-    summaryRange: [number, number];
-    summaryTaskId?: string;
-    summaryTaskStatus: MemuTaskStatus;
-    // the summary content in retrieve task is ready
-    isReady?: boolean;
+  // [from, to)
+  summaryRange: [number, number];
+  summaryTaskId?: string;
+  summaryTaskStatus: MemuTaskStatus;
+  // the summary content in retrieve task is ready
+  isReady?: boolean;
 
-    // Local-mode diagnostics / retry control (optional)
-    failureCount?: number;
-    lastError?: string;
+  // Retry diagnostics
+  failureCount?: number;
+  lastError?: string;
+  lastFailureAt?: number;
 }
 
 export interface ConversationData {
-    messages: ConversationMessage[];
-    userName: string;
-    userId: string;
-    characterName: string;
-    characterId: string;
+  messages: ConversationMessage[];
+  userName: string;
+  userId: string;
+  characterName: string;
+  characterId: string;
+  // Optional: the SillyTavern chat file name (used as a stable pointer on the server).
+  chatFileName?: string;
+  // Optional: IANA timezone name of the client (used for sleep-based daily resource splits).
+  timeZone?: string;
+  // Optional: numeric offset fallback (minutes, same sign as Date.getTimezoneOffset()).
+  timeZoneOffsetMin?: number;
 }
 
 export interface ConversationMessage {
-    role: 'user' | 'assistant' | 'participant';
-    content: string;
-    name?: string;
+  role: 'user' | 'assistant' | 'participant';
+  content: string;
+  name?: string;
+  // Optional: message timestamp in epoch milliseconds (UTC). Prefer this for deterministic splits.
+  ts_ms?: number;
 }
 
 export interface STEventData {
-    chat: STEventDataMsg[];
-    dryRun: boolean;
+  chat: STEventDataMsg[];
+  dryRun: boolean;
 }
 
 export interface STEventDataMsg {
-    role: 'user' | 'assistant' | 'system';
-    content: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }

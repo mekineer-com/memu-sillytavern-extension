@@ -20,21 +20,31 @@ function getStableLocalUserId(fallback: string | undefined): string {
 }
 
 export async function initChatExtraInfo(ctx: any): Promise<void> {
-    if (memuExtras.baseInfo) {
-        return;
-    }
-    const character = ctx.characters[ctx.characterId] ?? ctx.characters[0];
+    // IMPORTANT: never guess the character. If SillyTavern context isn"t ready yet, bail and try again later.
+    const character = ctx?.characters?.[ctx?.characterId];
     if (!character) {
         return;
     }
-    memuExtras.baseInfo = {
-        characterId: `${character.name} - ${character.create_date}`,
-        characterName: character.name,
-        userName: ctx.name1,
-        userId: getStableLocalUserId(ctx?.name1),
-    }
 
-    await st.saveChat();
+    // KISS: per-character scope is the character name.
+    // If someone renames a character, they get a new DB/lorebooks. That's fine.
+    const desiredCharacterName = String(character.name || '').trim();
+    const desiredCharacterId = desiredCharacterName;
+
+    const existing = memuExtras.baseInfo;
+    const userId = (existing?.userId && String(existing.userId).trim()) ? String(existing.userId).trim() : getStableLocalUserId(ctx?.name1);
+    const userName = (ctx?.name1 != null) ? String(ctx.name1) : (existing?.userName ?? '');
+
+    // Update if missing or stale (chat switching can fire before ctx.characterId updates).
+    if (!existing || existing.characterId !== desiredCharacterId || existing.characterName !== desiredCharacterName || existing.userName !== userName) {
+        memuExtras.baseInfo = {
+            characterId: desiredCharacterId,
+            characterName: desiredCharacterName,
+            userName,
+            userId,
+        };
+        await st.saveChat();
+    }
 }
 
 

@@ -1,11 +1,13 @@
 import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
-import { API_KEY, PLUGIN_MODE, memuExtras, st } from 'utils/context-extra';
-import { getTaskStatus, getTaskSummaryReady, getPluginPing } from 'utils/network';
+import { memuExtras, st } from 'utils/context-extra';
+import { getTaskStatus, getTaskSummaryReady } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
 import { doSummary, retrieveMemories } from './memorize';
+import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
 const MAX_SUMMARY_FAILURE_RETRIES = 2;
+const MAX_RETRIEVE_FAILURE_RETRIES = 2;
 
 let pollerTimer: ReturnType<typeof setInterval> | undefined;
 let isTerminated = false;
@@ -30,21 +32,7 @@ export function stopSummaryPolling(): void {
 }
 
 async function tick(): Promise<void> {
-    try {
-        // Prefer plugin-reported mode; localStorage may be stale right after a restart.
-        let mode = PLUGIN_MODE.get();
-        try {
-            const ping = await getPluginPing();
-            if (ping?.mode) {
-                mode = ping.mode as any;
-                try { PLUGIN_MODE.set(mode); } catch { }
-            }
-        } catch { }
-
-        const apiKey = mode === 'local' ? '' : API_KEY.get();
-        if (mode !== 'local' && !apiKey) {
-            return;
-        }
+  try {
 
         const summary = memuExtras.summary;
         if (!summary) {
@@ -55,7 +43,7 @@ async function tick(): Promise<void> {
             case MemuTaskStatus.PENDING:
             case MemuTaskStatus.PROCESSING: {
                 // async query latest status (do not wait)
-                void fireAndUpdateTaskStatus(apiKey, summary.summaryRange, summary.summaryTaskId);
+                void fireAndUpdateTaskStatus(summary.summaryRange, summary.summaryTaskId);
                 break;
             }
             case MemuTaskStatus.SUCCESS: {
@@ -64,13 +52,23 @@ async function tick(): Promise<void> {
                     if (memuExtras.retrieve?.nowRetrieve?.summaryTaskId === summary.summaryTaskId) {
                         break;
                     }
+                    // Avoid retry-spam when retrieve is failing repeatedly (e.g., backend SQLModel mapping error).
+                    const lastFail: any = (memuExtras as any)?.retrieve?.lastFailure;
+                    if (lastFail?.summaryTaskId === (summary.summaryTaskId ?? 'undefined')
+                        && (lastFail?.failureCount ?? 0) >= MAX_RETRIEVE_FAILURE_RETRIES) {
+                        break;
+                    }
                     if (summary.isReady !== true) {
-                        updateTaskSummaryStatus(apiKey, summary.summaryTaskId);
+                        updateTaskSummaryStatus(summary.summaryTaskId);
                         break;
                     }
                     await retrieveMemories(summary);
                 } catch (error) {
-                    console.error('memu-ext: digest-poller tick: digest is success, but retrieve memories failed', error);
+                    onceError(
+                        `poller-retrieve-failed:${String(summary.summaryTaskId ?? 'none')}`,
+                        `retrieve after digest failed (taskId=${String(summary.summaryTaskId ?? 'none')})`,
+                        error,
+                    );
                 }
                 break;
             }
@@ -85,7 +83,10 @@ async function tick(): Promise<void> {
                     // don't keep this FAILED state around forever. After a couple failures,
                     // clear it so the next user turn can attempt again.
                     if (!summary.summaryTaskId && failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
-                        console.warn('memu-ext: digest-poller tick: stale summary taskId (null); clearing saved digest state');
+                        onceWarn(
+                            `poller-stale-taskid:${from}:${to}`,
+                            `digest state cleared (no taskId, range=${from}-${to})`,
+                        );
                         (memuExtras as any).summary = null;
                         await st.saveChat();
                         break;
@@ -93,7 +94,10 @@ async function tick(): Promise<void> {
                     // Some local backends may complete and drop tasks quickly.
                     // If status probing returns 'Unknown taskId', assume digest is done and try retrieve once.
                     if (err === 'Unknown taskId') {
-                        console.warn('memu-ext: digest-poller tick: taskId not found; attempting retrieve anyway');
+                        onceWarn(
+                            `poller-unknown-taskid:${String(summary.summaryTaskId ?? 'none')}`,
+                            `taskId not found; trying retrieve (taskId=${String(summary.summaryTaskId ?? 'none')})`,
+                        );
                         try {
                             memuExtras.summary = {
                                 ...summary,
@@ -104,18 +108,20 @@ async function tick(): Promise<void> {
                             await st.saveChat();
                             await retrieveMemories(memuExtras.summary);
                         } catch (e) {
-                            console.error('memu-ext: digest-poller tick: retrieve after Unknown taskId failed', e);
+                            onceError(
+                                `poller-retrieve-after-unknown:${String(summary.summaryTaskId ?? 'none')}`,
+                                `retrieve after unknown taskId failed (taskId=${String(summary.summaryTaskId ?? 'none')})`,
+                                e,
+                            );
                         }
                         break;
                     }
 
                     if (failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
-                        console.error('memu-ext: digest-poller tick: digest failed repeatedly; not retrying automatically', {
-                            from,
-                            to,
-                            failCount,
-                            error: err,
-                        });
+                        onceError(
+                            `poller-digest-failed:${from}:${to}`,
+                            `digest failed repeatedly (range=${from}-${to}, failures=${failCount})`,
+                        );
                         break;
                     }
 
@@ -134,16 +140,16 @@ async function tick(): Promise<void> {
             }
         }
     } catch (error) {
-        console.error('memu-ext: digest-poller tick error', error);
+        onceError("poller-tick-error", "poller tick failed", error);
     }
 }
 
-function updateTaskSummaryStatus(apiKey: string, taskId?: string | null): void {
+function updateTaskSummaryStatus(taskId?: string | null): void {
     if (!taskId) {
-        console.error('memu-ext: updateTaskSummaryStatus: taskId is null');
+        onceError("poller-taskid-null", "taskId null");
         return;
     }
-    getTaskSummaryReady(apiKey, DEFAULT_INTERVAL_MS / 2, taskId)
+    getTaskSummaryReady(taskId)
         .then(async (resp) => {
             if (memuExtras.summary) {
                 memuExtras.summary.isReady = resp.allReady === true;
@@ -151,17 +157,17 @@ function updateTaskSummaryStatus(apiKey: string, taskId?: string | null): void {
             }
         })
         .catch((err) => {
-            console.error('memu-ext: getTaskSummaryReady failed', err);
+            onceError("poller-task-ready-failed", "task ready failed", err);
         });
 }
 
-function fireAndUpdateTaskStatus(apiKey: string, range: [number, number], taskId?: string | null): void {
+function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null): void {
     if (!taskId) {
-        console.error('memu-ext: fireAndUpdateTaskStatus: taskId is null');
+        onceError("poller-fire-taskid-null", "taskId null");
         return;
     }
 
-    getTaskStatus(apiKey, DEFAULT_INTERVAL_MS / 2, taskId)
+    getTaskStatus(taskId)
         .then(async (resp) => {
             const err = (resp as any)?.error;
             const raw = String(resp?.status ?? '').toUpperCase();
@@ -195,8 +201,7 @@ function fireAndUpdateTaskStatus(apiKey: string, range: [number, number], taskId
             await st.saveChat();
         })
         .catch((err) => {
-            console.error('memu-ext: getTaskStatus failed', err);
+            onceError("poller-task-status-failed", "task status failed", err);
         });
 }
-
 

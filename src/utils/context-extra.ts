@@ -6,7 +6,7 @@ import { ToolManager } from '@silly-tavern/scripts/tool-calling.js';
 import { debounce } from "@silly-tavern/scripts/utils.js";
 import { appendFileContent } from '@silly-tavern/scripts/chats.js';
 import { getRegexedString, regex_placement } from '@silly-tavern/scripts/extensions/regex/engine.js';
-import { MEMU_LOCAL_STORAGE_API_KEY, MEMU_LOCAL_STORAGE_PLUGIN_MODE, MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN } from "./consts";
+import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -35,17 +35,6 @@ export {
     Message,
     MessageCollection
 };
-
-export const API_KEY = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_API_KEY),
-    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_API_KEY, value),
-}
-
-export const PLUGIN_MODE = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE) || 'cloud',
-    // localStorage.setItem(key, value)
-    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_PLUGIN_MODE, value),
-}
 
 export const SHOW_ADVANCED_MAPPING = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING),
@@ -82,8 +71,8 @@ export const memuExtras = new Proxy<MemuExtras>(originExtras, {
                 return (st.getContext().chatMetadata.memuExtras as MemuExtras).retrieve;
             case 'summary':
                 return (st.getContext().chatMetadata.memuExtras as MemuExtras).summary;
-            case 'bridgeSessionId':
-                return (st.getContext().chatMetadata.memuExtras as MemuExtras).bridgeSessionId;
+            case 'serverInstanceId':
+                return (st.getContext().chatMetadata.memuExtras as MemuExtras).serverInstanceId;
             default:
                 throw new Error(`Unknown extra prop: ${String(prop)}`);
         }
@@ -100,8 +89,8 @@ export const memuExtras = new Proxy<MemuExtras>(originExtras, {
             case 'summary':
                 (st.getContext().chatMetadata.memuExtras as MemuExtras).summary = value as MemuSummary;
                 return true;
-            case 'bridgeSessionId':
-                (st.getContext().chatMetadata.memuExtras as MemuExtras).bridgeSessionId = value as string;
+            case 'serverInstanceId':
+                (st.getContext().chatMetadata.memuExtras as MemuExtras).serverInstanceId = value as string;
                 return true;
             default:
                 throw new Error(`Unknown extra prop: ${String(prop)}`);

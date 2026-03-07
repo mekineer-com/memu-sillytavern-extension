@@ -1,552 +1,673 @@
-import MemoryShowModal from "component/MemoryShowModal";
-import { onChatChanged, onChatCompletionPromptReady, onMessageEdited, onMessageReceived, onMessageSwiped } from "memory/exports";
-import { ChangeEvent, CSSProperties, useEffect, useState } from "react";
-import EyeIcon from "ui/icons";
-import MemuLogo from "ui/logo";
-import { FailIcon, LoadingIcon, SuccessIcon } from "ui/status";
-import { API_KEY, AUTO_SUMMARY_BY_CONTEXT_SIZE, memuExtras, OVERRIDE_SUMMARIZER, PLUGIN_MODE, SHOW_ADVANCED_MAPPING, st, SUMMARY_TURN } from "utils/context-extra";
-import { getConnectionProfiles, getPluginConfig, getProfileModels, pingPlugin, setPluginConfig } from "utils/network";
-import { delay } from "utils/utils";
-import { ConnectionProfileSummary, MemuMode, MemuPluginConfigV1, MemuStep } from "utils/types";
+import MemoryShowModal from 'component/MemoryShowModal';
+import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import EyeIcon from 'ui/icons';
+import MemuLogo from 'ui/logo';
+import {
+  AUTO_SUMMARY_BY_CONTEXT_SIZE,
+  memuExtras,
+  OVERRIDE_SUMMARIZER,
+  SHOW_ADVANCED_MAPPING,
+  st,
+  SUMMARY_TURN,
+} from 'utils/context-extra';
+import {
+  getConnectionProfiles,
+  getPluginConfig,
+  getProfileModels,
+  pingPlugin,
+  serverStart,
+  serverStatus,
+  serverStop,
+  setPluginConfig,
+} from 'utils/network';
+import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep } from 'utils/types';
+import { postJsonWithCsrf } from 'utils/csrf';
 
 const buttonStyle: CSSProperties = {
-    height: '100%',
-    borderRadius: 8,
-    width: 36,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
+  height: '100%',
+  borderRadius: 8,
+  width: 36,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
+};
+
+const sectionStyle: CSSProperties = {
+  border: '1px solid rgba(128,128,128,0.35)',
+  borderRadius: 10,
+  padding: '10px 12px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+};
+
+const sectionTitleStyle: CSSProperties = {
+  margin: 0,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+function defaultCfg(): MemuPluginConfigV1 {
+  return { version: 4, updatedAt: new Date().toISOString() };
 }
 
-function App() {
-    const [apiKey, setApiKey] = useState<string>('');
-    const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+export default function App() {
+  const [pluginOk, setPluginOk] = useState<boolean | null>(null);
+  const [pluginConfig, setPluginConfigState] = useState<MemuPluginConfigV1 | null>(null);
+  const [profiles, setProfiles] = useState<ConnectionProfileSummary[]>([]);
+  const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-    // --- memU plugin/server-side config (Best UX, not too complex) ---
-    const [pluginOk, setPluginOk] = useState<boolean | null>(null);
-    const [pluginConfig, setPluginConfigState] = useState<MemuPluginConfigV1 | null>(null);
-    const [profiles, setProfiles] = useState<ConnectionProfileSummary[]>([]);
-    const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-    const [showAdvancedMapping, setShowAdvancedMapping] = useState<boolean>(false);
-    const [embedModels, setEmbedModels] = useState<string[]>([]);
-    const [embedModelsStatus, setEmbedModelsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-    const [embedModelsMessage, setEmbedModelsMessage] = useState<string>('');
-    const [embedManualExpanded, setEmbedManualExpanded] = useState<boolean>(false);
-    const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(false);
-    const [autoSummaryByContextSize, setAutoSummaryByContextSize] = useState<boolean>(false);
-    const [summaryTurn, setSummaryTurn] = useState<number>(10);
-    const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
-    const [memoryText, setMemoryText] = useState<string>('');
+  const [serverCtl, setServerCtl] = useState<any | null>(null);
+  const [serverCtlBusy, setServerCtlBusy] = useState<'idle' | 'working' | 'error'>('idle');
 
-    useEffect(() => {
-        st.eventSource.on(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
-        st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);
-        st.eventSource.on(st.event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
-        st.eventSource.on(st.event_types.MESSAGE_EDITED, onMessageEdited);
-        st.eventSource.on(st.event_types.MESSAGE_SWIPED, onMessageSwiped);
+  const [showAdvancedMapping, setShowAdvancedMapping] = useState<boolean>(false);
 
-        st.eventSource.on(st.event_types.CHAT_CHANGED, () => {
-            setMemoryText(memuExtras.retrieve?.nowRetrieve?.summary ?? '');
-        });
-    }, []);
+  const [embedModels, setEmbedModels] = useState<string[]>([]);
+  const [embedModelsStatus, setEmbedModelsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [embedModelsMessage, setEmbedModelsMessage] = useState<string>('');
 
-    useEffect(() => {
+  const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
+  const [autoSummaryByContextSize, setAutoSummaryByContextSize] = useState<boolean>(false);
+  const [summaryTurn, setSummaryTurn] = useState<number>(10);
+
+  const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
+  const [memoryText, setMemoryText] = useState<string>('');
+  const [eyeHover, setEyeHover] = useState<boolean>(false);
+  const skipNextAutosaveRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    st.eventSource.on(st.event_types.CHAT_CHANGED, () => {
+      setMemoryText(memuExtras.retrieve?.nowRetrieve?.summary ?? '');
+    });
+  }, []);
+
+  // init
+  useEffect(() => {
+    (async () => {
+      try {
+        const ok = await pingPlugin();
+        setPluginOk(ok);
+        if (!ok) return;
+
+        const cfg = await getPluginConfig();
+        setPluginConfigState(cfg);
+
         try {
-            const saved = API_KEY.get();
-            if (saved !== null) setApiKey(saved);
-        } catch { }
-    }, []);
-
-    // Load plugin health + saved config + best-effort connection profiles
-    useEffect(() => {
-        async function initPluginUi() {
-            try {
-                const ok = await pingPlugin();
-                setPluginOk(ok);
-                if (!ok) return;
-
-                const cfg = await getPluginConfig();
-                setPluginConfigState(cfg);
-                // Sync runtime mode with plugin mode
-                try { if ((cfg as any)?.mode) PLUGIN_MODE.set((cfg as any).mode as any); } catch { /* ignore */ }
-
-                // Remember the UI collapse state for Advanced mapping.
-// If the user never chose, default to "open only if overrides exist".
-                try {
-                    const pref = SHOW_ADVANCED_MAPPING.get();
-                    if (pref !== null) {
-                        setShowAdvancedMapping(pref === 'true');
-                    } else {
-                        const m = (cfg as any)?.stepProfileId;
-                        const hasOverrides = m && typeof m === 'object' && Object.keys(m).some((k) => k !== 'all' && String(m[k] ?? '').trim().length > 0);
-                        if (hasOverrides) setShowAdvancedMapping(true);
-                    }
-                } catch { }
-
-                const prof = await getConnectionProfiles();
-                if (Array.isArray(prof?.profiles)) {
-                    setProfiles(prof.profiles);
-                }
-            } catch {
-                setPluginOk(false);
-            }
-        }
-        void initPluginUi();
-    }, []);
-
-    // When local mode is active, load embedding model list from the selected embeddings profile (best-effort).
-    async function loadEmbeddingModels(force: boolean = false) {
-        try {
-            if (!pluginOk) return;
-            if ((pluginConfig?.mode ?? 'cloud') !== 'local') return;
-
-            const embedProfileId = (pluginConfig?.stepProfileId?.embeddings || pluginConfig?.defaultProfileId || '').trim();
-            if (!embedProfileId) {
-                setEmbedModels([]);
-                setEmbedModelsStatus('idle');
-                return;
-            }
-
-            setEmbedModelsStatus('loading');
-            setEmbedModelsMessage('');
-            const resp = await getProfileModels(embedProfileId, { kind: 'embedding', force });
-            if (resp?.ok && Array.isArray(resp.models)) {
-                setEmbedModels(resp.models);
-                setEmbedModelsStatus('idle');
-                // keep manual collapsed unless user opened it
-            } else {
-                setEmbedModels([]);
-                setEmbedModelsStatus('error');
-                setEmbedModelsMessage(resp?.message || 'Failed to load models from provider.');
-                setEmbedManualExpanded(true);
-            }
-        } catch (e: any) {
-            setEmbedModels([]);
-            setEmbedModelsStatus('error');
-            setEmbedModelsMessage(e?.message || 'Failed to load models from provider.');
-            setEmbedManualExpanded(true);
-        }
-    }
-
-    useEffect(() => {
-        void loadEmbeddingModels(false);
-    }, [pluginOk, pluginConfig?.mode, pluginConfig?.defaultProfileId, pluginConfig?.stepProfileId?.embeddings]);
-
-    useEffect(() => {
-        const saved = OVERRIDE_SUMMARIZER.get();
-        if (saved !== null) setOverrideSummarizer(saved);
-        const savedAutoSummaryByContextSize = AUTO_SUMMARY_BY_CONTEXT_SIZE.get();
-        if (savedAutoSummaryByContextSize !== null) setAutoSummaryByContextSize(savedAutoSummaryByContextSize);
-        const savedSummaryTurn = SUMMARY_TURN.get();
-        if (savedSummaryTurn !== null) setSummaryTurn(parseInt(savedSummaryTurn));
-    }, []);
-
-    function handleChange(e: ChangeEvent<HTMLInputElement>) {
-        setApiKey(e.target.value);
-        setStatus('idle');
-    }
-
-    // todo: check available
-    async function handleSave() {
-        setStatus('saving');
-        await delay(1500);
-        try {
-            API_KEY.set(apiKey);
-            setStatus('saved');
-            await delay(1500);
-            setStatus('idle');
+          const pref = SHOW_ADVANCED_MAPPING.get();
+          if (pref !== null) {
+            setShowAdvancedMapping(pref === 'true');
+          } else {
+            const m = (cfg as any)?.stepProfileId;
+            const hasOverrides = m && typeof m === 'object' && Object.keys(m).some((k) => k !== 'all' && String(m[k] ?? '').trim().length > 0);
+            if (hasOverrides) setShowAdvancedMapping(true);
+          }
         } catch {
-            setStatus('error');
-            await delay(1500);
-            setStatus('idle');
+          // ignore
         }
+
+        const prof = await getConnectionProfiles();
+        if (Array.isArray(prof?.profiles)) setProfiles(prof.profiles);
+      } catch {
+        setPluginOk(false);
+      }
+    })();
+  }, []);
+
+  // memory ui prefs
+  useEffect(() => {
+    const savedOverride = OVERRIDE_SUMMARIZER.get();
+    if (savedOverride !== null) setOverrideSummarizer(savedOverride);
+
+    const savedAuto = AUTO_SUMMARY_BY_CONTEXT_SIZE.get();
+    if (savedAuto !== null) setAutoSummaryByContextSize(savedAuto);
+
+    const savedTurn = SUMMARY_TURN.get();
+    if (savedTurn !== null) {
+      let n = parseInt(savedTurn);
+      if (!Number.isFinite(n) || n < 5) n = 10;
+      if (n > 200) n = 200;
+      setSummaryTurn(n);
+      try {
+        SUMMARY_TURN.set(n);
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  async function refreshServerCtl() {
+    try {
+      if (!pluginOk) return;
+      const s = await serverStatus();
+      setServerCtl(s);
+      setServerCtlBusy('idle');
+    } catch {
+      setServerCtl({ ok: false, running: false, healthy: false });
+      setServerCtlBusy('error');
+    }
+  }
+
+  useEffect(() => {
+    if (!pluginOk) return;
+    void refreshServerCtl();
+  }, [pluginOk, (pluginConfig as any)?.serverPath, (pluginConfig as any)?.autoStartServer]);
+
+  async function doServerStart() {
+    setServerCtlBusy('working');
+    try {
+      const r = await serverStart();
+      setServerCtl(r?.status ?? r);
+      setServerCtlBusy('idle');
+    } catch {
+      setServerCtlBusy('error');
+    }
+  }
+
+  async function doServerStop() {
+    setServerCtlBusy('working');
+    try {
+      const r = await serverStop();
+      setServerCtl(r?.status ?? r);
+      setServerCtlBusy('idle');
+    } catch {
+      setServerCtlBusy('error');
+    }
+  }
+
+  function updatePluginConfig(patch: Partial<MemuPluginConfigV1>) {
+    setPluginConfigState((prev) => {
+      const base = prev ?? defaultCfg();
+      const next: any = { ...base, ...patch };
+
+      // embedding model: dropdown overrides manual overrides legacy
+      const selected = typeof next.embeddingModelSelected === 'string' ? next.embeddingModelSelected.trim() : '';
+      const manual = typeof next.embeddingModelManual === 'string' ? next.embeddingModelManual.trim() : '';
+      const legacy = typeof next.embeddingModel === 'string' ? next.embeddingModel.trim() : '';
+      const effective = selected || manual || legacy;
+
+      if (selected) next.embeddingModelSelected = selected;
+      else delete next.embeddingModelSelected;
+
+      if (manual) next.embeddingModelManual = manual;
+      else delete next.embeddingModelManual;
+
+      if (effective) next.embeddingModel = effective;
+      else delete next.embeddingModel;
+
+      next.version = 4;
+      next.updatedAt = new Date().toISOString();
+      return next;
+    });
+    setConfigStatus('idle');
+  }
+
+  useEffect(() => {
+    if (!pluginOk || !pluginConfig) return;
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
     }
 
-    function updatePluginConfig(patch: Partial<MemuPluginConfigV1>) {
-        // Keep extension runtime mode in sync with server/plugin config
-        if (Object.prototype.hasOwnProperty.call(patch, 'mode') && (patch as any).mode) {
-            try { PLUGIN_MODE.set((patch as any).mode as any); } catch { /* ignore */ }
-        }
-        setPluginConfigState(prev => {
-            const base: MemuPluginConfigV1 = prev ?? {
-                version: 1,
-                mode: 'cloud',
-                updatedAt: new Date().toISOString(),
-            };
+    let cancelled = false;
+    setConfigStatus('saving');
+    const timer = window.setTimeout(async () => {
+      try {
+        await setPluginConfig(pluginConfig);
+        if (!cancelled) setConfigStatus('saved');
+      } catch {
+        if (!cancelled) setConfigStatus('error');
+      }
+      if (!cancelled) {
+        window.setTimeout(() => {
+          if (!cancelled) setConfigStatus('idle');
+        }, 800);
+      }
+    }, 350);
 
-            const next: any = { ...base, ...patch };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [pluginConfig, pluginOk]);
 
-            // Normalize/derive embedding model fields (UX: dropdown overrides manual).
-            const selected = typeof next.embeddingModelSelected === 'string' ? next.embeddingModelSelected.trim() : '';
-            const manual = typeof next.embeddingModelManual === 'string' ? next.embeddingModelManual.trim() : '';
-            const legacy = typeof next.embeddingModel === 'string' ? next.embeddingModel.trim() : '';
-            const effective = selected || manual || legacy;
+  const embedProfileId = useMemo(() => {
+    const cfg = pluginConfig;
+    const sid = (cfg?.stepProfileId?.embeddings || cfg?.defaultProfileId || '').trim();
+    return sid;
+  }, [pluginConfig?.defaultProfileId, pluginConfig?.stepProfileId?.embeddings]);
 
-            if (selected) next.embeddingModelSelected = selected; else delete next.embeddingModelSelected;
-            if (manual) next.embeddingModelManual = manual; else delete next.embeddingModelManual;
-            if (effective) next.embeddingModel = effective; else delete next.embeddingModel;
+  async function loadEmbeddingModels(force: boolean = false) {
+    try {
+      if (!pluginOk) return;
+      if (!embedProfileId) {
+        setEmbedModels([]);
+        setEmbedModelsStatus('idle');
+        return;
+      }
+      setEmbedModelsStatus('loading');
+      setEmbedModelsMessage('');
+      const resp = await getProfileModels(embedProfileId, { kind: 'embedding', force });
+      if (resp?.ok && Array.isArray(resp.models)) {
+        setEmbedModels(resp.models);
+        setEmbedModelsStatus('idle');
+      } else {
+        setEmbedModels([]);
+        setEmbedModelsStatus('error');
+        setEmbedModelsMessage(resp?.message || 'Failed to load models');
+      }
+    } catch (e: any) {
+      setEmbedModels([]);
+      setEmbedModelsStatus('error');
+      setEmbedModelsMessage(e?.message || 'Failed to load models');
+    }
+  }
 
-            return next as MemuPluginConfigV1;
-        });
+  useEffect(() => {
+    void loadEmbeddingModels(false);
+  }, [pluginOk, embedProfileId]);
+
+  function renderProfilePicker(value: string | undefined, onChange: (v: string) => void) {
+    if (!profiles.length) {
+      return (
+        <input
+          className="text_pole"
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="profile id"
+        />
+      );
     }
 
-    async function savePluginConfig() {
-        if (!pluginConfig) return;
-        setConfigStatus('saving');
-        try {
-            const resp = await setPluginConfig(pluginConfig);
-            if (resp?.ok && resp?.config) {
-                setPluginConfigState(resp.config);
-                setConfigStatus('saved');
-            } else {
-                setConfigStatus('error');
-            }
-        } catch {
-            setConfigStatus('error');
-        }
-        await delay(1200);
-        setConfigStatus('idle');
-    }
-
-    function cleanProfileName(s: string): string {
-        const v = String(s || '').trim();
-        return v.length > 80 ? v.slice(0, 77) + '…' : v;
-    }
-
-    function renderProfilePicker(
-        value: string | undefined,
-        onChange: (v: string) => void,
-        placeholder: string,
-    ) {
-        if (profiles.length > 0) {
-            return (
-                <select
-                    className="text_pole"
-                    value={value ?? ''}
-                    onChange={(e) => onChange(e.target.value)}
-                >
-                    <option value="">— inherit default —</option>
-                    {profiles.map(p => (
-                        <option key={p.id} value={p.id}>{cleanProfileName(p.name)}</option>
-                    ))}
-                </select>
-            );
-        }
-        return (
-            <input
-                type="text"
-                value={value ?? ''}
-                onChange={(e) => onChange(e.target.value)}
-                className="text_pole"
-                placeholder={placeholder}
-            />
-        );
-    }
-
-    const stepLabels: Array<{ step: MemuStep; label: string; hint: string }> = [
-        { step: 'preprocess', label: 'Preprocess', hint: 'Raw multimodal → concise text' },
-        { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
-        { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
-        { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
-        { step: 'ranking', label: 'Ranking', hint: 'Rerank candidates' },
-    ];
-
-    function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
-        setOverrideSummarizer(e.target.checked);
-        OVERRIDE_SUMMARIZER.set(e.target.checked);
-    }
-
-    function handleAutoSummaryByContextSizeChange(e: ChangeEvent<HTMLInputElement>) {
-        setAutoSummaryByContextSize(e.target.checked);
-        AUTO_SUMMARY_BY_CONTEXT_SIZE.set(e.target.checked);
-    }
-
-    function handleSummaryTurnChange(e: ChangeEvent<HTMLInputElement>) {
-        setSummaryTurn(parseInt(e.target.value));
-        SUMMARY_TURN.set(parseInt(e.target.value));
-    }
-
-    const mode: MemuMode = (pluginConfig?.mode ?? 'cloud') as MemuMode;
+    const v = (value ?? '').trim();
 
     return (
-        <>
-            <div className="memu-ext-settings">
-                <div className="inline-drawer">
-                    <div className="inline-drawer-toggle inline-drawer-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <MemuLogo width={58} height={20} />
-                            <button
-                                className="menu_button"
-                                style={{ ...buttonStyle, width: 30 }}
-                                disabled={memoryText === ''}
-                                onClick={(e) => { e.stopPropagation(); setShowMemoryModal(true); }}
-                            >
-                                <EyeIcon width={16} height={16} />
-                            </button>
-                        </div>
-                        <div className="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                    </div>
-                    <div className="inline-drawer-content" style={{ display: 'flex', flexDirection: 'column' }}>
-
-                        {/* ---- Best UX config: Local mode mapping (server-side) ---- */}
-                        <div style={{ display: 'flex', flexDirection: 'column', padding: '0 4px' }}>
-                            <h4>Backend</h4>
-                            <small>
-                                <span>
-                                    Plugin: {pluginOk === null ? 'checking…' : pluginOk ? 'ok' : 'not reachable'}
-                                </span>
-                            </small>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <label style={{ minWidth: 80 }}>Mode:</label>
-                            <select
-                                className="text_pole"
-                                value={pluginConfig?.mode ?? 'cloud'}
-                                onChange={(e) => updatePluginConfig({ mode: e.target.value as MemuMode })}
-                                disabled={!pluginOk}
-                            >
-                                <option value="cloud">Cloud (memu.so)</option>
-                                <option value="local">Local (Python memU)</option>
-                            </select>
-
-                            <button
-                                onClick={savePluginConfig}
-                                className="menu_button"
-                                style={buttonStyle}
-                                disabled={!pluginOk || !pluginConfig || configStatus === 'saving'}
-                                aria-busy={configStatus === 'saving'}
-                                title={configStatus === 'saving' ? 'Saving' : configStatus === 'saved' ? 'Saved' : 'Save'}
-                            >
-                                {configStatus === 'saving' ? <LoadingIcon width={20} height={20} /> :
-                                    configStatus === 'saved' ? <SuccessIcon width={20} height={20} /> :
-                                        <i className="fa-fw fa-solid fa-save" style={{ fontSize: 20 }} />}
-                            </button>
-                            {configStatus === 'error' && (
-                                <FailIcon width={20} height={20} />
-                            )}
-                        </div>
-
-                        {pluginOk && (pluginConfig?.mode ?? 'cloud') === 'local' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 4px' }}>
-                                <h4>Model Mapping</h4>
-                                <small>
-                                    <span>
-                                        Profiles must be OpenAI-compatible. {' '}
-                                        <a href="/api/plugins/memu/troubleshooting" target="_blank" rel="noopener noreferrer">Click for Troubleshooting</a>
-                                    </span>
-                                </small>
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                    <label>Default profile (all steps)</label>
-                                    {renderProfilePicker(
-                                        pluginConfig?.defaultProfileId,
-                                        (v) => updatePluginConfig({ defaultProfileId: v || undefined }),
-                                        'connection-profile-id'
-                                    )}
-                                </div>
-
-                                <label className="checkbox_label expander" htmlFor="advanced_mapping" title="Advanced mapping">
-                                    <input
-                                        id="advanced_mapping"
-                                        type="checkbox"
-                                        className="checkbox"
-                                        checked={showAdvancedMapping}
-                                        onChange={(e) => { const v = e.target.checked; setShowAdvancedMapping(v); try { SHOW_ADVANCED_MAPPING.set(v); } catch { } }}
-                                    />
-                                    <span>Advanced per-step overrides</span>
-                                </label>
-
-                                {showAdvancedMapping && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 8, paddingRight: 8 }}>
-                                        {stepLabels.map(({ step, label, hint }) => (
-                                            <div key={step} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                                <label>{label} <small style={{ opacity: 0.7 }}>— {hint}</small></label>
-                                                {renderProfilePicker(
-                                                    pluginConfig?.stepProfileId?.[step],
-                                                    (v) => {
-                                                        const next = { ...(pluginConfig?.stepProfileId ?? {}) } as any;
-                                                        if (v) next[step] = v; else delete next[step];
-                                                        updatePluginConfig({ stepProfileId: next });
-                                                    },
-                                                    `override profile id for ${step}`
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 10 }}>
-                                    <h4 style={{ margin: 0 }}>Embeddings agent</h4>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        <label>Embeddings profile <small style={{ opacity: 0.7 }}>— optional override</small></label>
-                                        {renderProfilePicker(
-                                            pluginConfig?.stepProfileId?.embeddings,
-                                            (v) => {
-                                                const next = { ...(pluginConfig?.stepProfileId ?? {}) } as any;
-                                                if (v) next.embeddings = v; else delete next.embeddings;
-                                                updatePluginConfig({ stepProfileId: next });
-                                            },
-                                            'override profile id for embeddings'
-                                        )}
-                                    </div>
-
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        <label>Embedding model <small style={{ opacity: 0.7 }}>— used for vector embeddings</small></label>
-
-                                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                            <select
-                                                className="text_pole"
-                                                value={pluginConfig?.embeddingModelSelected ?? ''}
-                                                onChange={(e) => {
-                                                    const v = e.target.value;
-                                                    updatePluginConfig({ embeddingModelSelected: v || undefined });
-                                                    if (v) setEmbedManualExpanded(false);
-                                                }}
-                                                disabled={embedModelsStatus === 'loading'}
-                                            >
-                                                <option value="">— automatic / manual —</option>
-                                                {embedModels.map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                ))}
-                                            </select>
-
-                                            <button
-                                                className="menu_button"
-                                                style={{ ...buttonStyle, width: 40 }}
-                                                title="Refresh embedding model list"
-                                                onClick={() => void loadEmbeddingModels(true)}
-                                                disabled={embedModelsStatus === 'loading'}
-                                            >
-                                                <i className="fa-fw fa-solid fa-rotate" style={{ fontSize: 16 }} />
-                                            </button>
-                                        </div>
-
-                                        {embedModelsStatus === 'loading' && (
-                                            <small style={{ opacity: 0.85 }}>Loading models…</small>
-                                        )}
-                                        {embedModelsStatus === 'error' && embedModelsMessage && (
-                                            <small style={{ opacity: 0.85 }}>Model list unavailable: {embedModelsMessage}</small>
-                                        )}
-
-                                        {!embedManualExpanded ? (
-                                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                                                <button
-                                                    className="menu_button"
-                                                    style={{ height: 28, borderRadius: 8, padding: '0 10px' } as any}
-                                                    onClick={() => setEmbedManualExpanded(true)}
-                                                >
-                                                    {pluginConfig?.embeddingModelManual ? 'Edit manual model' : 'Enter manual model'}
-                                                </button>
-                                                {pluginConfig?.embeddingModelManual && (
-                                                    <small style={{ opacity: 0.85 }}>Manual: <code>{pluginConfig.embeddingModelManual}</code></small>
-                                                )}
-                                            </div>
-                                        ) : (
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                                    <input
-                                                        type="text"
-                                                        value={pluginConfig?.embeddingModelManual ?? ''}
-                                                        onChange={(e) => updatePluginConfig({ embeddingModelManual: e.target.value || undefined })}
-                                                        className="text_pole"
-                                                        placeholder="text-embedding-3-small"
-                                                        disabled={!!(pluginConfig?.embeddingModelSelected && pluginConfig.embeddingModelSelected.trim())}
-                                                    />
-                                                    <button
-                                                        className="menu_button"
-                                                        style={{ height: 28, borderRadius: 8, padding: '0 10px' } as any}
-                                                        onClick={() => setEmbedManualExpanded(false)}
-                                                    >
-                                                        Hide
-                                                    </button>
-                                                </div>
-                                                <small style={{ opacity: 0.85 }}>
-                                                    Used only when the dropdown is set to “automatic / manual”.
-                                                </small>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
-                            </div>
-                        )}
-
-                        {mode === 'cloud' ? (
-                            <>
-                                <div style={{ display: 'flex', flexDirection: 'column', padding: '0 4px' }}>
-                                    <h4>API Key</h4>
-                                    <small>
-                                        <span>Cloud (memu.so) key: <a href="https://app.memu.so/api-key" target="_blank" rel="noopener noreferrer">app.memu.so/api-key</a></span>
-                                    </small>
-                                </div>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <input
-                                        type="text"
-                                        value={apiKey}
-                                        onChange={handleChange}
-                                        className="text_pole"
-                                        placeholder="memu-api-key"
-                                    />
-                                    <button
-                                        onClick={handleSave}
-                                        className="menu_button"
-                                        style={buttonStyle}
-                                        disabled={status === 'saving'}
-                                        aria-busy={status === 'saving'}
-                                        title={status === 'saving' ? 'Saving' : status === 'saved' ? 'Saved' : 'Save'}
-                                    >
-                                        {status === 'saving' ? <LoadingIcon width={20} height={20} /> :
-                                            status === 'saved' ? <SuccessIcon width={20} height={20} /> :
-                                                <i className="fa-fw fa-solid fa-save" style={{ fontSize: 20 }} />}
-                                    </button>
-                                    {status === 'error' && (
-                                        <FailIcon width={20} height={20} />
-                                    )}
-                                </div>
-                            </>
-                        ) : null}
-                        <hr />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            <h4>Memory</h4>
-                            <label className="checkbox_label expander" htmlFor="override_summarizer" title="Override Summarizer">
-                                <input id="override_summarizer" type="checkbox" className="checkbox" checked={overrideSummarizer} onChange={handleOverrideSummarizerChange} />
-                                <span>Override Summarizer</span>
-                                <i className="fa-solid fa-info-circle" title="Override the summarizer with MemU's summarizer. Extremely recommend to be checked."></i>
-                            </label>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                <label className="checkbox_label expander" htmlFor="auto_summary_turn" title="Auto Summary Turn">
-                                    <input id="auto_summary_turn" type="checkbox" className="checkbox" checked={autoSummaryByContextSize} onChange={handleAutoSummaryByContextSizeChange} />
-                                    <span>Summary by Context Size</span>
-                                    {/* <i className="fa-solid fa-info-circle" title="Checked for auto summary by context size."></i> */}
-                                </label>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 8, paddingRight: 8 }}>
-                                    <label style={{ opacity: autoSummaryByContextSize ? 0.5 : 1 }}>
-                                        Summary Turn:
-                                        <span id="summary_turn_output">
-                                            {' ' + (autoSummaryByContextSize ? 'auto' : summaryTurn)}
-                                        </span>
-                                    </label>
-                                    <input
-                                        type="range"
-                                        disabled={autoSummaryByContextSize}
-                                        value={summaryTurn}
-                                        min="5"
-                                        max="1000" step="5"
-                                        onChange={handleSummaryTurnChange}>
-                                    </input>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <MemoryShowModal open={showMemoryModal} text={memoryText} onClose={() => setShowMemoryModal(false)} />
-        </>
+      <select className="text_pole" value={v} onChange={(e) => onChange(e.target.value)}>
+        <option value="">(use default)</option>
+        {profiles.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
     );
+  }
+
+  const stepLabels: Array<{ step: MemuStep; label: string; hint: string }> = [
+    { step: 'preprocess', label: 'Preprocess', hint: 'Raw multimodal → concise text' },
+    { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
+    { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
+    { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
+    { step: 'ranking', label: 'Ranking', hint: 'Rerank candidates' },
+  ];
+
+  function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
+    setOverrideSummarizer(e.target.checked);
+    OVERRIDE_SUMMARIZER.set(e.target.checked);
+  }
+
+  function handleAutoSummaryByContextSizeChange(e: ChangeEvent<HTMLInputElement>) {
+    setAutoSummaryByContextSize(e.target.checked);
+    AUTO_SUMMARY_BY_CONTEXT_SIZE.set(e.target.checked);
+  }
+
+  function handleSummaryTurnChange(e: ChangeEvent<HTMLInputElement>) {
+    const n = parseInt(e.target.value);
+    setSummaryTurn(n);
+    SUMMARY_TURN.set(n);
+  }
+
+  const maxContextTokens = (() => {
+    try {
+      return st.getChatMaxContextSize();
+    } catch {
+      return 0;
+    }
+  })();
+
+  function sanitizeLorebookName(name: string): string {
+    return String(name || '')
+      .replace(/[\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function getCurrentCharacterLorebookPrefix(): string {
+    try {
+      const ctx: any = st.getContext() as any;
+      const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
+      const raw = String(character?.name || memuExtras.baseInfo?.characterName || memuExtras.baseInfo?.agentName || '').trim();
+      if (!raw) return 'memU - ';
+      return `memU - ${sanitizeLorebookName(raw)} - `;
+    } catch {
+      return 'memU - ';
+    }
+  }
+
+  function formatLorebookEntries(bookName: string, data: any): string {
+    const entriesObj = data?.entries && typeof data.entries === 'object' ? data.entries : {};
+    const entries = Object.values(entriesObj) as any[];
+    if (!entries.length) return `### ${bookName}\n(empty)`;
+
+    const lines: string[] = [`### ${bookName}`];
+    for (const e of entries) {
+      const content = String(e?.content || '').trim();
+      if (!content) continue;
+      lines.push(content);
+    }
+    return lines.join('\n\n');
+  }
+
+  async function loadRecentLorebookMemories(): Promise<string> {
+    const list = await postJsonWithCsrf<any[]>('/api/worldinfo/list', {});
+    const all = Array.isArray(list) ? list : [];
+    const prefix = getCurrentCharacterLorebookPrefix().toLowerCase();
+
+    const matching = all
+      .map((x) => String((x as any)?.file_id || (x as any)?.name || '').trim())
+      .filter((n) => !!n && n.toLowerCase().startsWith(prefix));
+
+    if (!matching.length) {
+      return 'No memU lorebooks found for the current character.';
+    }
+
+    const blocks: string[] = [];
+    for (const name of matching) {
+      try {
+        const data = await postJsonWithCsrf<any>('/api/worldinfo/get', { name });
+        blocks.push(formatLorebookEntries(name, data));
+      } catch {
+        blocks.push(`### ${name}\n(failed to read lorebook)`);
+      }
+    }
+
+    const out = blocks.join('\n\n---\n\n').trim();
+    const MAX_CHARS = 18000;
+    return out.length > MAX_CHARS ? `${out.slice(0, MAX_CHARS)}\n\n...(truncated)` : out;
+  }
+
+  async function openMemoryModal(): Promise<void> {
+    setShowMemoryModal(true);
+    setMemoryText('Loading latest memU lorebooks...');
+    try {
+      const txt = await loadRecentLorebookMemories();
+      setMemoryText(txt || 'No content');
+    } catch (e: any) {
+      setMemoryText(`Failed to load lorebooks: ${e?.message || String(e)}`);
+    }
+  }
+
+  return (
+    <>
+      <div className="memu-ext-settings" style={{ marginBottom: 16 }}>
+        <div className="inline-drawer">
+          <div className="inline-drawer-toggle inline-drawer-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MemuLogo width={58} height={20} />
+              <button
+                className="menu_button"
+                style={{
+                  ...buttonStyle,
+                  width: 30,
+                  transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
+                  boxShadow: eyeHover ? '0 0 0 2px rgba(125,202,247,0.55)' : 'none',
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseEnter={() => setEyeHover(true)}
+                onMouseLeave={() => setEyeHover(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void openMemoryModal();
+                }}
+                title="View latest memU lorebooks"
+              >
+                <EyeIcon width={16} height={16} />
+              </button>
+            </div>
+            <div className="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+          </div>
+
+          <div className="inline-drawer-content" style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ opacity: 0.85 }}>
+                Plugin: {pluginOk === null ? 'checking…' : pluginOk ? 'reachable' : 'not reachable'}
+              </div>
+              <div style={{ marginLeft: 'auto', opacity: 0.75, fontSize: 12 }}>
+                {configStatus === 'saving' ? 'saving…' : configStatus === 'saved' ? 'saved' : configStatus === 'error' ? 'save failed' : ''}
+              </div>
+            </div>
+
+            {/* Server controls */}
+            {pluginOk && (
+              <div style={sectionStyle}>
+                <h4 style={sectionTitleStyle}>
+                  <MemuLogo width={58} height={20} />
+                  <span>Backend</span>
+                </h4>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+                  <button
+                    className="menu_button"
+                    style={{ ...buttonStyle, width: 'auto', padding: '6px 10px' } as any}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void doServerStart();
+                    }}
+                    disabled={serverCtlBusy === 'working'}
+                  >
+                    Start
+                  </button>
+                  <button
+                    className="menu_button"
+                    style={{ ...buttonStyle, width: 'auto', padding: '6px 10px' } as any}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void doServerStop();
+                    }}
+                    disabled={serverCtlBusy === 'working'}
+                  >
+                    Stop
+                  </button>
+                  <label className="checkbox_label expander" htmlFor="auto_start_server" style={{ margin: 0 }}>
+                    <input
+                      id="auto_start_server"
+                      type="checkbox"
+                      className="checkbox"
+                      checked={(pluginConfig as any)?.autoStartServer !== false}
+                      onChange={(e) => updatePluginConfig({ autoStartServer: e.target.checked } as any)}
+                    />
+                    <span>Auto Start</span>
+                  </label>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label>Server path</label>
+                  <input
+                    className="text_pole"
+                    value={String((pluginConfig as any)?.serverPath || '~/apps/mcp-memu-server')}
+                    onChange={(e) => updatePluginConfig({ serverPath: e.target.value as any })}
+                    placeholder="~/apps/mcp-memu-server"
+                  />
+                </div>
+
+                {(() => {
+                  const healthy = !!serverCtl?.healthy;
+                  const running = !!serverCtl?.running;
+                  const baseUrl = serverCtl?.baseUrl;
+                  const autoStart = (pluginConfig as any)?.autoStartServer !== false;
+                  const statusText = healthy
+                    ? 'running'
+                    : running
+                      ? 'starting…'
+                      : (autoStart ? 'stopped' : 'stopped (auto-start off)');
+
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                      <span style={{ opacity: 0.85 }}>
+                        Server: <b>{statusText}</b>
+                        {baseUrl ? ` @ ${baseUrl}` : ''}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <small style={{ opacity: 0.8, alignSelf: 'flex-end' }}>
+                  <a href="/api/plugins/memu/troubleshooting" target="_blank" rel="noopener noreferrer">
+                    Troubleshooting
+                  </a>
+                </small>
+              </div>
+            )}
+
+            {/* Model mapping */}
+            {pluginOk && (
+              <div style={sectionStyle}>
+                <h4 style={sectionTitleStyle}>Model Mapping</h4>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {renderProfilePicker(pluginConfig?.defaultProfileId, (v) => updatePluginConfig({ defaultProfileId: v || undefined }))}
+                </div>
+
+                <label className="checkbox_label expander" htmlFor="advanced_mapping">
+                  <input
+                    id="advanced_mapping"
+                    type="checkbox"
+                    className="checkbox"
+                    checked={showAdvancedMapping}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setShowAdvancedMapping(v);
+                      try {
+                        SHOW_ADVANCED_MAPPING.set(v);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                  />
+                  <span>Advanced mapping</span>
+                </label>
+
+                {showAdvancedMapping && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {stepLabels.map((s) => (
+                      <div key={s.step} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label>
+                          {s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span>
+                        </label>
+                        {renderProfilePicker(pluginConfig?.stepProfileId?.[s.step], (v) =>
+                          updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), [s.step]: v || undefined } as any }),
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label>Embedding model</label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select
+                      className="text_pole"
+                      style={{ flex: 1 }}
+                      value={pluginConfig?.embeddingModelSelected ?? ''}
+                      onChange={(e) => updatePluginConfig({ embeddingModelSelected: e.target.value || undefined })}
+                      disabled={embedModelsStatus === 'loading'}
+                    >
+                      <option value="">profile default / custom</option>
+                      {embedModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="menu_button"
+                      style={{ ...buttonStyle, width: 34 } as any}
+                      onClick={() => void loadEmbeddingModels(true)}
+                      disabled={embedModelsStatus === 'loading'}
+                      title="Refresh embedding model list"
+                    >
+                      <i className="fa-solid fa-rotate-right" />
+                    </button>
+                  </div>
+
+                  {embedModelsStatus === 'error' && <small style={{ opacity: 0.8 }}>{embedModelsMessage}</small>}
+
+                  {!pluginConfig?.embeddingModelSelected?.trim() && (
+                    <input
+                      type="text"
+                      className="text_pole"
+                      value={pluginConfig?.embeddingModelManual ?? ''}
+                      onChange={(e) => updatePluginConfig({ embeddingModelManual: e.target.value || undefined })}
+                      placeholder="text-embedding-3-small"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Memory */}
+            <div style={sectionStyle}>
+              <h4 style={sectionTitleStyle}>Memory</h4>
+
+              <label className="checkbox_label expander" htmlFor="override_summarizer">
+                <input
+                  id="override_summarizer"
+                  type="checkbox"
+                  className="checkbox"
+                  checked={overrideSummarizer}
+                  onChange={handleOverrideSummarizerChange}
+                />
+                <span>Override Summarizer</span>
+                <i
+                  className="fa-solid fa-info-circle"
+                  title="If checked: replace SillyTavern's summary message with memU's summary. If unchecked: add memU summary alongside it."
+                  style={{ opacity: 0.8 }}
+                />
+              </label>
+
+              <label className="checkbox_label expander" htmlFor="auto_summary_turn">
+                <input
+                  id="auto_summary_turn"
+                  type="checkbox"
+                  className="checkbox"
+                  checked={autoSummaryByContextSize}
+                  onChange={handleAutoSummaryByContextSizeChange}
+                />
+                <span>Summary by context size</span>
+              </label>
+
+              {autoSummaryByContextSize ? (
+                <small style={{ opacity: 0.85, paddingLeft: 24 }}>
+                  Uses your SillyTavern context limit: <code>{maxContextTokens}</code> tokens.
+                </small>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 24 }}>
+                  <label>Digest every N turns</label>
+                  <input
+                    type="number"
+                    min={5}
+                    max={200}
+                    value={summaryTurn}
+                    onChange={handleSummaryTurnChange}
+                    className="text_pole"
+                    style={{ width: 84 }}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <MemoryShowModal open={showMemoryModal} text={memoryText} onClose={() => setShowMemoryModal(false)} />
+    </>
+  );
 }
-
-export default App;
-
-

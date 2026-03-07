@@ -1,17 +1,13 @@
 import { CategoryResponse } from "memu-js";
-import { API_KEY, PLUGIN_MODE, memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
-import { memorizeConversation, retrieveDefaultCategories, getPluginPing } from "utils/network";
+import { memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
+import { memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus, STEventData } from "utils/types";
-import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo } from "@silly-tavern/scripts/world-info.js";
-import { sumTokens } from "./utils";
+import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
+import { sumTokens, initChatExtraInfo } from "./utils";
+import { postJsonWithCsrf } from "utils/csrf";
+import { status, info, warn, error as logError, onceWarn } from "utils/log";
 
 let isSummarying = false;
-
-// Persist the last processed chat index in localStorage as a backstop.
-// This prevents repeated memorize/retrieve on chat re-open if chat_metadata doesn't round-trip for any reason.
-// Keyed by SillyTavern chatId.
-
-type LocalCursorState = { to: number; bridgeSessionId?: string; updatedAt?: number };
 
 export function getChatIdSafe(): string {
     try {
@@ -34,102 +30,22 @@ export function getChatIdSafe(): string {
     }
 }
 
-function cursorStorageKey(chatId: string): string {
-    const safe = encodeURIComponent(chatId || '');
-    return `memu.cursor.${safe}`;
-}
-
-function getLegacyChatIdRaw(): string {
+// The actual SillyTavern chat *file name* (used for file-based storage).
+// This is intentionally separate from getChatIdSafe(), which prefers integrity UUIDs.
+export function getChatFileNameRaw(): string {
     try {
         const ctx: any = st.getContext() as any;
-        const id = (typeof ctx?.getCurrentChatId === 'function')
+        const raw = (typeof ctx?.getCurrentChatId === 'function')
             ? ctx.getCurrentChatId()
             : (ctx?.chatId ?? ctx?.chat_id);
-        return (typeof id === 'string') ? id : '';
+        const s = (typeof raw === 'string') ? raw.trim() : '';
+        return s;
     } catch {
         return '';
     }
-}
-
-function loadLocalCursor(chatId: string): LocalCursorState | null {
-    if (!chatId) return null;
-    try {
-        let raw = localStorage.getItem(cursorStorageKey(chatId));
-        // Migration: older builds keyed cursor by raw chat id (no prefixes, no integrity id).
-        if (!raw && chatId.startsWith('integrity:')) {
-            const legacyRaw = getLegacyChatIdRaw();
-            if (legacyRaw) {
-                raw = localStorage.getItem(cursorStorageKey(legacyRaw))
-                    || localStorage.getItem(cursorStorageKey(`chat:${legacyRaw}`));
-                // If we found legacy state, we'll re-save it under the new key after parsing.
-            }
-        }
-        if (!raw) return null;
-        const obj = JSON.parse(raw);
-        const to = Number(obj?.to);
-        if (!Number.isFinite(to)) return null;
-        const out: LocalCursorState = { to };
-        if (obj?.bridgeSessionId) out.bridgeSessionId = String(obj.bridgeSessionId);
-        if (obj?.updatedAt) out.updatedAt = Number(obj.updatedAt);
-
-        // If we loaded a legacy cursor entry, persist it to the new key so future loads are fast.
-        if (chatId.startsWith('integrity:')) {
-            try {
-                localStorage.setItem(cursorStorageKey(chatId), JSON.stringify(out));
-            } catch {
-                // ignore
-            }
-        }
-        return out;
-    } catch {
-        return null;
-    }
-}
-
-function saveLocalCursor(chatId: string, state: LocalCursorState): void {
-    if (!chatId) return;
-    try {
-        localStorage.setItem(cursorStorageKey(chatId), JSON.stringify(state));
-    } catch { }
-}
-
-export function clearLocalCursor(chatId?: string): void {
-    const id = chatId ?? getChatIdSafe();
-    if (!id) return;
-    try { localStorage.removeItem(cursorStorageKey(id)); } catch { }
 }
 
 // --- World Info helpers (list/get/edit) ---
-
-let _csrfCache: { token: string; at: number } | null = null;
-
-async function getCsrfTokenCached(): Promise<string> {
-    try {
-        const now = Date.now();
-        if (_csrfCache && (now - _csrfCache.at) < 60_000 && _csrfCache.token) return _csrfCache.token;
-        const csrf = await fetch('/csrf-token');
-        const csrfJson: any = await csrf.json().catch(() => ({} as any));
-        const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
-        _csrfCache = { token, at: now };
-        return token;
-    } catch {
-        return '';
-    }
-}
-
-async function postJsonWithCsrf(url: string, body: any): Promise<any> {
-    const token = await getCsrfTokenCached();
-    const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
-        body: JSON.stringify(body ?? {}),
-    });
-    if (!resp.ok) {
-        const txt = await resp.text().catch(() => '');
-        throw new Error(`${url} failed (${resp.status}): ${txt}`);
-    }
-    return resp.json().catch(() => ({} as any));
-}
 
 type WorldInfoListItem = { file_id?: string; name?: string };
 
@@ -144,54 +60,13 @@ async function getWorldInfoBook(name: string): Promise<any> {
 
 function getCurrentCharacterNameForWorldInfo(baseInfo?: any): string {
     const ctx: any = st.getContext();
-    const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? ctx.characters[0]) : null;
+    const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
     return sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || baseInfo?.agentName || 'Character'));
 }
 
 function memuBookPrefixForCharacter(characterName: string): string {
     const c = sanitizeWorldInfoName(String(characterName || '')).trim();
     return `memU - ${c} - `;
-}
-
-/**
- * If we have a backstop cursor (localStorage) but *no* memU chat-state and *no* memU lorebooks on disk,
- * that cursor is almost certainly from an older buggy build. Clear it so a fresh memorize/retrieve can run.
- */
-export async function healOrphanLocalCursorIfNeeded(): Promise<void> {
-    const chatId = getChatIdSafe();
-    if (!chatId) return;
-
-    const localCursor = loadLocalCursor(chatId);
-    if (!localCursor) return;
-
-    const hasState = !!memuExtras.retrieve?.nowRetrieve?.summaryRange || !!memuExtras.summary?.summaryRange;
-    if (hasState) return;
-
-    // Only do the expensive check when we'd otherwise skip work.
-    const chat: any[] = st.getContext().chat ?? [];
-    const chatLen = Array.isArray(chat) ? chat.length : 0;
-    if (localCursor.to < (chatLen - 1)) return;
-
-    const characterName = getCurrentCharacterNameForWorldInfo(memuExtras.baseInfo);
-    const prefix = memuBookPrefixForCharacter(characterName);
-
-    let hasAnyMemuBooks = false;
-    try {
-        const list = await listWorldInfoBooks();
-        hasAnyMemuBooks = list.some((x: any) => {
-            const id = String(x?.file_id ?? '');
-            const nm = String(x?.name ?? '');
-            return id.startsWith(prefix) || nm.startsWith(prefix);
-        });
-    } catch {
-        // If we can't list worlds, don't destroy cursor; fail safe.
-        return;
-    }
-
-    if (!hasAnyMemuBooks) {
-        clearLocalCursor(chatId);
-        console.log('memu-ext: cleared orphan local cursor (no memU state + no memU lorebooks)');
-    }
 }
 
 /**
@@ -245,7 +120,7 @@ export async function ensureMemULorebooksUiOnly(): Promise<void> {
     }
 
     if (changedCount > 0) {
-        console.log('memu-ext: migrated %d memU lorebooks to UI-only (disable=true, constant=false)', changedCount);
+        info(`lorebooks set to ui-only (${changedCount} updated)`);
     }
 }
 
@@ -256,37 +131,26 @@ export async function summaryIfNeed(): Promise<void> {
 
     isSummarying = true;
 
+    // Ensure per-chat baseInfo reflects the *current* character before we decide to digest.
+    try { await initChatExtraInfo(st.getContext()); } catch { }
+
     const chatId = getChatIdSafe();
     if (!chatId) {
         // Chat not fully initialized yet (no stable chatId). Avoid a false "re-digest" on load.
         isSummarying = false;
         return;
     }
-    const localCursor = loadLocalCursor(chatId);
 
     const lastToFromSummary = memuExtras.summary?.summaryRange?.[1];
     const lastToFromRetrieve = memuExtras.retrieve?.nowRetrieve?.summaryRange?.[1];
-    const lastToFromLocal = localCursor?.to;
 
     const lastTo = Math.max(
         Number.isFinite(lastToFromSummary as any) ? (lastToFromSummary as any as number) : -1,
         Number.isFinite(lastToFromRetrieve as any) ? (lastToFromRetrieve as any as number) : -1,
-        Number.isFinite(lastToFromLocal as any) ? (lastToFromLocal as any as number) : -1,
     );
 
     const from = lastTo + 1;
     const chat = st.getContext().chat;
-
-    // Debug: helps diagnose repeated digest on chat re-open.
-    console.debug('memu-ext: digest cursor', {
-        chatId,
-        chatLen: Array.isArray(chat) ? chat.length : -1,
-        lastToFromSummary,
-        lastToFromRetrieve,
-        lastToFromLocal,
-        lastTo,
-        from,
-    });
 
     // Nothing new since last digest.
     if (from >= chat.length) {
@@ -294,23 +158,41 @@ export async function summaryIfNeed(): Promise<void> {
         return;
     }
 
-
     // If a summary task is already running, let the poller handle it.
     if (memuExtras.summary && (memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PROCESSING)) {
         isSummarying = false;
         return;
     }
 
+    // Backoff (minimal): if we failed recently, pause auto-digest for a bit.
+    const sf: any = memuExtras.summary;
+    const nowMs = Date.now();
+    const pauseUntilMs = Number(sf?.pauseUntilMs ?? 0);
+    if (pauseUntilMs && nowMs < pauseUntilMs) {
+        isSummarying = false;
+        return;
+    }
+    if (sf && sf.summaryTaskStatus === MemuTaskStatus.FAILURE) {
+        const fc = Number(sf.failureCount ?? 0);
+        const pauseMs = (fc >= 3) ? (5 * 60_000) : 10_000;
+        sf.pauseUntilMs = nowMs + pauseMs;
+        isSummarying = false;
+        return;
+    }
+    let summaryTurn = parseInt(String(SUMMARY_TURN.get() ?? ''));
+    if (!Number.isFinite(summaryTurn) || summaryTurn < 5) summaryTurn = 10;
+    if (summaryTurn > 200) summaryTurn = 200;
+    const chatLen = chat.length;
+    status(chatLen, from);
+
+    const nowTurn = chat.length - from;
+
     if (AUTO_SUMMARY_BY_CONTEXT_SIZE.get()) {
         const total = await sumTokens(from);
-        console.log('memu-ext: now token accumulated: %d, max context: %d', total, st.getChatMaxContextSize());
         if (total >= st.getChatMaxContextSize()) {
             await doSummary(from, chat.length - 1);
         }
     } else {
-        const summaryTurn = parseInt(SUMMARY_TURN.get());
-        const nowTurn = chat.length - from;
-        console.log('memu-ext: now turn: %d, digest turn: %d', nowTurn, summaryTurn);
         if (nowTurn >= summaryTurn) {
             await doSummary(from, chat.length - 1);
         }
@@ -319,51 +201,58 @@ export async function summaryIfNeed(): Promise<void> {
 }
 
 export async function doSummary(from: number, to: number): Promise<void> {
-    // Prefer plugin-reported mode. localStorage can be stale on first load.
-    let mode = PLUGIN_MODE.get();
-    let ping: any = null;
-    try {
-        ping = await getPluginPing();
-        if (ping?.mode) {
-            mode = ping.mode as any;
-            try { PLUGIN_MODE.set(mode); } catch { }
-        }
-    } catch { }
-
-    const chatId = getChatIdSafe();
-    const apiKey = mode === 'local' ? '' : API_KEY.get();
-    if (mode !== 'local' && apiKey == null) {
-        console.log('memu-ext: missing API key');
-        return;
-    }
+    try { await initChatExtraInfo(st.getContext()); } catch { }
     if (memuExtras.baseInfo == null) {
-        console.log('memu-ext: baseInfo not found');
+        warn("memorize skipped: no baseInfo in chat metadata");
         return;
     }
-    console.log('memu-ext: trigger memorize digest');
+
+    // Timezone hint for sleep-based daily resource splitting server-side.
+    // Prefer IANA name; keep offset as fallback.
+    let timeZone: string | undefined;
+    try {
+        timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch { }
+    const timeZoneOffsetMin = new Date().getTimezoneOffset();
 
     try {
-        const response = await memorizeConversation(
-            apiKey,
-            {
+        const response = await memorizeConversation({
                 messages: await prepareConversationData(from, to),
                 userId: memuExtras.baseInfo.userId,
                 userName: memuExtras.baseInfo.userName,
                 characterId: memuExtras.baseInfo.characterId,
                 characterName: memuExtras.baseInfo.characterName,
-            },
-        );
-                memuExtras.summary = {
-            summaryRange: [from, to],
-            summaryTaskId: response.taskId,
-            summaryTaskStatus: MemuTaskStatus.PENDING,
-            isReady: false,
-            failureCount: 0,
-            lastError: undefined,
-        };
-        await st.saveChat();
-        // IMPORTANT: do NOT advance the local cursor on memorize start.
-        // Persist the cursor only after a successful retrieve.
+                chatFileName: getChatFileNameRaw(),
+                timeZone,
+                timeZoneOffsetMin,
+            });
+        // Local mode usually returns a task id and completes asynchronously.
+        // Keep it pending so the poller drives retrieve/lorebook sync after success.
+        {
+            const localTaskId = (typeof (response as any)?.taskId === 'string' && (response as any).taskId.trim())
+                ? (response as any).taskId.trim()
+                : null;
+
+            memuExtras.summary = {
+                summaryRange: [from, to],
+                summaryTaskId: localTaskId,
+                summaryTaskStatus: localTaskId ? MemuTaskStatus.PENDING : MemuTaskStatus.SUCCESS,
+                isReady: localTaskId ? false : true,
+                failureCount: 0,
+                lastError: undefined,
+            };
+            await st.saveChat();
+
+            // Legacy/sync fallback: no task id means we should retrieve immediately.
+            if (!localTaskId) {
+                await retrieveMemories(memuExtras.summary);
+                return;
+            }
+
+            // One-shot: if categories already exist, ensure lorebooks can appear quickly.
+            await syncLorebooksNow("after-memorize-local-pending");
+            return;
+        }
     } catch (error) {
         const prevRange = memuExtras.summary?.summaryRange ?? [-1, -1];
         memuExtras.summary = {
@@ -374,36 +263,40 @@ export async function doSummary(from: number, to: number): Promise<void> {
             isReady: false,
             failureCount: (memuExtras.summary?.failureCount ?? 0) + 1,
             lastError: error instanceof Error ? error.message : String(error),
+            lastFailureAt: Date.now(),
         };
         await st.saveChat();
-        console.error('memu-ext: memorize failed', error);
+        logError(`memorize failed (range=${from}-${to})`, error);
+    }
+}
+
+
+
+// One-shot: (re)create and populate memU World Info lorebooks right now.
+// Useful when lorebooks were deleted, or when digest/retrieve is delayed.
+export async function syncLorebooksNow(reason: string = "manual"): Promise<void> {
+    try { await initChatExtraInfo(st.getContext()); } catch { }
+    try {
+        if (!memuExtras.baseInfo) return;
+        const resp = await retrieveDefaultCategories(memuExtras.baseInfo.userId, memuExtras.baseInfo.characterId);
+        const categories = (resp as any)?.categories ?? [];
+        if (Array.isArray(categories) && categories.length) {
+            await syncCategoriesToWorldInfo(memuExtras.baseInfo, categories);
+        }
+    } catch (e) {
+        onceWarn(`lorebooks-sync-failed:${reason}`, `lorebooks sync failed (${reason})`);
     }
 }
 
 export async function retrieveMemories(summary: MemuSummary): Promise<void> {
-    const chatId = getChatIdSafe();
-    let mode = PLUGIN_MODE.get();
-    try {
-        const ping = await getPluginPing();
-        if (ping?.mode) {
-            mode = ping.mode as any;
-            try { PLUGIN_MODE.set(mode); } catch { }
-        }
-    } catch { }
-
-    const apiKey = mode === 'local' ? '' : API_KEY.get();
-    if (mode !== 'local' && apiKey == null) {
-        console.log('memu-ext: missing API key');
-        return;
-    }
-    console.log('memu-ext: trigger retrieve memories');
+    try { await initChatExtraInfo(st.getContext()); } catch { }
     try {
         const response = await retrieveDefaultCategories(
-            apiKey,
             memuExtras.baseInfo.userId,
             memuExtras.baseInfo.characterId,
         );
-        const memuSummaryText = parseSummary(response.categories);
+        const categories = Array.isArray((response as any)?.categories) ? (response as any).categories : [];
+        const memuSummaryText = parseSummary(categories);
         try { writeToStSummarizeMemory(memuSummaryText); } catch { }
 
         // Put memU's retrieved summary into SillyTavern's built-in "Summarize/Memory" slot.
@@ -411,12 +304,12 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
         // so we write to the pre-last message to keep it visible + compatible.
         // Write memU categories into World Info lorebooks (one per category) so you can view them in the ST UI.
         try {
-            await syncCategoriesToWorldInfo(memuExtras.baseInfo, response.categories);
+            await syncCategoriesToWorldInfo(memuExtras.baseInfo, categories);
         } catch (e) {
-            console.warn('memu-ext: world info sync failed', e);
+            onceWarn("worldinfo-sync-failed", "worldinfo sync failed");
         }
 
-                const retrieve = memuExtras.retrieve ?? {
+        const retrieve: any = memuExtras.retrieve ?? {
             history: [],
         };
         if (retrieve.nowRetrieve != null) {
@@ -427,14 +320,32 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
             summaryTaskId: summary.summaryTaskId ?? "undefined",
             summary: memuSummaryText,
         };
+        // Clear any prior failure for this taskId (avoid suppressing future retrieve attempts).
+        if (retrieve.lastFailure?.summaryTaskId === summary.summaryTaskId) {
+            delete retrieve.lastFailure;
+        }
         memuExtras.retrieve = retrieve;
-                await st.saveChat();
-        // Backstop cursor persistence (localStorage)
-        saveLocalCursor(chatId || getChatIdSafe(), { to: summary.summaryRange[1], updatedAt: Date.now() });
-        console.log('memu-ext: retrieve OK (%d categories)', Array.isArray(response.categories) ? response.categories.length : 0);
+        await st.saveChat();
     } catch (error) {
-        console.error('memu-ext: retrieve memories failed', error);
-        throw error;
+        // Do not throw: if the backend is misconfigured (e.g., SQLModel list-type error),
+        // throwing causes the poller to retry forever and spam logs.
+        const retrieve: any = memuExtras.retrieve ?? { history: [] };
+        const taskId = summary.summaryTaskId ?? 'undefined';
+        const prev = retrieve.lastFailure?.summaryTaskId === taskId ? retrieve.lastFailure : null;
+        const count = (prev?.failureCount ?? 0) + 1;
+        retrieve.lastFailure = {
+            summaryTaskId: taskId,
+            failureCount: count,
+            lastError: error instanceof Error ? error.message : String(error),
+            lastFailureAt: Date.now(),
+            lastAt: Date.now(),
+        };
+        memuExtras.retrieve = retrieve;
+        await st.saveChat();
+        if (count <= 2) {
+            logError(`retrieve failed (taskId=${taskId}, attempts=${count})`, error);
+        }
+        return;
     }
 }
 
@@ -497,7 +408,6 @@ function isNullishCategorySummary(text: string): boolean {
     if (/^\[[^\]]+\]\s*null$/i.test(t)) return true;
     return false;
 }
-
 
 function filterCategoryForCharacter(categoryName: string, content: string, characterName: string, userName?: string): string {
     const cat = (categoryName || '').trim().toLowerCase();
@@ -589,49 +499,55 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     if (!Array.isArray(categories) || categories.length === 0) return;
 
     const ctx: any = st.getContext();
-    const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? ctx.characters[0]) : null;
+    const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
     const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || baseInfo?.agentName || 'Character'));
     const avatarKey = character?.avatar;
 
     const createdBooks: string[] = [];
-    const attachBooks: string[] = [];
 
     for (const cat of categories) {
         const catName = sanitizeWorldInfoName(String((cat as any)?.name || 'category'));
         const bookName = sanitizeWorldInfoName(`memU - ${characterName} - ${catName}`);
 
-        const raw = String((cat as any)?.summary ?? (cat as any)?.description ?? '');
+        // Only use actual memory summaries — never fall back to the category description.
+        // Descriptions are metadata for the extraction LLM, not memory content.
+        const raw = String((cat as any)?.summary || '');
         const cleaned = cleanCategorySummary(raw);
-        const content = isNullishCategorySummary(cleaned)
-            ? `(No stored memories in this category yet.)`
-            : cleaned;
-        const finalContent = filterCategoryForCharacter(catName, content, characterName, baseInfo?.userName);
 
-        const t = (finalContent || '').trim();
-        const looksRich = !!t && (
-            t.startsWith('#') ||
-            /\n\s*##?\s+\S/.test(t) ||
-            /\n\s*[-*]\s+\S/.test(t) ||
-            t.length >= 220
-        );
+        // Minimal + correct: do not create lorebooks for empty categories.
+        if (isNullishCategorySummary(cleaned)) {
+            continue;
+        }
+
+        const finalContent = filterCategoryForCharacter(catName, cleaned, characterName, baseInfo?.userName);
 
         await upsertWorldInfoLorebook(bookName, buildWorldInfoFileData(bookName, catName, finalContent));
         createdBooks.push(bookName);
-        if (looksRich) attachBooks.push(bookName);
     }
 
     // Attach created lorebooks to the current character so they show up under Character → Lorebooks.
-    if (avatarKey && attachBooks.length > 0) {
+    // IMPORTANT: attach *all* created books. Entries are disabled (UI-only) by default, so attaching
+    // does not inject them into prompts; it just makes them visible for debugging and manual enabling.
+    if (avatarKey && createdBooks.length > 0) {
         try {
-            await charUpdateAddAuxWorld(String(avatarKey), attachBooks);
+            await charUpdateAddAuxWorld(String(avatarKey), createdBooks);
         } catch (e) {
-            console.warn('memu-ext: failed to attach world info lorebooks to character', e);
+            onceWarn("lorebooks-attach-failed", "lorebooks attach failed");
         }
+    } else if (!avatarKey && createdBooks.length > 0) {
+        onceWarn("lorebooks-no-avatar", "lorebooks not attached (no avatar)");
     }
 
-    console.log('memu-ext: world info synced (%d lorebooks)', createdBooks.length);
-}
 
+    // ST UI doesn't always refresh the World Info lists immediately when aux books change.
+    // Force a lightweight refresh so the lorebooks appear without a full page reload.
+    try {
+        await updateWorldInfoList();
+    } catch { }
+    try {
+        (st as any)?.eventSource?.emit?.((st as any)?.event_types?.SETTINGS_UPDATED);
+    } catch { }
+}
 
 export function addSummaryToPrompt(eventData: STEventData, replaceSystem: boolean = true): void {
     const memuSummary = memuExtras.retrieve?.nowRetrieve?.summary;
@@ -697,23 +613,6 @@ function parseSummary(categories: CategoryResponse[]): string {
         .join('\n\n\n');
 }
 
-// function prepareConversationData(): ConversationMessage[] {
-//     const chat = st.getContext().chat;
-//     const chatInfo = memuExtras.baseInfo;
-//     if (!chatInfo) {
-//         throw new Error('memu-ext: chatInfo not found');
-//     }
-
-//     const messages: ConversationMessage[] = [];
-//     for (const message of chat) {
-//         messages.push({
-//             role: message.is_user ? message.name === chatInfo.userName ? 'user' : 'participant' : 'assistant',
-//             name: message.is_user && message.name !== chatInfo.userName ? message.name : undefined,
-//             content: message.mes,
-//         });
-//     }
-//     return messages;
-// }
 
 async function prepareConversationData(from: number, to: number): Promise<ConversationMessage[]> {
     const chat = st.getContext().chat;
@@ -744,6 +643,16 @@ async function prepareConversationData(from: number, to: number): Promise<Conver
                 : 'assistant',
             name: chatItem.is_user && chatItem.name !== memuExtras.baseInfo.userName ? chatItem.name : undefined,
             content: regexedMessage,
+            // Preserve timestamp if available (ST chat.jsonl uses ISO send_date).
+            ts_ms: (() => {
+                const raw: any = (chatItem as any).send_date ?? (chatItem as any).sendDate;
+                if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+                if (typeof raw === 'string') {
+                    const ms = Date.parse(raw);
+                    return Number.isFinite(ms) ? ms : undefined;
+                }
+                return undefined;
+            })(),
         } as ConversationMessage;
     }));
 

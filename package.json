@@ -9,8 +9,9 @@
     "toastr": "^2.1.4"
   },
   "scripts": {
-    "build:dev": "webpack --mode development",
-    "build": "webpack --mode production"
+    "build:dev": "node scripts/grep_gate.js && webpack --mode development",
+    "build": "node scripts/grep_gate.js && webpack --mode production",
+    "check:debloat": "node scripts/grep_gate.js"
   },
   "eslintConfig": {
     "extends": [
