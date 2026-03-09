@@ -1,5 +1,13 @@
 import { OVERRIDE_SUMMARIZER, memuExtras, st } from "utils/context-extra";
-import { addSummaryToPrompt, summaryIfNeed, ensureMemULorebooksUiOnly, getChatIdSafe } from "./memorize";
+import {
+    addPendingRetrieveToPrompt,
+    summaryIfNeed,
+    ensureMemULorebooksUiOnly,
+    getChatIdSafe,
+    retrieveForLatestUserMessage,
+    dispatchPendingAPImw,
+    resetRetrievePipelineState,
+} from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
@@ -93,6 +101,10 @@ export function onMessageReceived(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
 
+export function onUserMessageSent(msgIdAny: any): void {
+    retrieveForLatestUserMessage(msgIdAny);
+}
+
 export function onMessageEdited(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
@@ -101,13 +113,19 @@ export function onMessageSwiped(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
 
-export function onChatCompletionPromptReady(eventData: any): void {
+export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
-    addSummaryToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+}
+
+export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {
+    if (dryRun) return;
+    dispatchPendingAPImw(generateData);
 }
 
 export function onChatChanged(): void {
     const ctx = st.getContext();
+    resetRetrievePipelineState();
 
     if (ctx.getCurrentChatId() === undefined) {
         stopSummaryPolling();
@@ -118,6 +136,7 @@ export function onChatChanged(): void {
         try {
             setIsTerminated(false);
             await initChatExtraInfo(ctx);
+            window.dispatchEvent(new Event('memu:server-ready'));
             await maybeClearStaleLocalState();
 
             // Keep memU lorebooks UI-only to avoid prompt token duplication.

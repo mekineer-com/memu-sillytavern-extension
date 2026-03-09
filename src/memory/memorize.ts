@@ -1,6 +1,6 @@
 import { CategoryResponse } from "memu-js";
 import { memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
-import { memorizeConversation, retrieveDefaultCategories } from "utils/network";
+import { conversationRetrieve, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus, STEventData } from "utils/types";
 import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { sumTokens, initChatExtraInfo } from "./utils";
@@ -8,6 +8,21 @@ import { postJsonWithCsrf } from "utils/csrf";
 import { status, info, warn, error as logError, onceWarn } from "utils/log";
 
 let isSummarying = false;
+
+type PendingRetrieveTurn = {
+    conversationId: string;
+    userId: string;
+    soulId: string;
+    queryText: string;
+};
+
+type PendingAPImw = {
+    conversationId: string;
+    promise: Promise<void>;
+};
+
+let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
+let _pendingAPImw: PendingAPImw | null = null;
 
 export function getChatIdSafe(): string {
     try {
@@ -351,6 +366,115 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
     }
 }
 
+function setLiveRetrieveSummary(text: string): void {
+    const retrieve: any = memuExtras.retrieve ?? { history: [] };
+    retrieve.liveRetrieve = { summary: text };
+    memuExtras.retrieve = retrieve;
+}
+
+function clearLiveRetrieveSummary(): void {
+    const retrieve: any = memuExtras.retrieve;
+    if (!retrieve || typeof retrieve !== 'object' || !retrieve.liveRetrieve) return;
+    delete retrieve.liveRetrieve;
+    memuExtras.retrieve = retrieve;
+}
+
+function trackPendingAPImw(conversationId: string, promise: Promise<any>): void {
+    const wrapped: Promise<void> = promise.finally(() => {
+        if (_pendingAPImw?.promise === wrapped) {
+            _pendingAPImw = null;
+        }
+    });
+    _pendingAPImw = { conversationId, promise: wrapped };
+}
+
+async function failIfPendingAPImw(conversationId: string): Promise<void> {
+    const pending = _pendingAPImw;
+    if (!pending || pending.conversationId !== conversationId) return;
+    const message = `memu: previous APImw still running for ${conversationId}`;
+    (window as any).toastr?.error?.(message);
+    await st.eventSource.emit(st.event_types.GENERATION_STOPPED);
+    throw new Error(message);
+}
+
+export function resetRetrievePipelineState(): void {
+    _pendingRetrieveTurn = null;
+}
+
+export function retrieveForLatestUserMessage(messageIdAny: any): void {
+    void (async () => {
+        try { await initChatExtraInfo(st.getContext()); } catch { }
+        if (!memuExtras.baseInfo) return;
+
+        const ctx: any = st.getContext();
+        const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
+        const messageId = Number(messageIdAny);
+        const idx = Number.isFinite(messageId) ? messageId : (chat.length - 1);
+        if (idx < 0 || idx >= chat.length) return;
+
+        const chatItem: any = chat[idx];
+        const rawText = typeof chatItem?.mes === 'string' ? chatItem.mes : '';
+        const queryText = rawText.trim();
+        if (!queryText) return;
+
+        const conversationId = getChatIdSafe();
+        const userId = String(memuExtras.baseInfo.userId || '').trim();
+        const soulId = String(memuExtras.baseInfo.characterId || '').trim();
+        if (!conversationId || !userId || !soulId) return;
+        clearLiveRetrieveSummary();
+        _pendingRetrieveTurn = {
+            conversationId,
+            userId,
+            soulId,
+            queryText,
+        };
+    })();
+}
+
+export async function addPendingRetrieveToPrompt(eventData: STEventData, replaceSystem: boolean = true): Promise<void> {
+    const turn = _pendingRetrieveTurn;
+    if (!turn) {
+        addSummaryToPrompt(eventData, replaceSystem);
+        return;
+    }
+
+    await failIfPendingAPImw(turn.conversationId);
+    const resp = await conversationRetrieve({
+        userId: turn.userId,
+        soulId: turn.soulId,
+        conversationId: turn.conversationId,
+        method: 'rag',
+        query: turn.queryText,
+    });
+    const ragSummary = parseRetrieveResult((resp as any)?.result ?? null);
+    if (ragSummary) {
+        setLiveRetrieveSummary(ragSummary);
+        writeToStSummarizeMemory(ragSummary);
+    }
+    addSummaryToPrompt(eventData, replaceSystem, ragSummary);
+}
+
+function getAPImwPromptInput(prompt: any): { query?: string; queries?: Array<Record<string, any> | string> } | null {
+    if (typeof prompt === 'string' && prompt) return { query: prompt };
+    if (Array.isArray(prompt) && prompt.length > 0) return { queries: prompt };
+    return null;
+}
+
+export function dispatchPendingAPImw(generateData: any): void {
+    const turn = _pendingRetrieveTurn;
+    if (!turn) return;
+    _pendingRetrieveTurn = null;
+    const prompt = getAPImwPromptInput(generateData?.prompt);
+    if (!prompt) return;
+    trackPendingAPImw(turn.conversationId, conversationRetrieve({
+        userId: turn.userId,
+        soulId: turn.soulId,
+        conversationId: turn.conversationId,
+        method: 'llm',
+        ...prompt,
+    }));
+}
+
 function writeToStSummarizeMemory(text: string): void {
     const ctx = st.getContext();
     const chat: any[] = (ctx as any)?.chat ?? [];
@@ -551,15 +675,21 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     } catch { }
 }
 
-export function addSummaryToPrompt(eventData: STEventData, replaceSystem: boolean = true): void {
-    const memuSummary = memuExtras.retrieve?.nowRetrieve?.summary;
+export function addSummaryToPrompt(
+    eventData: STEventData,
+    replaceSystem: boolean = true,
+    summaryOverride?: string | null,
+): void {
+    const memuSummary = summaryOverride !== undefined
+        ? String(summaryOverride || '')
+        : (memuExtras.retrieve?.liveRetrieve?.summary || memuExtras.retrieve?.nowRetrieve?.summary || '');
     if (!memuSummary) {
-                return;
+        return;
     }
     if (replaceSystem) {
         const summary = findSystemSummary(st.promptManager.messages);
         if (summary) {
-                        replaceSystemSummary(summary, memuSummary, eventData);
+            replaceSystemSummary(summary, memuSummary, eventData);
             return;
         }
     }
@@ -613,6 +743,39 @@ function parseSummary(categories: CategoryResponse[]): string {
         .filter(x => !isNullishCategorySummary(x.summary))
         .map(x => `[${x.name}] ${x.summary}`)
         .join('\n\n\n');
+}
+
+function parseRetrieveResult(result: any): string {
+    if (!result || typeof result !== 'object') return '';
+
+    const categories = Array.isArray((result as any).categories) ? (result as any).categories : [];
+    const items = Array.isArray((result as any).items) ? (result as any).items : [];
+    const resources = Array.isArray((result as any).resources) ? (result as any).resources : [];
+
+    const blocks: string[] = [];
+    const categoryText = parseSummary(categories);
+    if (categoryText) blocks.push(categoryText);
+
+    const itemLines = items
+        .map((item: any) => {
+            const summary = String(item?.summary ?? '').trim();
+            if (!summary) return '';
+            const memoryType = String(item?.memory_type ?? item?.memoryType ?? 'memory').trim();
+            return `[${memoryType}] ${summary}`;
+        })
+        .filter(Boolean);
+    if (itemLines.length > 0) blocks.push(itemLines.join('\n\n'));
+
+    const resourceLines = resources
+        .map((resource: any) => {
+            const caption = String(resource?.caption ?? '').trim();
+            const url = String(resource?.url ?? '').trim();
+            return caption || url;
+        })
+        .filter(Boolean);
+    if (resourceLines.length > 0) blocks.push(resourceLines.join('\n\n'));
+
+    return blocks.join('\n\n\n').trim();
 }
 
 

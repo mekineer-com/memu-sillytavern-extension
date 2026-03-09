@@ -79,8 +79,14 @@ export default function App() {
 
   useEffect(() => {
     st.eventSource.on(st.event_types.CHAT_CHANGED, () => {
-      setMemoryText(memuExtras.retrieve?.nowRetrieve?.summary ?? '');
+      setMemoryText(memuExtras.retrieve?.liveRetrieve?.summary ?? memuExtras.retrieve?.nowRetrieve?.summary ?? '');
     });
+  }, []);
+
+  useEffect(() => {
+    const h = () => void serverStatus().then(setServerCtl).catch(() => {});
+    window.addEventListener('memu:server-ready', h);
+    return () => window.removeEventListener('memu:server-ready', h);
   }, []);
 
   // init

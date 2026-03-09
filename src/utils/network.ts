@@ -15,6 +15,23 @@ export type MemorizeResponse = { taskId: string };
 export type MemorizeTaskStatusResponse = { status: string; error?: string };
 export type MemorizeTaskSummaryReadyResponse = { allReady: boolean };
 export type DefaultCategoriesResponse = { categories: any[] };
+export type ConversationRetrieveRequest = {
+  userId: string;
+  soulId: string;
+  conversationId: string;
+  method: 'rag' | 'llm';
+  query?: string;
+  queries?: Array<Record<string, any> | string>;
+};
+export type ConversationRetrieveResponse = {
+  ok: boolean;
+  result?: any;
+  state?: any;
+  path?: string;
+  method?: string;
+  conversation_id?: string;
+  queries?: number;
+};
 export type ScopeStorageProbeResponse = {
   ok: boolean;
   userId?: string;
@@ -88,6 +105,10 @@ export async function getTaskSummaryReady(taskId: string): Promise<MemorizeTaskS
 
 export async function retrieveDefaultCategories(userId: string, soulId: string): Promise<DefaultCategoriesResponse> {
   return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, soulId });
+}
+
+export async function conversationRetrieve(body: ConversationRetrieveRequest): Promise<ConversationRetrieveResponse> {
+  return request<ConversationRetrieveResponse>('/conversationRetrieve', body);
 }
 
 export async function scopeStorageProbe(userId: string, soulId: string): Promise<ScopeStorageProbeResponse> {

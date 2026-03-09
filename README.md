@@ -14,7 +14,7 @@ Compatibility includes Alpine 3.23.
 Community fork (unofficial).<br>
 Upstream: (https://github.com/NevaMind-AI/memu-sillytavern-extension)<br>
 Purpose: SillyTavern extension UI + memory sync over the plugin/server memU path.<br>
-Not affiliated with upstream/app.memu.so.<br>
+Not affiliated with the upstream hosted service.<br>
 License: see LICENSE (upstream license applies).
 
 ![MemUxST Banner](public/banner.png)

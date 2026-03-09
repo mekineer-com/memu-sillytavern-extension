@@ -58,6 +58,7 @@ export interface MemuBaseInfo {
 }
 
 export interface MemuRetrieve {
+  liveRetrieve?: MemuRetrieveHistory;
   nowRetrieve?: MemuRetrieveHistory;
   history: MemuRetrieveHistory[];
 }

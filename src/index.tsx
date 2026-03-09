@@ -1,7 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { onChatChanged, onChatCompletionPromptReady, onMessageEdited, onMessageReceived, onMessageSwiped } from 'memory/exports';
+import {
+    onChatChanged,
+    onChatCompletionPromptReady,
+    onGenerateAfterData,
+    onMessageEdited,
+    onMessageReceived,
+    onMessageSwiped,
+    onUserMessageSent,
+} from 'memory/exports';
 import { st } from './utils/context-extra';
 import { info, warn, error as logError } from './utils/log';
 
@@ -15,7 +23,11 @@ function installHooksWithRetry(): void {
         if (!st?.eventSource?.on) return false;
         try {
             st.eventSource.on(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
+            st.eventSource.makeFirst(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
+            st.eventSource.on(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
+            st.eventSource.makeLast(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
             st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);
+            st.eventSource.on(st.event_types.MESSAGE_SENT, onUserMessageSent);
             st.eventSource.on(st.event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
             st.eventSource.on(st.event_types.MESSAGE_EDITED, onMessageEdited);
             st.eventSource.on(st.event_types.MESSAGE_SWIPED, onMessageSwiped);
