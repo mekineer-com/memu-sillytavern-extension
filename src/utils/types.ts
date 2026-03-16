@@ -76,6 +76,7 @@ export interface MemuSummary {
   summaryTaskStatus: MemuTaskStatus;
   // the summary content in retrieve task is ready
   isReady?: boolean;
+  force?: boolean;
 
   // Retry diagnostics
   failureCount?: number;

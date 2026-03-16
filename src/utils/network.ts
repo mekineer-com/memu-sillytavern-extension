@@ -115,9 +115,13 @@ export async function scopeStorageProbe(userId: string, soulId: string): Promise
   return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, soulId });
 }
 
-export async function memorizeConversation(conversationData: ConversationData): Promise<MemorizeResponse> {
+export async function memorizeConversation(
+  conversationData: ConversationData,
+  opts: { force?: boolean } = {},
+): Promise<MemorizeResponse> {
   const soul = conversationData.characterName;
-  return request<MemorizeResponse>('/memorizeConversation', {
+  const qs = opts.force ? '?force=true' : '';
+  return request<MemorizeResponse>(`/memorizeConversation${qs}`, {
     conversation: conversationData.messages,
     userId: conversationData.userId,
     userName: conversationData.userName,

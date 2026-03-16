@@ -1,9 +1,9 @@
 import { CategoryResponse } from "memu-js";
-import { memuExtras, st, Message, MessageCollection, AUTO_SUMMARY_BY_CONTEXT_SIZE, SUMMARY_TURN } from "utils/context-extra";
+import { memuExtras, st, Message, MessageCollection } from "utils/context-extra";
 import { conversationRetrieve, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus, STEventData } from "utils/types";
 import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
-import { sumTokens, initChatExtraInfo } from "./utils";
+import { initChatExtraInfo } from "./utils";
 import { postJsonWithCsrf } from "utils/csrf";
 import { status, info, warn, error as logError, onceWarn } from "utils/log";
 
@@ -194,28 +194,13 @@ export async function summaryIfNeed(): Promise<void> {
         isSummarying = false;
         return;
     }
-    let summaryTurn = parseInt(String(SUMMARY_TURN.get() ?? ''));
-    if (!Number.isFinite(summaryTurn) || summaryTurn < 5) summaryTurn = 10;
-    if (summaryTurn > 200) summaryTurn = 200;
     const chatLen = chat.length;
     status(chatLen, from);
-
-    const nowTurn = chat.length - from;
-
-    if (AUTO_SUMMARY_BY_CONTEXT_SIZE.get()) {
-        const total = await sumTokens(from);
-        if (total >= st.getChatMaxContextSize()) {
-            await doSummary(from, chat.length - 1);
-        }
-    } else {
-        if (nowTurn >= summaryTurn) {
-            await doSummary(from, chat.length - 1);
-        }
-    }
+    await doSummary(from, chat.length - 1);
     isSummarying = false;
 }
 
-export async function doSummary(from: number, to: number): Promise<void> {
+export async function doSummary(from: number, to: number, force: boolean = false): Promise<void> {
     try { await initChatExtraInfo(st.getContext()); } catch { }
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
@@ -242,7 +227,7 @@ export async function doSummary(from: number, to: number): Promise<void> {
                 chatFileName: getChatFileNameRaw(),
                 timeZone,
                 timeZoneOffsetMin,
-            });
+            }, { force });
         // Local mode usually returns a task id and completes asynchronously.
         // Keep it pending so the poller drives retrieve/lorebook sync after success.
         {
@@ -255,6 +240,7 @@ export async function doSummary(from: number, to: number): Promise<void> {
                 summaryTaskId: localTaskId,
                 summaryTaskStatus: localTaskId ? MemuTaskStatus.PENDING : MemuTaskStatus.SUCCESS,
                 isReady: localTaskId ? false : true,
+                force,
                 failureCount: 0,
                 lastError: undefined,
             };
@@ -278,6 +264,7 @@ export async function doSummary(from: number, to: number): Promise<void> {
             summaryTaskId: null,
             summaryTaskStatus: MemuTaskStatus.FAILURE,
             isReady: false,
+            force,
             failureCount: (memuExtras.summary?.failureCount ?? 0) + 1,
             lastError: error instanceof Error ? error.message : String(error),
             lastFailureAt: Date.now(),
@@ -285,6 +272,16 @@ export async function doSummary(from: number, to: number): Promise<void> {
         await st.saveChat();
         logError(`memorize failed (range=${from}-${to})`, error);
     }
+}
+
+export async function memorizeNow(): Promise<void> {
+    try { await initChatExtraInfo(st.getContext()); } catch { }
+    const chat = st.getContext().chat;
+    if (!Array.isArray(chat) || chat.length === 0) {
+        warn("memorize now skipped: empty chat");
+        return;
+    }
+    await doSummary(0, chat.length - 1, true);
 }
 
 

@@ -1,14 +1,13 @@
 import MemoryShowModal from 'component/MemoryShowModal';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { memorizeNow } from 'memory/memorize';
 import EyeIcon from 'ui/icons';
 import MemuLogo from 'ui/logo';
 import {
-  AUTO_SUMMARY_BY_CONTEXT_SIZE,
   memuExtras,
   OVERRIDE_SUMMARIZER,
   SHOW_ADVANCED_MAPPING,
   st,
-  SUMMARY_TURN,
 } from 'utils/context-extra';
 import {
   getConnectionProfiles,
@@ -69,8 +68,7 @@ export default function App() {
   const [embedModelsMessage, setEmbedModelsMessage] = useState<string>('');
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
-  const [autoSummaryByContextSize, setAutoSummaryByContextSize] = useState<boolean>(false);
-  const [summaryTurn, setSummaryTurn] = useState<number>(10);
+  const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
 
   const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
   const [memoryText, setMemoryText] = useState<string>('');
@@ -125,22 +123,6 @@ export default function App() {
   useEffect(() => {
     const savedOverride = OVERRIDE_SUMMARIZER.get();
     if (savedOverride !== null) setOverrideSummarizer(savedOverride);
-
-    const savedAuto = AUTO_SUMMARY_BY_CONTEXT_SIZE.get();
-    if (savedAuto !== null) setAutoSummaryByContextSize(savedAuto);
-
-    const savedTurn = SUMMARY_TURN.get();
-    if (savedTurn !== null) {
-      let n = parseInt(savedTurn);
-      if (!Number.isFinite(n) || n < 5) n = 10;
-      if (n > 200) n = 200;
-      setSummaryTurn(n);
-      try {
-        SUMMARY_TURN.set(n);
-      } catch {
-        // ignore
-      }
-    }
   }, []);
 
   async function refreshServerCtl() {
@@ -313,24 +295,14 @@ export default function App() {
     OVERRIDE_SUMMARIZER.set(e.target.checked);
   }
 
-  function handleAutoSummaryByContextSizeChange(e: ChangeEvent<HTMLInputElement>) {
-    setAutoSummaryByContextSize(e.target.checked);
-    AUTO_SUMMARY_BY_CONTEXT_SIZE.set(e.target.checked);
-  }
-
-  function handleSummaryTurnChange(e: ChangeEvent<HTMLInputElement>) {
-    const n = parseInt(e.target.value);
-    setSummaryTurn(n);
-    SUMMARY_TURN.set(n);
-  }
-
-  const maxContextTokens = (() => {
+  async function handleMemorizeNow(): Promise<void> {
+    setMemorizeNowBusy(true);
     try {
-      return st.getChatMaxContextSize();
-    } catch {
-      return 0;
+      await memorizeNow();
+    } finally {
+      setMemorizeNowBusy(false);
     }
-  })();
+  }
 
   function sanitizeLorebookName(name: string): string {
     return String(name || '')
@@ -639,35 +611,19 @@ export default function App() {
                 />
               </label>
 
-              <label className="checkbox_label expander" htmlFor="auto_summary_turn">
-                <input
-                  id="auto_summary_turn"
-                  type="checkbox"
-                  className="checkbox"
-                  checked={autoSummaryByContextSize}
-                  onChange={handleAutoSummaryByContextSizeChange}
-                />
-                <span>Summary by context size</span>
-              </label>
-
-              {autoSummaryByContextSize ? (
-                <small style={{ opacity: 0.85, paddingLeft: 24 }}>
-                  Uses your SillyTavern context limit: <code>{maxContextTokens}</code> tokens.
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 24 }}>
+                <button
+                  type="button"
+                  className="menu_button"
+                  onClick={() => void handleMemorizeNow()}
+                  disabled={memorizeNowBusy}
+                >
+                  {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
+                </button>
+                <small style={{ opacity: 0.85 }}>
+                  Force extraction of the current accumulated chat even if no sleep gap has been detected yet.
                 </small>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 24 }}>
-                  <label>Digest every N turns</label>
-                  <input
-                    type="number"
-                    min={5}
-                    max={200}
-                    value={summaryTurn}
-                    onChange={handleSummaryTurnChange}
-                    className="text_pole"
-                    style={{ width: 84 }}
-                  />
-                </div>
-              )}
+              </div>
             </div>
           </div>
         </div>

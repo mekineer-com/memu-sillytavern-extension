@@ -132,7 +132,7 @@ async function tick(): Promise<void> {
                         failureCount: failCount + 1,
                     };
                     await st.saveChat();
-                    void doSummary(from, to);
+                    void doSummary(from, to, summary.force === true);
                 } else {
                 }
                 break;
