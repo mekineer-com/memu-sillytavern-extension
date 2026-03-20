@@ -26,6 +26,7 @@ export type ConversationRetrieveRequest = {
 export type ConversationRetrieveResponse = {
   ok: boolean;
   result?: any;
+  working_note?: any;
   state?: any;
   path?: string;
   method?: string;

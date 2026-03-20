@@ -444,11 +444,19 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
         query: turn.queryText,
     });
     const ragSummary = parseRetrieveResult((resp as any)?.result ?? null);
-    if (ragSummary) {
-        setLiveRetrieveSummary(ragSummary);
-        writeToStSummarizeMemory(ragSummary);
+    const rawWorkingNote = (resp as any)?.working_note;
+    const hasWorkingNote = rawWorkingNote != null && String(rawWorkingNote).trim() !== '';
+    const workingNoteSummary = hasWorkingNote
+        ? parseRetrieveResult(typeof rawWorkingNote === 'string' ? JSON.parse(rawWorkingNote) : rawWorkingNote)
+        : '';
+    const promptSummary = workingNoteSummary
+        ? [`[Prior context]\n${workingNoteSummary}`, ragSummary].filter(Boolean).join('\n\n\n')
+        : ragSummary;
+    if (promptSummary) {
+        setLiveRetrieveSummary(promptSummary);
+        writeToStSummarizeMemory(promptSummary);
     }
-    addSummaryToPrompt(eventData, replaceSystem, ragSummary);
+    addSummaryToPrompt(eventData, replaceSystem, promptSummary);
 }
 
 function getAPImwPromptInput(prompt: any): { query?: string; queries?: Array<Record<string, any> | string> } | null {
