@@ -6,6 +6,7 @@ import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo, updateWorld
 import { initChatExtraInfo } from "./utils";
 import { postJsonWithCsrf } from "utils/csrf";
 import { status, info, warn, error as logError, onceWarn } from "utils/log";
+import { stashInspectData } from "ui/inspect-panel";
 
 let isSummarying = false;
 
@@ -443,7 +444,22 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
         method: 'rag',
         query: turn.queryText,
     });
-    const ragSummary = parseRetrieveResult((resp as any)?.result ?? null);
+    const result = (resp as any)?.result ?? null;
+    stashInspectData({
+        timestamp: Date.now(),
+        query: turn.queryText,
+        workingNote: (resp as any)?.working_note != null ? String((resp as any).working_note) : undefined,
+        categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
+            name: c.name || '?', score: c.score || 0, summary: c.summary,
+        })) : [],
+        items: Array.isArray(result?.items) ? result.items.map((i: any) => ({
+            summary: i.summary || '', score: i.score || 0, memory_type: i.memory_type || '?', id: i.id,
+        })) : [],
+        resources: result?.resources,
+        method: (resp as any)?.method,
+        conversationId: (resp as any)?.conversation_id,
+    });
+    const ragSummary = parseRetrieveResult(result);
     const rawWorkingNote = (resp as any)?.working_note;
     const hasWorkingNote = rawWorkingNote != null && String(rawWorkingNote).trim() !== '';
     const workingNoteSummary = hasWorkingNote
