@@ -1,11 +1,11 @@
 import { CategoryResponse } from "memu-js";
-import { memuExtras, st, Message, MessageCollection } from "utils/context-extra";
-import { conversationRetrieve, memorizeConversation, retrieveDefaultCategories } from "utils/network";
+import { memuExtras, st } from "utils/context-extra";
+import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
 import { status, warn, error as logError, onceWarn } from "utils/log";
-import { stashInspectData } from "ui/inspect-panel";
+import { getInspectData, stashInspectData } from "ui/inspect-panel";
 
 let isSummarying = false;
 
@@ -232,7 +232,6 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
         );
         const categories = Array.isArray((response as any)?.categories) ? (response as any).categories : [];
         const memuSummaryText = parseSummary(categories);
-        try { writeToStSummarizeMemory(memuSummaryText); } catch { }
 
         // Put memU's retrieved summary into SillyTavern's built-in "Summarize/Memory" slot.
         // That extension stores the latest summary at chat[i].extra.memory (it ignores the last message),
@@ -518,17 +517,16 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const promptSummary = promptSections.join('\n\n\n').trim();
     if (promptSummary) {
         setLiveRetrieveSummary(promptSummary);
-        writeToStSummarizeMemory(promptSummary);
     }
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
 }
 
-export function dispatchPendingAPImw(generateData: any): void {
+export function dispatchPendingAPImw(generateData: any): PendingRetrieveTurn | null {
     const turn = _pendingRetrieveTurn;
-    if (!turn) return;
+    if (!turn) return null;
     if (_pendingAPImw?.conversationId === turn.conversationId) {
         _pendingRetrieveTurn = null;
-        return;
+        return turn;
     }
     _pendingRetrieveTurn = null;
     void generateData;
@@ -539,25 +537,61 @@ export function dispatchPendingAPImw(generateData: any): void {
         method: 'llm',
         query: turn.queryText,
     }));
+    return turn;
 }
 
-function writeToStSummarizeMemory(text: string): void {
-    const ctx = st.getContext();
-    const chat: any[] = (ctx as any)?.chat ?? [];
-    if (!Array.isArray(chat) || chat.length === 0) return;
+export function dispatchTurnPreview(turn: PendingRetrieveTurn | null): void {
+    if (!turn) return;
+    const prev = getInspectData();
+    stashInspectData({
+        ...(prev || { timestamp: Date.now() }),
+        timestamp: Date.now(),
+        query: turn.queryText,
+        userId: turn.userId,
+        soulId: turn.soulId,
+        method: 'rag',
+        conversationId: turn.conversationId,
+        turnPreviewStatus: 'pending',
+    });
 
-    // Summarize/Memory extension ignores the last message when searching for extra.memory,
-    // so we write to the pre-last message (or 0 if chat is too short).
-    const idx = Math.max(0, chat.length - 2);
-    const mes = chat[idx];
-    if (!mes) return;
-    if (!mes.extra) mes.extra = {};
-
-    // Keep it readable: avoid megabyte-sized blocks if a backend returns huge summaries.
-    const MAX_CHARS = 6000;
-    mes.extra.memory = (text && text.length > MAX_CHARS)
-        ? `${text.slice(0, MAX_CHARS)}\n\n…(truncated)`
-        : text;
+    void conversationTurn({
+        userId: turn.userId,
+        soulId: turn.soulId,
+        conversationId: turn.conversationId,
+        message: turn.queryText,
+        runApimw: false,
+        waitApimw: false,
+        dryRun: true,
+        debug: true,
+    }).then((resp: any) => {
+        const prev2 = getInspectData();
+        stashInspectData({
+            ...(prev2 || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            query: turn.queryText,
+            userId: turn.userId,
+            soulId: turn.soulId,
+            method: 'rag',
+            conversationId: turn.conversationId,
+            turnPreviewStatus: 'ok',
+            turnContract: resp?.turn_contract,
+            turnPrompt: typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined,
+            turnSystemPrompt: typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined,
+        });
+    }).catch((err: any) => {
+        const prev2 = getInspectData();
+        stashInspectData({
+            ...(prev2 || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            query: turn.queryText,
+            userId: turn.userId,
+            soulId: turn.soulId,
+            method: 'rag',
+            conversationId: turn.conversationId,
+            turnPreviewStatus: 'error',
+            turnPreviewError: err instanceof Error ? err.message : String(err),
+        });
+    });
 }
 
 // --- World Info sync (view memU memories inside ST) ---
@@ -726,23 +760,11 @@ export function addSummaryToPrompt(
         return;
     }
     if (replaceSystem && Array.isArray(eventData?.chat)) {
-        const summary = findSystemSummary(st.promptManager.messages);
-        if (summary) {
-            replaceSystemSummary(summary, memuSummary, eventData);
-            return;
-        }
+        eventData.chat = eventData.chat.filter((msg: any) => String(msg?.identifier || '') !== 'summary');
+        addSummary(memuSummary, eventData);
+        return;
     }
     addSummary(memuSummary, eventData);
-}
-
-function replaceSystemSummary(summary: string, memuSummary: string, eventData: any): void {
-    if (!Array.isArray(eventData?.chat)) return;
-    eventData.chat.forEach((msg: any) => {
-        if (msg.content === summary) {
-                        msg.content = memuSummary;
-            return;
-        }
-    });
 }
 
 function addSummary(memuSummary: string, eventData: any): void {
@@ -756,28 +778,6 @@ function addSummary(memuSummary: string, eventData: any): void {
     if (typeof eventData?.prompt === 'string') {
         eventData.prompt = `${memuSummary}\n\n${eventData.prompt}`;
     }
-}
-
-/**
- * @copy from @silly-tavern/scripts/openai.js
- *
- * Retrieves the chat as a flattened array of messages.
- * @returns {Array} The chat messages.
- */
-function findSystemSummary(messages: MessageCollection): string {
-    for (let item of messages.collection) {
-        if (item instanceof MessageCollection) {
-            const summary = findSystemSummary(item);
-            if (summary) {
-                return summary;
-            }
-        } else if (item instanceof Message && item.content) {
-            if (item.identifier === 'summary') {
-                return item.content;
-            }
-        }
-    }
-    return null;
 }
 
 function parseSummary(categories: CategoryResponse[]): string {

@@ -5,6 +5,7 @@ import {
     getChatIdSafe,
     retrieveForLatestUserMessage,
     dispatchPendingAPImw,
+    dispatchTurnPreview,
     resetRetrievePipelineState,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
@@ -145,7 +146,8 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
 
 export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {
     if (dryRun) return;
-    dispatchPendingAPImw(generateData);
+    const turn = dispatchPendingAPImw(generateData);
+    dispatchTurnPreview(turn);
 }
 
 export function onChatChanged(): void {

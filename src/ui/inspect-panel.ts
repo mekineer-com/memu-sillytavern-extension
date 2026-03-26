@@ -19,6 +19,11 @@ export type InspectData = {
     resources?: any[];
     method?: string;
     conversationId?: string;
+    turnPreviewStatus?: 'pending' | 'ok' | 'error';
+    turnPreviewError?: string;
+    turnContract?: any;
+    turnPrompt?: string;
+    turnSystemPrompt?: string;
 };
 
 let _lastInspectData: InspectData | null = null;
@@ -84,6 +89,31 @@ function renderInspectHtml(data: InspectData): string {
         parts.push(`<div style="opacity:0.6">(no data from last retrieve)</div>`);
     } else if (cats.length === 0 && items.length === 0 && data.query) {
         parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
+    }
+
+    if (data.turnPreviewStatus === 'pending') {
+        parts.push(`<div style="opacity:0.75">(turn preview pending)</div>`);
+    } else if (data.turnPreviewStatus === 'error') {
+        const err = String(data.turnPreviewError || 'unknown error').slice(0, 300);
+        parts.push(`<div style="opacity:0.9;color:#ff9d9d">(turn preview failed: ${esc(err)})</div>`);
+    } else if (data.turnPreviewStatus === 'ok') {
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract (preview)</b></summary>`);
+        if (data.turnContract) {
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
+        } else {
+            parts.push(`<div style="opacity:0.7">(no contract returned)</div>`);
+        }
+        parts.push(`</details>`);
+        if (data.turnSystemPrompt) {
+            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn System Prompt</b> (${data.turnSystemPrompt.length} chars)</summary>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:140px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.turnSystemPrompt)}</pre>`);
+            parts.push(`</details>`);
+        }
+        if (data.turnPrompt) {
+            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn User Prompt</b> (${data.turnPrompt.length} chars)</summary>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.turnPrompt)}</pre>`);
+            parts.push(`</details>`);
+        }
     }
 
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
