@@ -140,42 +140,12 @@ function injectIntoLegacyPopup(popupEl: Element): void {
     if (!panel.parentElement) target.appendChild(panel);
 }
 
-function injectIntoPromptManagerInspect(): boolean {
-    const popup = document.getElementById('completion_prompt_manager_popup');
-    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
-    const inspectList = document.getElementById('completion_prompt_manager_popup_entry_form_inspect_list');
-    if (!popup || !inspectArea || !inspectList) return false;
-
-    const popupOpen = popup.classList.contains('openDrawer') || isVisible(popup);
-    const inspectOpen = isVisible(inspectArea) && (inspectArea as HTMLElement).style.display !== 'none';
-    if (!popupOpen || !inspectOpen) return false;
-
-    const panel = ensurePanel(inspectArea);
-    const html = renderInspectHtml(currentInspectData());
-    if (panel.innerHTML !== html) {
-        panel.innerHTML = html;
-    }
-    if (!panel.parentElement) {
-        inspectList.insertAdjacentElement('afterend', panel);
-    } else if (panel.previousElementSibling !== inspectList) {
-        inspectList.insertAdjacentElement('afterend', panel);
-    }
-    return true;
-}
-
 export function isInspectUiVisible(): boolean {
-    const popup = document.getElementById('completion_prompt_manager_popup');
-    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
-    const popupOpen = !!popup && (popup.classList.contains('openDrawer') || isVisible(popup));
-    const inspectOpen = !!inspectArea && isVisible(inspectArea) && (inspectArea as HTMLElement).style.display !== 'none';
-    if (popupOpen && inspectOpen) return true;
-
     const legacyPopup = document.querySelector('.popup');
     return !!(legacyPopup && legacyPopup.querySelector('#inspectPrompt') && isVisible(legacyPopup));
 }
 
 function refreshInspectPanels(): void {
-    injectIntoPromptManagerInspect();
     const legacyPopup = document.querySelector('.popup');
     if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
         injectIntoLegacyPopup(legacyPopup);
@@ -197,18 +167,11 @@ function scheduleRefresh(): void {
 export function startInspectObserver(): void {
     if (_observer) return;
 
-    // Keep a tiny observer only for hard re-mounts of prompt manager root nodes.
-    const relevantId = new Set([
-        'completion_prompt_manager_popup',
-        'completion_prompt_manager_popup_inspect',
-        'completion_prompt_manager_popup_entry_form_inspect_list',
-    ]);
     const nodeHasRelevantTarget = (node: Node): boolean => {
         if (!(node instanceof Element)) return false;
-        if (relevantId.has(node.id)) return true;
-        return !!node.querySelector?.(
-            '#completion_prompt_manager_popup,#completion_prompt_manager_popup_inspect,#completion_prompt_manager_popup_entry_form_inspect_list,#inspectPrompt,.popup',
-        );
+        if (node.id === 'inspectPrompt') return true;
+        if (node.classList.contains('popup')) return true;
+        return !!node.querySelector?.('#inspectPrompt,.popup');
     };
 
     _observer = new MutationObserver((mutations) => {
