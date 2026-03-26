@@ -212,8 +212,10 @@ export function startInspectObserver(): void {
     // Keep a tiny observer only for hard re-mounts of prompt manager root nodes.
     _observer = new MutationObserver(() => {
         attachPromptVisibilityObserver();
+        scheduleRefresh();
     });
-    _observer.observe(document.documentElement, { childList: true, subtree: false });
+    const root = document.body || document.documentElement;
+    _observer.observe(root, { childList: true, subtree: true });
     attachPromptVisibilityObserver();
     scheduleRefresh();
 }
