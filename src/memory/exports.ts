@@ -2,7 +2,6 @@ import { OVERRIDE_SUMMARIZER, memuExtras, st } from "utils/context-extra";
 import {
     addPendingRetrieveToPrompt,
     summaryIfNeed,
-    ensureMemULorebooksUiOnly,
     getChatIdSafe,
     retrieveForLatestUserMessage,
     dispatchPendingAPImw,
@@ -170,9 +169,6 @@ export function onChatChanged(): void {
             await initChatExtraInfo(ctx);
             window.dispatchEvent(new Event('memu:server-ready'));
             await maybeClearStaleLocalState();
-
-            // Keep memU lorebooks UI-only to avoid prompt token duplication.
-            try { await ensureMemULorebooksUiOnly(); } catch { }
             startSummaryPolling();
             // On chat-open: run the normal "should we memorize?" check.
             summaryIfNeedDebounced();

@@ -4,8 +4,7 @@ import { conversationRetrieve, memorizeConversation, retrieveDefaultCategories }
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
-import { postJsonWithCsrf } from "utils/csrf";
-import { status, info, warn, error as logError, onceWarn } from "utils/log";
+import { status, warn, error as logError, onceWarn } from "utils/log";
 import { stashInspectData } from "ui/inspect-panel";
 
 let isSummarying = false;
@@ -58,86 +57,6 @@ export function getChatFileNameRaw(): string {
         return s;
     } catch {
         return '';
-    }
-}
-
-// --- World Info helpers (list/get/edit) ---
-
-type WorldInfoListItem = { file_id?: string; name?: string };
-
-async function listWorldInfoBooks(): Promise<WorldInfoListItem[]> {
-    const data = await postJsonWithCsrf('/api/worldinfo/list', {});
-    return Array.isArray(data) ? data : [];
-}
-
-async function getWorldInfoBook(name: string): Promise<any> {
-    return await postJsonWithCsrf('/api/worldinfo/get', { name });
-}
-
-function getCurrentCharacterNameForWorldInfo(baseInfo?: any): string {
-    const ctx: any = st.getContext();
-    const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
-    return sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || baseInfo?.agentName || 'Character'));
-}
-
-function memuBookPrefixForCharacter(characterName: string): string {
-    const c = sanitizeWorldInfoName(String(characterName || '')).trim();
-    return `memU - ${c} - `;
-}
-
-/**
- * Keep memU lorebooks UI-only: disable/constant=false so they don't get injected into prompts (token cost).
- * This also "heals" older builds that created constant=true entries.
- */
-export async function ensureMemULorebooksUiOnly(): Promise<void> {
-    const characterName = getCurrentCharacterNameForWorldInfo(memuExtras.baseInfo);
-    const prefix = memuBookPrefixForCharacter(characterName);
-    const globalPrefix = 'memU - ';
-
-    let list: WorldInfoListItem[] = [];
-    try {
-        list = await listWorldInfoBooks();
-    } catch {
-        return;
-    }
-
-    const targets = list
-        .map(x => String((x as any)?.file_id || (x as any)?.name || ''))
-        .filter(n => n && (n.startsWith(prefix) || n.startsWith(globalPrefix)));
-
-    if (targets.length === 0) return;
-
-    let changedCount = 0;
-
-    for (const name of targets) {
-        let data: any;
-        try {
-            data = await getWorldInfoBook(name);
-        } catch {
-            continue;
-        }
-        if (!data || typeof data !== 'object' || !data.entries || typeof data.entries !== 'object') continue;
-
-        let changed = false;
-        for (const k of Object.keys(data.entries)) {
-            const e = data.entries[k];
-            if (!e || typeof e !== 'object') continue;
-            if (e.constant !== false) { e.constant = false; changed = true; }
-            if (e.disable !== true) { e.disable = true; changed = true; }
-        }
-
-        if (!changed) continue;
-
-        try {
-            await upsertWorldInfoLorebook(name, data);
-            changedCount += 1;
-        } catch {
-            // ignore
-        }
-    }
-
-    if (changedCount > 0) {
-        info(`lorebooks set to ui-only (${changedCount} updated)`);
     }
 }
 
