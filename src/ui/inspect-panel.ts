@@ -40,8 +40,14 @@ export function getInspectData(): InspectData | null {
 function renderInspectHtml(data: InspectData): string {
     const parts: string[] = [];
     const status = data.status || (data.error ? 'error' : 'ok');
+    const clip = (s: string, max: number): string => {
+        const t = String(s || '');
+        if (t.length <= max) return t;
+        return `${t.slice(0, max)}\n\n…(truncated)`;
+    };
+    const escClip = (s: string, max: number): string => esc(clip(s, max));
 
-    parts.push(`<div style="font-family:monospace;font-size:12px;max-height:300px;overflow-y:auto;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
+    parts.push(`<div style="font-family:monospace;font-size:12px;max-height:300px;overflow:auto;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
     parts.push(`<div style="font-weight:bold;margin-bottom:6px;color:#7dcaf7">memU Inspect</div>`);
 
     // Query
@@ -52,7 +58,7 @@ function renderInspectHtml(data: InspectData): string {
     // Prior context
     if (data.workingNote) {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Prior Context</b> (${data.workingNote.length} chars)</summary>`);
-        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:150px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.workingNote)}</pre>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:150px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.workingNote, 8000)}</pre>`);
         parts.push(`</details>`);
     }
 
@@ -74,7 +80,7 @@ function renderInspectHtml(data: InspectData): string {
             parts.push(`<div style="margin:3px 0;padding-left:8px;border-left:2px solid rgba(125,202,247,0.4)">`);
             parts.push(`<span style="opacity:0.6">[${esc(item.memory_type)}]</span> `);
             parts.push(`<span style="opacity:0.7">score=${item.score.toFixed(4)}</span><br>`);
-            parts.push(`${esc(item.summary)}`);
+            parts.push(`${escClip(item.summary, 800)}`);
             parts.push(`</div>`);
         }
         parts.push(`</details>`);
@@ -99,19 +105,19 @@ function renderInspectHtml(data: InspectData): string {
     } else if (data.turnPreviewStatus === 'ok') {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract (preview)</b></summary>`);
         if (data.turnContract) {
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(JSON.stringify(data.turnContract, null, 2), 8000)}</pre>`);
         } else {
             parts.push(`<div style="opacity:0.7">(no contract returned)</div>`);
         }
         parts.push(`</details>`);
         if (data.turnSystemPrompt) {
             parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn System Prompt</b> (${data.turnSystemPrompt.length} chars)</summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:140px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.turnSystemPrompt)}</pre>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.turnSystemPrompt, 6000)}</pre>`);
             parts.push(`</details>`);
         }
         if (data.turnPrompt) {
             parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn User Prompt</b> (${data.turnPrompt.length} chars)</summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.turnPrompt)}</pre>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.turnPrompt, 8000)}</pre>`);
             parts.push(`</details>`);
         }
     }
@@ -188,6 +194,17 @@ function injectIntoPromptManagerInspect(): boolean {
     return true;
 }
 
+export function isInspectUiVisible(): boolean {
+    const popup = document.getElementById('completion_prompt_manager_popup');
+    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
+    const popupOpen = !!popup && (popup.classList.contains('openDrawer') || isVisible(popup));
+    const inspectOpen = !!inspectArea && isVisible(inspectArea) && (inspectArea as HTMLElement).style.display !== 'none';
+    if (popupOpen && inspectOpen) return true;
+
+    const legacyPopup = document.querySelector('.popup');
+    return !!(legacyPopup && legacyPopup.querySelector('#inspectPrompt') && isVisible(legacyPopup));
+}
+
 function refreshInspectPanels(): void {
     injectIntoPromptManagerInspect();
     const legacyPopup = document.querySelector('.popup');
@@ -240,7 +257,32 @@ export function startInspectObserver(): void {
     if (_observer) return;
 
     // Keep a tiny observer only for hard re-mounts of prompt manager root nodes.
-    _observer = new MutationObserver(() => {
+    const relevantId = new Set([
+        'completion_prompt_manager_popup',
+        'completion_prompt_manager_popup_inspect',
+        'completion_prompt_manager_popup_entry_form_inspect_list',
+    ]);
+    const nodeHasRelevantTarget = (node: Node): boolean => {
+        if (!(node instanceof Element)) return false;
+        if (relevantId.has(node.id)) return true;
+        return !!node.querySelector?.(
+            '#completion_prompt_manager_popup,#completion_prompt_manager_popup_inspect,#completion_prompt_manager_popup_entry_form_inspect_list,#inspectPrompt,.popup',
+        );
+    };
+
+    _observer = new MutationObserver((mutations) => {
+        let changed = false;
+        for (const m of mutations) {
+            for (const n of Array.from(m.addedNodes || [])) {
+                if (nodeHasRelevantTarget(n)) { changed = true; break; }
+            }
+            if (changed) break;
+            for (const n of Array.from(m.removedNodes || [])) {
+                if (nodeHasRelevantTarget(n)) { changed = true; break; }
+            }
+            if (changed) break;
+        }
+        if (!changed) return;
         attachPromptVisibilityObserver();
         scheduleRefresh();
     });

@@ -12,7 +12,7 @@ import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summ
 import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
 import { info, warn } from "utils/log";
-import { getInspectData, stashInspectData } from "ui/inspect-panel";
+import { getInspectData, isInspectUiVisible, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
@@ -168,7 +168,9 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
 export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {
     if (dryRun) return;
     const turn = dispatchPendingAPImw(generateData);
-    dispatchTurnPreview(turn);
+    if (isInspectUiVisible()) {
+        dispatchTurnPreview(turn);
+    }
 }
 
 export function onChatChanged(): void {
