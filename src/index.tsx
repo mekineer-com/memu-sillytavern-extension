@@ -4,7 +4,6 @@ import App from './App';
 import {
     onChatChanged,
     onChatCompletionPromptReady,
-    onGenerateAfterCombinePrompts,
     onGenerateAfterData,
     onMessageEdited,
     onMessageReceived,
@@ -26,8 +25,6 @@ function installHooksWithRetry(): void {
         try {
             st.eventSource.on(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
             st.eventSource.makeFirst(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
-            st.eventSource.on(st.event_types.GENERATE_AFTER_COMBINE_PROMPTS, onGenerateAfterCombinePrompts);
-            st.eventSource.makeFirst(st.event_types.GENERATE_AFTER_COMBINE_PROMPTS, onGenerateAfterCombinePrompts);
             st.eventSource.on(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
             st.eventSource.makeLast(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
             st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);

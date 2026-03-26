@@ -725,9 +725,6 @@ export function addSummaryToPrompt(
     if (!memuSummary) {
         return;
     }
-    if (hasSummaryAlready(eventData, memuSummary)) {
-        return;
-    }
     if (replaceSystem && Array.isArray(eventData?.chat)) {
         const summary = findSystemSummary(st.promptManager.messages);
         if (summary) {
@@ -736,19 +733,6 @@ export function addSummaryToPrompt(
         }
     }
     addSummary(memuSummary, eventData);
-}
-
-function hasSummaryAlready(eventData: any, memuSummary: string): boolean {
-    if (Array.isArray(eventData?.chat)) {
-        return eventData.chat.some((msg: any) => {
-            const content = typeof msg?.content === 'string' ? msg.content : '';
-            return content === memuSummary || content.includes(memuSummary);
-        });
-    }
-    if (typeof eventData?.prompt === 'string') {
-        return eventData.prompt.includes(memuSummary);
-    }
-    return false;
 }
 
 function replaceSystemSummary(summary: string, memuSummary: string, eventData: any): void {

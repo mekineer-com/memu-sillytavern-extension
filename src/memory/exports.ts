@@ -12,7 +12,6 @@ import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
 import { info, warn } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
-import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
     try {
@@ -142,13 +141,6 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
             error: msg,
         });
     }
-}
-
-export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
-    // OpenAI/chat path gets a dedicated CHAT_COMPLETION_PROMPT_READY hook later in the same turn.
-    // Skipping here avoids duplicate memU injection for chat APIs.
-    if (main_api === 'openai') return;
-    await onChatCompletionPromptReady(eventData);
 }
 
 export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {
