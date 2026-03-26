@@ -3,7 +3,7 @@
  *
  * Watches for PI's popup in the DOM (via MutationObserver). When it appears,
  * injects a collapsible memU section showing the last retrieve response:
- * working_note, retrieved items with scores, categories.
+ * prior context, retrieved items with scores, categories.
  */
 
 export type InspectData = {
@@ -38,9 +38,9 @@ function renderInspectHtml(data: InspectData): string {
         parts.push(`<div style="margin-bottom:6px"><b>Query:</b> ${esc(data.query)}</div>`);
     }
 
-    // Working note
+    // Prior context
     if (data.workingNote) {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Working Note</b> (${data.workingNote.length} chars)</summary>`);
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Prior Context</b> (${data.workingNote.length} chars)</summary>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:150px;overflow-y:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(data.workingNote)}</pre>`);
         parts.push(`</details>`);
     }

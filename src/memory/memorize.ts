@@ -448,7 +448,7 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
-        workingNote: (resp as any)?.working_note != null ? String((resp as any).working_note) : undefined,
+        workingNote: (resp as any)?.prior_context != null ? String((resp as any).prior_context) : undefined,
         categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
             name: c.name || '?', score: c.score || 0, summary: c.summary,
         })) : [],
@@ -460,7 +460,7 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
         conversationId: (resp as any)?.conversation_id,
     });
     const ragSummary = parseRetrieveResult(result);
-    const rawWorkingNote = (resp as any)?.working_note;
+    const rawWorkingNote = (resp as any)?.prior_context;
     const hasWorkingNote = rawWorkingNote != null && String(rawWorkingNote).trim() !== '';
     const workingNoteSummary = hasWorkingNote
         ? parseRetrieveResult(typeof rawWorkingNote === 'string' ? JSON.parse(rawWorkingNote) : rawWorkingNote)

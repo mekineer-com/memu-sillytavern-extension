@@ -26,12 +26,32 @@ export type ConversationRetrieveRequest = {
 export type ConversationRetrieveResponse = {
   ok: boolean;
   result?: any;
-  working_note?: any;
+  prior_context?: any;
   state?: any;
   path?: string;
   method?: string;
   conversation_id?: string;
   queries?: number;
+};
+export type ConversationTurnRequest = {
+  userId: string;
+  soulId: string;
+  conversationId: string;
+  message: string;
+  history?: Array<Record<string, any>>;
+  runApimw?: boolean;
+  waitApimw?: boolean;
+  debug?: boolean;
+};
+export type ConversationTurnResponse = {
+  ok: boolean;
+  response?: string;
+  conversation_id?: string;
+  apimw?: string;
+  state?: any;
+  path?: string;
+  turn_contract?: any;
+  annulment_memory_ids?: string[];
 };
 export type ScopeStorageProbeResponse = {
   ok: boolean;
@@ -110,6 +130,10 @@ export async function retrieveDefaultCategories(userId: string, soulId: string):
 
 export async function conversationRetrieve(body: ConversationRetrieveRequest): Promise<ConversationRetrieveResponse> {
   return request<ConversationRetrieveResponse>('/conversationRetrieve', body);
+}
+
+export async function conversationTurn(body: ConversationTurnRequest): Promise<ConversationTurnResponse> {
+  return request<ConversationTurnResponse>('/conversationTurn', body);
 }
 
 export async function scopeStorageProbe(userId: string, soulId: string): Promise<ScopeStorageProbeResponse> {
