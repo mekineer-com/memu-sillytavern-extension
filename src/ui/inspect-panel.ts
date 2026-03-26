@@ -42,83 +42,24 @@ export function getInspectData(): InspectData | null {
 function renderInspectHtml(data: InspectData): string {
     const parts: string[] = [];
     const status = data.status || (data.error ? 'error' : 'ok');
-    const clip = (s: string, max: number): string => {
-        const t = String(s || '');
-        if (t.length <= max) return t;
-        return `${t.slice(0, max)}\n\n…(truncated)`;
-    };
-    const escClip = (s: string, max: number): string => esc(clip(s, max));
 
     parts.push(`<div style="font-family:monospace;font-size:12px;max-height:300px;overflow:auto;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
     parts.push(`<div style="font-weight:bold;margin-bottom:6px;color:#7dcaf7">memU Inspect</div>`);
 
-    // Query
-    if (data.query) {
-        parts.push(`<div style="margin-bottom:6px"><b>Query:</b> ${esc(data.query)}</div>`);
-    }
-
-    // Prior context
-    if (data.workingNote) {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Prior Context</b> (${data.workingNote.length} chars)</summary>`);
-        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:150px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.workingNote, 8000)}</pre>`);
-        parts.push(`</details>`);
-    }
-
-    const cache = Array.isArray(data.memoryCache) ? data.memoryCache : [];
-    if (cache.length > 0) {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Memory Cache</b> (${cache.length})</summary>`);
-        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:120px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(cache.map((line) => `- ${line}`).join('\n'), 4000)}</pre>`);
-        parts.push(`</details>`);
-    }
-
-    const intents = Array.isArray(data.intentions) ? data.intentions : [];
-    if (intents.length > 0) {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Intentions</b> (${intents.length})</summary>`);
-        for (const it of intents) {
-            const label = esc(String(it.text || '').trim());
-            if (!label) continue;
-            const p = Number(it.priority);
-            const pTxt = Number.isFinite(p) ? ` p=${p.toFixed(1)}` : '';
-            const flags = `${it.active === false ? ' inactive' : ''}${it.ephemeral ? ' ephemeral' : ''}`;
-            parts.push(`<div style="margin:2px 0;padding-left:8px">${label}<span style="opacity:0.7">${esc(pTxt + flags)}</span></div>`);
-        }
-        parts.push(`</details>`);
-    }
-
-    // Categories
     const cats = data.categories || [];
-    if (cats.length > 0) {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Categories</b> (${cats.length})</summary>`);
-        for (const cat of cats) {
-            parts.push(`<div style="margin:2px 0;padding-left:8px">${esc(cat.name)} <span style="opacity:0.7">score=${cat.score.toFixed(3)}</span></div>`);
-        }
-        parts.push(`</details>`);
-    }
-
-    // Items
     const items = data.items || [];
-    if (items.length > 0) {
-        parts.push(`<details open style="margin-bottom:6px"><summary style="cursor:pointer"><b>Retrieved Items</b> (${items.length})</summary>`);
-        for (const item of items) {
-            parts.push(`<div style="margin:3px 0;padding-left:8px;border-left:2px solid rgba(125,202,247,0.4)">`);
-            parts.push(`<span style="opacity:0.6">[${esc(item.memory_type)}]</span> `);
-            parts.push(`<span style="opacity:0.7">score=${item.score.toFixed(4)}</span><br>`);
-            parts.push(`${escClip(item.summary, 800)}`);
-            parts.push(`</div>`);
-        }
-        parts.push(`</details>`);
-    }
+    const resources = Array.isArray(data.resources) ? data.resources : [];
+
+    parts.push(`<div style="margin-bottom:6px"><b>Retrieve:</b> status=${esc(status)} categories=${cats.length} items=${items.length} resources=${resources.length}</div>`);
 
     if (status === 'error') {
         const err = String(data.error || 'unknown error');
         parts.push(`<details style="margin-bottom:6px" open><summary style="cursor:pointer;color:#ff9d9d"><b>Retrieve Error</b></summary>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
         parts.push(`</details>`);
-    } else if (status === 'pending' && cats.length === 0 && items.length === 0 && !data.workingNote) {
+    } else if (status === 'pending') {
         parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
-    } else if (cats.length === 0 && items.length === 0 && !data.workingNote && !data.query) {
-        parts.push(`<div style="opacity:0.6">(no data from last retrieve)</div>`);
-    } else if (cats.length === 0 && items.length === 0 && data.query) {
+    } else if (cats.length === 0 && items.length === 0 && resources.length === 0) {
         parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
     }
 
@@ -132,21 +73,14 @@ function renderInspectHtml(data: InspectData): string {
     } else if (data.turnPreviewStatus === 'ok') {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract (preview)</b></summary>`);
         if (data.turnContract) {
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(JSON.stringify(data.turnContract, null, 2), 8000)}</pre>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
         } else {
             parts.push(`<div style="opacity:0.7">(no contract returned)</div>`);
         }
         parts.push(`</details>`);
-        if (data.turnSystemPrompt) {
-            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn System Prompt</b> (${data.turnSystemPrompt.length} chars)</summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.turnSystemPrompt, 6000)}</pre>`);
-            parts.push(`</details>`);
-        }
-        if (data.turnPrompt) {
-            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn User Prompt</b> (${data.turnPrompt.length} chars)</summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.turnPrompt, 8000)}</pre>`);
-            parts.push(`</details>`);
-        }
+        const sp = String(data.turnSystemPrompt || '');
+        const up = String(data.turnPrompt || '');
+        parts.push(`<div style="opacity:0.75">turn prompt chars: user=${up.length} system=${sp.length}</div>`);
     }
 
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
