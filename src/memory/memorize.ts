@@ -722,14 +722,6 @@ function buildWorldInfoFileData(bookName: string, categoryName: string, content:
     entry.comment = `memU category: ${categoryName}`;
     entry.content = content;
 
-    const t = (content || '').trim();
-    const looksRich = !!t && (
-        t.startsWith('#') ||
-        /\n\s*##?\s+\S/.test(t) ||
-        /\n\s*[-*]\s+\S/.test(t) ||
-        t.length >= 220
-    );
-
     // Keep memU lorebooks as UI-only.
     // memU injects retrieval directly; ST World Info injection is stripped before send.
     entry.constant = false;
