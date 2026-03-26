@@ -110,8 +110,10 @@ function renderInspectHtml(data: InspectData): string {
     }
 
     if (status === 'error') {
-        const err = (data.error || 'unknown error').slice(0, 240);
-        parts.push(`<div style="opacity:0.9;color:#ff9d9d">(retrieve failed: ${esc(err)})</div>`);
+        const err = String(data.error || 'unknown error');
+        parts.push(`<details style="margin-bottom:6px" open><summary style="cursor:pointer;color:#ff9d9d"><b>Retrieve Error</b></summary>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
+        parts.push(`</details>`);
     } else if (status === 'pending' && cats.length === 0 && items.length === 0 && !data.workingNote) {
         parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
     } else if (cats.length === 0 && items.length === 0 && !data.workingNote && !data.query) {
@@ -123,8 +125,10 @@ function renderInspectHtml(data: InspectData): string {
     if (data.turnPreviewStatus === 'pending') {
         parts.push(`<div style="opacity:0.75">(turn preview pending)</div>`);
     } else if (data.turnPreviewStatus === 'error') {
-        const err = String(data.turnPreviewError || 'unknown error').slice(0, 300);
-        parts.push(`<div style="opacity:0.9;color:#ff9d9d">(turn preview failed: ${esc(err)})</div>`);
+        const err = String(data.turnPreviewError || 'unknown error');
+        parts.push(`<details style="margin-bottom:6px" open><summary style="cursor:pointer;color:#ff9d9d"><b>Turn Preview Error</b></summary>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
+        parts.push(`</details>`);
     } else if (data.turnPreviewStatus === 'ok') {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract (preview)</b></summary>`);
         if (data.turnContract) {
