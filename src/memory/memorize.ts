@@ -10,6 +10,7 @@ import { getInspectData, stashInspectData } from "ui/inspect-panel";
 let isSummarying = false;
 
 type PendingRetrieveTurn = {
+    createdAt: number;
     conversationId: string;
     userId: string;
     soulId: string;
@@ -374,6 +375,17 @@ export function resetRetrievePipelineState(): void {
     _pendingRetrieveTurn = null;
 }
 
+export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
+    if (!Number.isFinite(stoppedAtMs) || stoppedAtMs <= 0) return false;
+    const turn = _pendingRetrieveTurn;
+    if (!turn) return false;
+    if (turn.createdAt <= stoppedAtMs) {
+        _pendingRetrieveTurn = null;
+        return true;
+    }
+    return false;
+}
+
 export function retrieveForLatestUserMessage(messageIdAny: any): void {
     void (async () => {
         try { await initChatExtraInfo(st.getContext()); } catch { }
@@ -397,6 +409,7 @@ export function retrieveForLatestUserMessage(messageIdAny: any): void {
         const history = buildTurnHistory(chat, idx, String(ctx?.name1 || ''));
         clearLiveRetrieveSummary();
         _pendingRetrieveTurn = {
+            createdAt: Date.now(),
             conversationId,
             userId,
             soulId,
@@ -443,7 +456,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     if (!conversationId || !userId || !soulId) return null;
     const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), String(ctx?.name1 || ''));
 
-    return { conversationId, userId, soulId, queryText, history };
+    return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history };
 }
 
 export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
@@ -555,7 +568,7 @@ export async function dispatchConversationTurn(
             soulId: turn.soulId,
             method: 'turn',
             conversationId: turn.conversationId,
-            turnPreviewStatus: 'pending',
+            turnStatus: 'pending',
         });
     }
 
@@ -586,7 +599,7 @@ export async function dispatchConversationTurn(
             soulId: turn.soulId,
             method: 'turn',
             conversationId: turn.conversationId,
-            turnPreviewStatus: 'ok',
+            turnStatus: 'ok',
             turnContract: resp?.turn_contract,
             turnPrompt: typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined,
             turnSystemPrompt: typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined,

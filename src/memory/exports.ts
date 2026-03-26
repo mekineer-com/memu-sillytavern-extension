@@ -5,13 +5,14 @@ import {
     getChatIdSafe,
     retrieveForLatestUserMessage,
     dispatchConversationTurn,
+    dropPendingTurnIfStopped,
     resetRetrievePipelineState,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
 import { info, warn } from "utils/log";
-import { getInspectData, isInspectUiVisible, stashInspectData } from "ui/inspect-panel";
+import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
@@ -21,6 +22,7 @@ const summaryIfNeedDebounced = st.debounce(() => {
 }, st.debounce_timeout.extended);
 
 const staleCursorResetOnceByScope = new Set<string>();
+let lastGenerationStoppedAt = 0;
 
 function stripWorldInfoInjection(eventData: any): void {
     const chat = eventData?.chat;
@@ -125,6 +127,10 @@ export function onMessageSwiped(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
 
+export function onGenerationStopped(): void {
+    lastGenerationStoppedAt = Date.now();
+}
+
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
@@ -166,16 +172,26 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
 
 export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
     if (dryRun) return;
+    if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            turnStatus: 'error',
+            turnError: 'Generation cancelled before memU turn dispatch',
+        });
+        return;
+    }
     try {
-        await dispatchConversationTurn(generateData, { debug: isInspectUiVisible() });
+        await dispatchConversationTurn(generateData, { debug: true });
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
         const prev = getInspectData();
         stashInspectData({
             ...(prev || { timestamp: Date.now() }),
             timestamp: Date.now(),
-            turnPreviewStatus: 'error',
-            turnPreviewError: msg,
+            turnStatus: 'error',
+            turnError: msg,
         });
         throw e;
     }

@@ -39,6 +39,11 @@ export interface MemuPluginConfigV1 {
 export interface ConnectionProfileSummary {
   id: string;
   name: string;
+  provider?: string;
+  memuChatCapable?: boolean;
+  memuEmbeddingListCapable?: boolean;
+  selected?: boolean;
+  resolvedProfileId?: string;
 }
 
 export interface MemuExtras {

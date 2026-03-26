@@ -21,8 +21,8 @@ export type InspectData = {
     resources?: any[];
     method?: string;
     conversationId?: string;
-    turnPreviewStatus?: 'pending' | 'ok' | 'error';
-    turnPreviewError?: string;
+    turnStatus?: 'pending' | 'ok' | 'error';
+    turnError?: string;
     turnContract?: any;
     turnPrompt?: string;
     turnSystemPrompt?: string;
@@ -54,24 +54,22 @@ function renderInspectHtml(data: InspectData): string {
 
     if (status === 'error') {
         const err = String(data.error || 'unknown error');
-        parts.push(`<details style="margin-bottom:6px" open><summary style="cursor:pointer;color:#ff9d9d"><b>Retrieve Error</b></summary>`);
+        parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Retrieve Error</b></div>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
-        parts.push(`</details>`);
     } else if (status === 'pending') {
         parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
     } else if (cats.length === 0 && items.length === 0 && resources.length === 0) {
         parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
     }
 
-    if (data.turnPreviewStatus === 'pending') {
-        parts.push(`<div style="opacity:0.75">(turn preview pending)</div>`);
-    } else if (data.turnPreviewStatus === 'error') {
-        const err = String(data.turnPreviewError || 'unknown error');
-        parts.push(`<details style="margin-bottom:6px" open><summary style="cursor:pointer;color:#ff9d9d"><b>Turn Preview Error</b></summary>`);
+    if (data.turnStatus === 'pending') {
+        parts.push(`<div style="opacity:0.75">(turn pending)</div>`);
+    } else if (data.turnStatus === 'error') {
+        const err = String(data.turnError || 'unknown error');
+        parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Turn Error</b></div>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
-        parts.push(`</details>`);
-    } else if (data.turnPreviewStatus === 'ok') {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract (preview)</b></summary>`);
+    } else if (data.turnStatus === 'ok') {
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract</b></summary>`);
         if (data.turnContract) {
             parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
         } else {
@@ -81,6 +79,16 @@ function renderInspectHtml(data: InspectData): string {
         const sp = String(data.turnSystemPrompt || '');
         const up = String(data.turnPrompt || '');
         parts.push(`<div style="opacity:0.75">turn prompt chars: user=${up.length} system=${sp.length}</div>`);
+        if (sp) {
+            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn System Prompt</b></summary>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(sp)}</pre>`);
+            parts.push(`</details>`);
+        }
+        if (up) {
+            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn User Prompt</b></summary>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(up)}</pre>`);
+            parts.push(`</details>`);
+        }
     }
 
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
@@ -175,7 +183,6 @@ function refreshInspectPanels(): void {
 }
 
 let _observer: MutationObserver | null = null;
-let _promptObserver: MutationObserver | null = null;
 let _refreshQueued = false;
 
 function scheduleRefresh(): void {
@@ -185,33 +192,6 @@ function scheduleRefresh(): void {
         _refreshQueued = false;
         refreshInspectPanels();
     });
-}
-
-function attachPromptVisibilityObserver(): boolean {
-    if (_promptObserver) {
-        _promptObserver.disconnect();
-        _promptObserver = null;
-    }
-
-    const targets: Element[] = [];
-    const popup = document.getElementById('completion_prompt_manager_popup');
-    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
-    if (popup) targets.push(popup);
-    if (inspectArea) targets.push(inspectArea);
-
-    const legacyPopup = document.querySelector('.popup');
-    if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
-        targets.push(legacyPopup);
-    }
-    if (targets.length === 0) return false;
-
-    _promptObserver = new MutationObserver(() => {
-        scheduleRefresh();
-    });
-    for (const target of targets) {
-        _promptObserver.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
-    }
-    return true;
 }
 
 export function startInspectObserver(): void {
@@ -244,11 +224,9 @@ export function startInspectObserver(): void {
             if (changed) break;
         }
         if (!changed) return;
-        attachPromptVisibilityObserver();
         scheduleRefresh();
     });
     const root = document.body || document.documentElement;
     _observer.observe(root, { childList: true, subtree: true });
-    attachPromptVisibilityObserver();
     scheduleRefresh();
 }

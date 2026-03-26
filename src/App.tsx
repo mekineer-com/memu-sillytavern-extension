@@ -53,6 +53,7 @@ function defaultCfg(): MemuPluginConfigV1 {
 }
 
 export default function App() {
+  const EMBED_CUSTOM = '__custom__';
   const [pluginOk, setPluginOk] = useState<boolean | null>(null);
   const [pluginConfig, setPluginConfigState] = useState<MemuPluginConfigV1 | null>(null);
   const [profiles, setProfiles] = useState<ConnectionProfileSummary[]>([]);
@@ -66,6 +67,7 @@ export default function App() {
   const [embedModels, setEmbedModels] = useState<string[]>([]);
   const [embedModelsStatus, setEmbedModelsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [embedModelsMessage, setEmbedModelsMessage] = useState<string>('');
+  const [embedCustomMode, setEmbedCustomMode] = useState<boolean>(false);
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
@@ -226,6 +228,95 @@ export default function App() {
     return sid;
   }, [pluginConfig?.defaultProfileId, pluginConfig?.stepProfileId?.embeddings]);
 
+  const defaultAlias = useMemo(
+    () => profiles.find((p) => String(p.id || '').trim() === 'default'),
+    [profiles],
+  );
+  const defaultProfileId = useMemo(
+    () => String(pluginConfig?.defaultProfileId || 'default').trim() || 'default',
+    [pluginConfig?.defaultProfileId],
+  );
+  const effectiveDefaultProvider = useMemo(() => {
+    if (defaultProfileId === 'default') {
+      return String(defaultAlias?.provider || '').trim().toLowerCase();
+    }
+    const p = profiles.find((x) => String(x.id || '').trim() === defaultProfileId);
+    return String(p?.provider || '').trim().toLowerCase();
+  }, [defaultAlias, defaultProfileId, profiles]);
+  const defaultIsHorde = effectiveDefaultProvider === 'horde';
+  const providerByProfileId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of profiles) {
+      const id = String(p.id || '').trim();
+      if (!id) continue;
+      m.set(id, String(p.provider || '').trim().toLowerCase());
+    }
+    return m;
+  }, [profiles]);
+  const providerForProfileId = (id: string): string => {
+    const s = String(id || '').trim();
+    if (!s) return '';
+    if (s === 'default') return effectiveDefaultProvider;
+    return providerByProfileId.get(s) || '';
+  };
+
+  useEffect(() => {
+    if (!defaultIsHorde) return;
+    if (showAdvancedMapping) return;
+    setShowAdvancedMapping(true);
+    try {
+      SHOW_ADVANCED_MAPPING.set(true);
+    } catch {
+      // ignore
+    }
+  }, [defaultIsHorde, showAdvancedMapping]);
+
+  useEffect(() => {
+    const selected = String(pluginConfig?.embeddingModelSelected || '').trim();
+    const manual = String(pluginConfig?.embeddingModelManual || '').trim();
+    if (selected) {
+      setEmbedCustomMode(false);
+      return;
+    }
+    if (manual) {
+      setEmbedCustomMode(true);
+    }
+  }, [pluginConfig?.embeddingModelSelected, pluginConfig?.embeddingModelManual]);
+
+  const embedModelPickerValue = useMemo(() => {
+    const selected = String(pluginConfig?.embeddingModelSelected || '').trim();
+    if (selected) return selected;
+    const manual = String(pluginConfig?.embeddingModelManual || '').trim();
+    if (embedCustomMode || manual) return EMBED_CUSTOM;
+    return '';
+  }, [pluginConfig?.embeddingModelSelected, pluginConfig?.embeddingModelManual, embedCustomMode]);
+
+  function onEmbeddingModelChange(v: string): void {
+    if (!v) {
+      setEmbedCustomMode(false);
+      updatePluginConfig({
+        embeddingModelSelected: undefined,
+        embeddingModelManual: undefined,
+        embeddingModel: undefined,
+      } as any);
+      return;
+    }
+    if (v === EMBED_CUSTOM) {
+      setEmbedCustomMode(true);
+      updatePluginConfig({
+        embeddingModelSelected: undefined,
+        embeddingModel: undefined,
+      } as any);
+      return;
+    }
+    setEmbedCustomMode(false);
+    updatePluginConfig({
+      embeddingModelSelected: v,
+      embeddingModelManual: undefined,
+      embeddingModel: v,
+    } as any);
+  }
+
   async function loadEmbeddingModels(force: boolean = false) {
     try {
       if (!pluginOk) return;
@@ -256,7 +347,14 @@ export default function App() {
     void loadEmbeddingModels(false);
   }, [pluginOk, embedProfileId]);
 
-  function renderProfilePicker(value: string | undefined, onChange: (v: string) => void) {
+  function renderProfilePicker(
+    value: string | undefined,
+    onChange: (v: string) => void,
+    opts?: { allowModelDefault?: boolean; includeDefaultAlias?: boolean; forceBlank?: boolean; blankLabel?: string; excludeProviders?: string[] },
+  ) {
+    const allowModelDefault = opts?.allowModelDefault === true;
+    const includeDefaultAlias = opts?.includeDefaultAlias !== false;
+    const forceBlank = opts?.forceBlank === true;
     if (!profiles.length) {
       return (
         <input
@@ -268,12 +366,17 @@ export default function App() {
       );
     }
 
-    const v = (value ?? '').trim();
+    const banned = new Set((opts?.excludeProviders || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean));
+    const options = (includeDefaultAlias ? profiles : profiles.filter((p) => String(p.id || '').trim() !== 'default'))
+      .filter((p) => !banned.has(String(p.provider || '').trim().toLowerCase()));
+    let v = (value ?? (allowModelDefault ? '' : 'default')).trim();
+    if (forceBlank && (v === '' || v === 'default')) v = '';
+    if (v && !options.some((p) => String(p.id || '').trim() === v)) v = '';
 
     return (
       <select className="text_pole" value={v} onChange={(e) => onChange(e.target.value)}>
-        <option value="">(use default)</option>
-        {profiles.map((p) => (
+        {(allowModelDefault || forceBlank) && <option value="">{forceBlank ? (opts?.blankLabel || '!') : 'default (Model Mapping)'}</option>}
+        {options.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>
@@ -511,37 +614,55 @@ export default function App() {
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {renderProfilePicker(pluginConfig?.defaultProfileId, (v) => updatePluginConfig({ defaultProfileId: v || undefined }))}
+                  {renderProfilePicker(
+                    pluginConfig?.defaultProfileId,
+                    (v) => updatePluginConfig({ defaultProfileId: (v || 'default') as any }),
+                    { allowModelDefault: false },
+                  )}
                 </div>
 
-                <label className="checkbox_label expander" htmlFor="advanced_mapping">
-                  <input
-                    id="advanced_mapping"
-                    type="checkbox"
-                    className="checkbox"
-                    checked={showAdvancedMapping}
-                    onChange={(e) => {
-                      const v = e.target.checked;
-                      setShowAdvancedMapping(v);
-                      try {
-                        SHOW_ADVANCED_MAPPING.set(v);
-                      } catch {
-                        // ignore
-                      }
-                    }}
-                  />
-                  <span>Advanced mapping</span>
-                </label>
+                {!defaultIsHorde && (
+                  <label className="checkbox_label expander" htmlFor="advanced_mapping">
+                    <input
+                      id="advanced_mapping"
+                      type="checkbox"
+                      className="checkbox"
+                      checked={showAdvancedMapping}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        setShowAdvancedMapping(v);
+                        try {
+                          SHOW_ADVANCED_MAPPING.set(v);
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                    />
+                    <span>Advanced mapping</span>
+                  </label>
+                )}
 
-                {showAdvancedMapping && (
+                {(showAdvancedMapping || defaultIsHorde) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {stepLabels.map((s) => (
                       <div key={s.step} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <label>
-                          {s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span>
-                        </label>
-                        {renderProfilePicker(pluginConfig?.stepProfileId?.[s.step], (v) =>
-                          updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), [s.step]: v || undefined } as any }),
+                        {(() => {
+                          const removeInheritance = defaultIsHorde;
+                          const raw = String(pluginConfig?.stepProfileId?.[s.step] || '').trim();
+                          const rawProvider = providerForProfileId(raw);
+                          const missing = removeInheritance && (!raw || raw === 'default' || rawProvider === 'horde');
+                          return (
+                            <label>
+                              {s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span>{missing ? <span title="Select a provider profile for this step" style={{ marginLeft: 6, opacity: 0.9 }}>!</span> : null}
+                            </label>
+                          );
+                        })()}
+                        {renderProfilePicker(
+                          pluginConfig?.stepProfileId?.[s.step],
+                          (v) => updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), [s.step]: v || undefined } as any }),
+                          defaultIsHorde
+                            ? { allowModelDefault: false, includeDefaultAlias: false, forceBlank: true, blankLabel: '!', excludeProviders: ['horde'] }
+                            : { allowModelDefault: true, includeDefaultAlias: true, excludeProviders: ['horde'] },
                         )}
                       </div>
                     ))}
@@ -549,16 +670,26 @@ export default function App() {
                 )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label>Embedding provider profile</label>
+                  {renderProfilePicker(
+                    pluginConfig?.stepProfileId?.embeddings,
+                    (v) => updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), embeddings: v || undefined } as any }),
+                    { allowModelDefault: true },
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <label>Embedding model</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <select
                       className="text_pole"
                       style={{ flex: 1 }}
-                      value={pluginConfig?.embeddingModelSelected ?? ''}
-                      onChange={(e) => updatePluginConfig({ embeddingModelSelected: e.target.value || undefined })}
+                      value={embedModelPickerValue}
+                      onChange={(e) => onEmbeddingModelChange(e.target.value)}
                       disabled={embedModelsStatus === 'loading'}
                     >
-                      <option value="">profile default / custom</option>
+                      <option value="">provider default model</option>
+                      <option value={EMBED_CUSTOM}>custom</option>
                       {embedModels.map((m) => (
                         <option key={m} value={m}>
                           {m}
@@ -578,12 +709,15 @@ export default function App() {
 
                   {embedModelsStatus === 'error' && <small style={{ opacity: 0.8 }}>{embedModelsMessage}</small>}
 
-                  {!pluginConfig?.embeddingModelSelected?.trim() && (
+                  {embedCustomMode && (
                     <input
                       type="text"
                       className="text_pole"
                       value={pluginConfig?.embeddingModelManual ?? ''}
-                      onChange={(e) => updatePluginConfig({ embeddingModelManual: e.target.value || undefined })}
+                      onChange={(e) => {
+                        setEmbedCustomMode(true);
+                        updatePluginConfig({ embeddingModelManual: e.target.value || undefined });
+                      }}
                       placeholder="text-embedding-3-small"
                     />
                   )}

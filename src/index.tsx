@@ -6,6 +6,7 @@ import {
     onChatCompletionPromptReady,
     onGenerateAfterCombinePrompts,
     onGenerateAfterData,
+    onGenerationStopped,
     onMessageEdited,
     onMessageReceived,
     onMessageSwiped,
@@ -30,6 +31,7 @@ function installHooksWithRetry(): void {
             st.eventSource.makeFirst(st.event_types.GENERATE_AFTER_COMBINE_PROMPTS, onGenerateAfterCombinePrompts);
             st.eventSource.on(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
             st.eventSource.makeLast(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
+            st.eventSource.on(st.event_types.GENERATION_STOPPED, onGenerationStopped);
             st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);
             st.eventSource.on(st.event_types.MESSAGE_SENT, onUserMessageSent);
             st.eventSource.on(st.event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
