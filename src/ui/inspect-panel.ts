@@ -10,6 +10,8 @@ export type InspectData = {
     timestamp: number;
     query?: string;
     workingNote?: string;
+    memoryCache?: string[];
+    intentions?: Array<{ text: string; priority?: number; active?: boolean; ephemeral?: boolean }>;
     status?: 'pending' | 'ok' | 'error';
     error?: string;
     userId?: string;
@@ -59,6 +61,27 @@ function renderInspectHtml(data: InspectData): string {
     if (data.workingNote) {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Prior Context</b> (${data.workingNote.length} chars)</summary>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:150px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(data.workingNote, 8000)}</pre>`);
+        parts.push(`</details>`);
+    }
+
+    const cache = Array.isArray(data.memoryCache) ? data.memoryCache : [];
+    if (cache.length > 0) {
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Memory Cache</b> (${cache.length})</summary>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:120px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${escClip(cache.map((line) => `- ${line}`).join('\n'), 4000)}</pre>`);
+        parts.push(`</details>`);
+    }
+
+    const intents = Array.isArray(data.intentions) ? data.intentions : [];
+    if (intents.length > 0) {
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Intentions</b> (${intents.length})</summary>`);
+        for (const it of intents) {
+            const label = esc(String(it.text || '').trim());
+            if (!label) continue;
+            const p = Number(it.priority);
+            const pTxt = Number.isFinite(p) ? ` p=${p.toFixed(1)}` : '';
+            const flags = `${it.active === false ? ' inactive' : ''}${it.ephemeral ? ' ephemeral' : ''}`;
+            parts.push(`<div style="margin:2px 0;padding-left:8px">${label}<span style="opacity:0.7">${esc(pTxt + flags)}</span></div>`);
+        }
         parts.push(`</details>`);
     }
 

@@ -481,13 +481,27 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const ragSummary = parseRetrieveResult(result);
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
     const workingNoteSummary = parsedPrior.summary;
-    const memoryCacheSummary = formatMemoryCacheForPrompt((resp as any)?.memory_cache);
+    const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
+    const intentionItemsRaw = Array.isArray((resp as any)?.active_intentions?.items) ? (resp as any).active_intentions.items : [];
+    const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
     const intentionSummary = formatIntentionsForPrompt((resp as any)?.active_intentions);
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
         status: 'ok',
         workingNote: parsedPrior.inspectText || undefined,
+        memoryCache: memoryCacheRaw
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 7),
+        intentions: intentionItemsRaw
+            .map((row: any) => ({
+                text: String(row?.text ?? '').trim(),
+                priority: Number(row?.priority),
+                active: row?.active !== false,
+                ephemeral: row?.ephemeral === true,
+            }))
+            .filter((row: any) => row.text),
         userId: turn.userId,
         soulId: turn.soulId,
         categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
@@ -776,8 +790,19 @@ function addSummary(memuSummary: string, eventData: any): void {
         return;
     }
     if (typeof eventData?.prompt === 'string') {
-        eventData.prompt = `${memuSummary}\n\n${eventData.prompt}`;
+        const cleaned = stripLegacySummaryBlock(eventData.prompt);
+        if (cleaned.includes(memuSummary)) {
+            eventData.prompt = cleaned;
+            return;
+        }
+        eventData.prompt = `${memuSummary}\n\n${cleaned}`;
     }
+}
+
+function stripLegacySummaryBlock(prompt: string): string {
+    const text = String(prompt || '');
+    if (!text.includes('[Summary:') || !text.includes('[Prior context]')) return text;
+    return text.replace(/\[Summary:\s*\[Prior context][\s\S]*?(?=\n\*{3}\n|$)/g, '').trim();
 }
 
 function parseSummary(categories: CategoryResponse[]): string {
