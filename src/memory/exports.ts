@@ -4,8 +4,7 @@ import {
     summaryIfNeed,
     getChatIdSafe,
     retrieveForLatestUserMessage,
-    dispatchPendingAPImw,
-    dispatchTurnPreview,
+    dispatchConversationTurn,
     resetRetrievePipelineState,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
@@ -165,11 +164,20 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
     }
 }
 
-export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {
+export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
     if (dryRun) return;
-    const turn = dispatchPendingAPImw(generateData);
-    if (isInspectUiVisible()) {
-        dispatchTurnPreview(turn);
+    try {
+        await dispatchConversationTurn(generateData, { debug: isInspectUiVisible() });
+    } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            turnPreviewStatus: 'error',
+            turnPreviewError: msg,
+        });
+        throw e;
     }
 }
 

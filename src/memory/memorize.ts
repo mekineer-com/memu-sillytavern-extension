@@ -14,15 +14,10 @@ type PendingRetrieveTurn = {
     userId: string;
     soulId: string;
     queryText: string;
-};
-
-type PendingAPImw = {
-    conversationId: string;
-    promise: Promise<void>;
+    history: Array<Record<string, any>>;
 };
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
-let _pendingAPImw: PendingAPImw | null = null;
 
 export function getChatIdSafe(): string {
     try {
@@ -357,20 +352,22 @@ function formatIntentionsForPrompt(raw: any): string {
     return lines.join('\n');
 }
 
-function trackPendingAPImw(conversationId: string, promise: Promise<any>): void {
-    const wrapped: Promise<void> = promise.finally(() => {
-        if (_pendingAPImw?.promise === wrapped) {
-            _pendingAPImw = null;
+function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
+    if (!Array.isArray(chat) || endIdx < 0) return [];
+    const start = Math.max(0, endIdx - 39);
+    const out: Array<Record<string, any>> = [];
+    for (let i = start; i <= endIdx && i < chat.length; i++) {
+        const row: any = chat[i];
+        const content = String(row?.mes ?? '').trim();
+        if (!content) continue;
+        const role = row?.is_user ? 'user' : 'assistant';
+        const item: Record<string, any> = { role, content };
+        if (row?.is_user && String(row?.name || '') !== String(userName || '')) {
+            item.name = String(row?.name || '');
         }
-    });
-    _pendingAPImw = { conversationId, promise: wrapped };
-}
-
-async function failIfPendingAPImw(conversationId: string): Promise<void> {
-    const pending = _pendingAPImw;
-    if (!pending || pending.conversationId !== conversationId) return;
-    const message = `memu: previous APImw still running for ${conversationId}; continuing RAG and skipping duplicate APImw`;
-    (window as any).toastr?.warning?.(message);
+        out.push(item);
+    }
+    return out;
 }
 
 export function resetRetrievePipelineState(): void {
@@ -397,12 +394,14 @@ export function retrieveForLatestUserMessage(messageIdAny: any): void {
         const userId = String(memuExtras.baseInfo.userId || '').trim();
         const soulId = String(memuExtras.baseInfo.characterId || '').trim();
         if (!conversationId || !userId || !soulId) return;
+        const history = buildTurnHistory(chat, idx, String(ctx?.name1 || ''));
         clearLiveRetrieveSummary();
         _pendingRetrieveTurn = {
             conversationId,
             userId,
             soulId,
             queryText,
+            history,
         };
         stashInspectData({
             timestamp: Date.now(),
@@ -425,6 +424,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const ctx: any = st.getContext();
     const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
     let queryText = '';
+    let queryIdx = -1;
     for (let i = chat.length - 1; i >= 0; i--) {
         const item: any = chat[i];
         const isUser = item?.is_user === true || (ctx?.name1 != null && String(item?.name || '') === String(ctx.name1));
@@ -432,6 +432,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
         const text = typeof item?.mes === 'string' ? item.mes.trim() : '';
         if (!text) continue;
         queryText = text;
+        queryIdx = i;
         break;
     }
     if (!queryText) return null;
@@ -440,8 +441,9 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const userId = String(memuExtras.baseInfo.userId || '').trim();
     const soulId = String(memuExtras.baseInfo.characterId || '').trim();
     if (!conversationId || !userId || !soulId) return null;
+    const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), String(ctx?.name1 || ''));
 
-    return { conversationId, userId, soulId, queryText };
+    return { conversationId, userId, soulId, queryText, history };
 }
 
 export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
@@ -454,7 +456,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         _pendingRetrieveTurn = turn;
     }
 
-    await failIfPendingAPImw(turn.conversationId);
     let resp: any;
     try {
         resp = await conversationRetrieve({
@@ -535,49 +536,47 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
 }
 
-export function dispatchPendingAPImw(generateData: any): PendingRetrieveTurn | null {
+export async function dispatchConversationTurn(
+    generateData: any,
+    opts: { debug?: boolean } = {},
+): Promise<void> {
     const turn = _pendingRetrieveTurn;
-    if (!turn) return null;
-    if (_pendingAPImw?.conversationId === turn.conversationId) {
-        _pendingRetrieveTurn = null;
-        return turn;
-    }
-    _pendingRetrieveTurn = null;
-    void generateData;
-    trackPendingAPImw(turn.conversationId, conversationRetrieve({
-        userId: turn.userId,
-        soulId: turn.soulId,
-        conversationId: turn.conversationId,
-        method: 'llm',
-        query: turn.queryText,
-    }));
-    return turn;
-}
-
-export function dispatchTurnPreview(turn: PendingRetrieveTurn | null): void {
     if (!turn) return;
-    const prev = getInspectData();
-    stashInspectData({
-        ...(prev || { timestamp: Date.now() }),
-        timestamp: Date.now(),
-        query: turn.queryText,
-        userId: turn.userId,
-        soulId: turn.soulId,
-        method: 'rag',
-        conversationId: turn.conversationId,
-        turnPreviewStatus: 'pending',
-    });
+    _pendingRetrieveTurn = null;
 
-    void conversationTurn({
+    const includeDebug = opts.debug === true;
+    if (includeDebug) {
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            query: turn.queryText,
+            userId: turn.userId,
+            soulId: turn.soulId,
+            method: 'turn',
+            conversationId: turn.conversationId,
+            turnPreviewStatus: 'pending',
+        });
+    }
+
+    const resp = await conversationTurn({
         userId: turn.userId,
         soulId: turn.soulId,
         conversationId: turn.conversationId,
         message: turn.queryText,
-        runApimw: false,
+        history: turn.history,
+        runApimw: true,
         waitApimw: false,
-        dryRun: true,
-        debug: true,
-    }).then((resp: any) => {
+        debug: includeDebug,
+    });
+
+    const reply = String(resp?.response ?? '').trim();
+    if (!reply) {
+        throw new Error("conversationTurn returned empty response");
+    }
+    (generateData as any).__memu_direct_reply = reply;
+
+    if (includeDebug) {
         const prev2 = getInspectData();
         stashInspectData({
             ...(prev2 || { timestamp: Date.now() }),
@@ -585,27 +584,14 @@ export function dispatchTurnPreview(turn: PendingRetrieveTurn | null): void {
             query: turn.queryText,
             userId: turn.userId,
             soulId: turn.soulId,
-            method: 'rag',
+            method: 'turn',
             conversationId: turn.conversationId,
             turnPreviewStatus: 'ok',
             turnContract: resp?.turn_contract,
             turnPrompt: typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined,
             turnSystemPrompt: typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined,
         });
-    }).catch((err: any) => {
-        const prev2 = getInspectData();
-        stashInspectData({
-            ...(prev2 || { timestamp: Date.now() }),
-            timestamp: Date.now(),
-            query: turn.queryText,
-            userId: turn.userId,
-            soulId: turn.soulId,
-            method: 'rag',
-            conversationId: turn.conversationId,
-            turnPreviewStatus: 'error',
-            turnPreviewError: err instanceof Error ? err.message : String(err),
-        });
-    });
+    }
 }
 
 // --- World Info sync (view memU memories inside ST) ---
