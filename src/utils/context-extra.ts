@@ -1,4 +1,4 @@
-import { event_types, eventSource, getMaxContextSize, saveChat } from "@silly-tavern/script.js";
+import { event_types, eventSource, getMaxContextSize, main_api, saveChat } from "@silly-tavern/script.js";
 import { debounce_timeout } from "@silly-tavern/scripts/constants.js";
 import { Message, MessageCollection, promptManager } from "@silly-tavern/scripts/openai.js";
 import { getContext } from "@silly-tavern/scripts/st-context.js";
@@ -14,6 +14,7 @@ const originExtras: MemuExtras = {}
 export const st = {
     getContext: () => getContext(),
     getChatMaxContextSize: () => getMaxContextSize(),
+    getMainApi: () => main_api,
 
     saveChat: async () => await saveChat(),
 

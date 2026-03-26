@@ -146,6 +146,9 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
 }
 
 export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
+    // OpenAI/chat path gets a dedicated CHAT_COMPLETION_PROMPT_READY hook later in the same turn.
+    // Skipping here avoids duplicate memU injection for chat APIs.
+    if (st.getMainApi && st.getMainApi() === 'openai') return;
     await onChatCompletionPromptReady(eventData);
 }
 
