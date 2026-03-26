@@ -12,6 +12,7 @@ import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
 import { info, warn } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
+import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
     try {
@@ -33,8 +34,6 @@ function stripWorldInfoInjection(eventData: any): void {
         }
     }
 }
-
-
 
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
@@ -148,7 +147,7 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
 export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
     // OpenAI/chat path gets a dedicated CHAT_COMPLETION_PROMPT_READY hook later in the same turn.
     // Skipping here avoids duplicate memU injection for chat APIs.
-    if (st.getMainApi && st.getMainApi() === 'openai') return;
+    if (main_api === 'openai') return;
     await onChatCompletionPromptReady(eventData);
 }
 
