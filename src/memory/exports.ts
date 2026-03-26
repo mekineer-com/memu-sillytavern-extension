@@ -13,6 +13,7 @@ import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
 import { info, warn } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
+import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
     try {
@@ -127,9 +128,29 @@ export function onMessageSwiped(_msgIdAny: any): void {
 
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
+    if (!Array.isArray(eventData?.chat)) return;
     try {
         // Keep ST lorebooks UI-only; never inject World Info into model context.
         stripWorldInfoInjection(eventData);
+        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+    } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        warn(`memu retrieve skipped: ${msg}`);
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            status: 'error',
+            error: msg,
+        });
+    }
+}
+
+export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
+    if (eventData?.dryRun) return;
+    if (main_api === 'openai') return;
+    if (typeof eventData?.prompt !== 'string') return;
+    try {
         await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
