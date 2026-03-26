@@ -22,6 +22,19 @@ const summaryIfNeedDebounced = st.debounce(() => {
 
 const staleCursorResetOnceByScope = new Set<string>();
 
+function stripWorldInfoInjection(eventData: any): void {
+    const chat = eventData?.chat;
+    if (!Array.isArray(chat) || chat.length === 0) return;
+
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const row: any = chat[i];
+        const id = String(row?.identifier || '');
+        if (id === 'worldInfoBefore' || id === 'worldInfoAfter') {
+            chat.splice(i, 1);
+        }
+    }
+}
+
 
 
 /**
@@ -117,6 +130,8 @@ export function onMessageSwiped(_msgIdAny: any): void {
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
     try {
+        // Keep ST lorebooks UI-only; never inject World Info into model context.
+        stripWorldInfoInjection(eventData);
         await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);

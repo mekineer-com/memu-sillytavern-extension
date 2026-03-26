@@ -730,10 +730,8 @@ function buildWorldInfoFileData(bookName: string, categoryName: string, content:
         t.length >= 220
     );
 
-    // Keep memU lorebooks as *UI-only* by default.
-    // memU already injects its retrieved summary into the prompt via `addSummaryToPrompt()`.
-    // If these lorebook entries are also enabled/constant, they get injected *again*, wasting tokens
-    // and cluttering prompt logs. Users can manually enable an entry if they really want WI injection.
+    // Keep memU lorebooks as UI-only.
+    // memU injects retrieval directly; ST World Info injection is stripped before send.
     entry.constant = false;
     entry.disable = true;
 
