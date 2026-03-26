@@ -10,6 +10,10 @@ export type InspectData = {
     timestamp: number;
     query?: string;
     workingNote?: string;
+    status?: 'pending' | 'ok' | 'error';
+    error?: string;
+    userId?: string;
+    soulId?: string;
     categories?: Array<{ name: string; score: number; summary?: string }>;
     items?: Array<{ summary: string; score: number; memory_type: string; id?: string }>;
     resources?: any[];
@@ -21,6 +25,7 @@ let _lastInspectData: InspectData | null = null;
 
 export function stashInspectData(data: InspectData): void {
     _lastInspectData = data;
+    scheduleRefresh();
 }
 
 export function getInspectData(): InspectData | null {
@@ -29,6 +34,7 @@ export function getInspectData(): InspectData | null {
 
 function renderInspectHtml(data: InspectData): string {
     const parts: string[] = [];
+    const status = data.status || (data.error ? 'error' : 'ok');
 
     parts.push(`<div style="font-family:monospace;font-size:12px;max-height:300px;overflow-y:auto;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
     parts.push(`<div style="font-weight:bold;margin-bottom:6px;color:#7dcaf7">memU Inspect</div>`);
@@ -69,13 +75,24 @@ function renderInspectHtml(data: InspectData): string {
         parts.push(`</details>`);
     }
 
-    if (cats.length === 0 && items.length === 0 && !data.workingNote) {
+    if (status === 'error') {
+        const err = (data.error || 'unknown error').slice(0, 240);
+        parts.push(`<div style="opacity:0.9;color:#ff9d9d">(retrieve failed: ${esc(err)})</div>`);
+    } else if (status === 'pending' && cats.length === 0 && items.length === 0 && !data.workingNote) {
+        parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
+    } else if (cats.length === 0 && items.length === 0 && !data.workingNote && !data.query) {
         parts.push(`<div style="opacity:0.6">(no data from last retrieve)</div>`);
+    } else if (cats.length === 0 && items.length === 0 && data.query) {
+        parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
     }
 
-    // Timestamp
-    const age = Math.round((Date.now() - data.timestamp) / 1000);
-    parts.push(`<div style="opacity:0.5;font-size:10px;margin-top:4px">${age}s ago · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
+    // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
+    const ts = Number.isFinite(data.timestamp) ? new Date(data.timestamp) : null;
+    const stamp = ts ? ts.toLocaleTimeString() : '?';
+    parts.push(`<div style="opacity:0.5;font-size:10px;margin-top:4px">${stamp} · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
+    if (data.userId || data.soulId) {
+        parts.push(`<div style="opacity:0.55;font-size:10px">scope: user=${esc(data.userId || '?')} soul=${esc(data.soulId || '?')}</div>`);
+    }
 
     parts.push(`</div>`);
     return parts.join('');
@@ -85,49 +102,118 @@ function esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-const PANEL_ID = 'memu-inspect-panel';
+const PANEL_CLASS = 'memu-inspect-panel';
 
-function injectIntoPopup(popupEl: Element): void {
-    if (popupEl.querySelector(`#${PANEL_ID}`)) return;
-    const data = _lastInspectData;
-    if (!data) return;
+function currentInspectData(): InspectData {
+    return _lastInspectData ?? { timestamp: Date.now() };
+}
 
-    const container = document.createElement('div');
-    container.id = PANEL_ID;
-    container.innerHTML = renderInspectHtml(data);
+function ensurePanel(parent: Element): HTMLDivElement {
+    let panel = parent.querySelector(`.${PANEL_CLASS}`) as HTMLDivElement | null;
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.className = PANEL_CLASS;
+    }
+    return panel;
+}
 
-    // Find the textarea container in PI's popup and insert after it
+function isVisible(el: Element | null): boolean {
+    if (!(el instanceof HTMLElement)) return false;
+    const cs = window.getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+    return el.offsetParent !== null || cs.position === 'fixed';
+}
+
+function injectIntoLegacyPopup(popupEl: Element): void {
     const textarea = popupEl.querySelector('#inspectPrompt');
     const target = textarea?.parentElement || popupEl.querySelector('.popup-content') || popupEl;
-    target.appendChild(container);
+    const panel = ensurePanel(target);
+    const html = renderInspectHtml(currentInspectData());
+    if (panel.innerHTML !== html) {
+        panel.innerHTML = html;
+    }
+    if (!panel.parentElement) target.appendChild(panel);
+}
+
+function injectIntoPromptManagerInspect(): boolean {
+    const popup = document.getElementById('completion_prompt_manager_popup');
+    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
+    const inspectList = document.getElementById('completion_prompt_manager_popup_entry_form_inspect_list');
+    if (!popup || !inspectArea || !inspectList) return false;
+
+    const popupOpen = popup.classList.contains('openDrawer') || isVisible(popup);
+    const inspectOpen = isVisible(inspectArea) && (inspectArea as HTMLElement).style.display !== 'none';
+    if (!popupOpen || !inspectOpen) return false;
+
+    const panel = ensurePanel(inspectArea);
+    const html = renderInspectHtml(currentInspectData());
+    if (panel.innerHTML !== html) {
+        panel.innerHTML = html;
+    }
+    if (!panel.parentElement) {
+        inspectList.insertAdjacentElement('afterend', panel);
+    } else if (panel.previousElementSibling !== inspectList) {
+        inspectList.insertAdjacentElement('afterend', panel);
+    }
+    return true;
+}
+
+function refreshInspectPanels(): void {
+    injectIntoPromptManagerInspect();
+    const legacyPopup = document.querySelector('.popup');
+    if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
+        injectIntoLegacyPopup(legacyPopup);
+    }
 }
 
 let _observer: MutationObserver | null = null;
+let _promptObserver: MutationObserver | null = null;
+let _refreshQueued = false;
+
+function scheduleRefresh(): void {
+    if (_refreshQueued) return;
+    _refreshQueued = true;
+    window.requestAnimationFrame(() => {
+        _refreshQueued = false;
+        refreshInspectPanels();
+    });
+}
+
+function attachPromptVisibilityObserver(): boolean {
+    if (_promptObserver) {
+        _promptObserver.disconnect();
+        _promptObserver = null;
+    }
+
+    const targets: Element[] = [];
+    const popup = document.getElementById('completion_prompt_manager_popup');
+    const inspectArea = document.getElementById('completion_prompt_manager_popup_inspect');
+    if (popup) targets.push(popup);
+    if (inspectArea) targets.push(inspectArea);
+
+    const legacyPopup = document.querySelector('.popup');
+    if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
+        targets.push(legacyPopup);
+    }
+    if (targets.length === 0) return false;
+
+    _promptObserver = new MutationObserver(() => {
+        scheduleRefresh();
+    });
+    for (const target of targets) {
+        _promptObserver.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
+    }
+    return true;
+}
 
 export function startInspectObserver(): void {
     if (_observer) return;
 
-    _observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (!(node instanceof HTMLElement)) continue;
-                // PI's popup uses the Popup class which creates elements with class "popup"
-                const popup = node.classList.contains('popup') ? node : node.querySelector?.('.popup');
-                if (!popup) continue;
-                // Check if this is PI's popup (has #inspectPrompt textarea)
-                const check = () => {
-                    const inspectPrompt = popup.querySelector('#inspectPrompt');
-                    if (inspectPrompt) {
-                        injectIntoPopup(popup);
-                    }
-                };
-                // PI may render async; check now and after a tick
-                check();
-                setTimeout(check, 100);
-                setTimeout(check, 300);
-            }
-        }
+    // Keep a tiny observer only for hard re-mounts of prompt manager root nodes.
+    _observer = new MutationObserver(() => {
+        attachPromptVisibilityObserver();
     });
-
-    _observer.observe(document.body, { childList: true, subtree: true });
+    _observer.observe(document.documentElement, { childList: true, subtree: false });
+    attachPromptVisibilityObserver();
+    scheduleRefresh();
 }

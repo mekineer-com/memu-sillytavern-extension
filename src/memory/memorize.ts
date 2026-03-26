@@ -1,8 +1,8 @@
 import { CategoryResponse } from "memu-js";
 import { memuExtras, st, Message, MessageCollection } from "utils/context-extra";
 import { conversationRetrieve, memorizeConversation, retrieveDefaultCategories } from "utils/network";
-import { ConversationMessage, MemuSummary, MemuTaskStatus, STEventData } from "utils/types";
-import { charUpdateAddAuxWorld, createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
+import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
+import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
 import { postJsonWithCsrf } from "utils/csrf";
 import { status, info, warn, error as logError, onceWarn } from "utils/log";
@@ -92,6 +92,7 @@ function memuBookPrefixForCharacter(characterName: string): string {
 export async function ensureMemULorebooksUiOnly(): Promise<void> {
     const characterName = getCurrentCharacterNameForWorldInfo(memuExtras.baseInfo);
     const prefix = memuBookPrefixForCharacter(characterName);
+    const globalPrefix = 'memU - ';
 
     let list: WorldInfoListItem[] = [];
     try {
@@ -102,7 +103,7 @@ export async function ensureMemULorebooksUiOnly(): Promise<void> {
 
     const targets = list
         .map(x => String((x as any)?.file_id || (x as any)?.name || ''))
-        .filter(n => n && n.startsWith(prefix));
+        .filter(n => n && (n.startsWith(prefix) || n.startsWith(globalPrefix)));
 
     if (targets.length === 0) return;
 
@@ -377,6 +378,67 @@ function clearLiveRetrieveSummary(): void {
     memuExtras.retrieve = retrieve;
 }
 
+function parsePriorContext(raw: any): { summary: string; inspectText: string } {
+    if (raw == null) return { summary: '', inspectText: '' };
+
+    let obj: any = raw;
+    let parsedJson = false;
+    if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (!trimmed) return { summary: '', inspectText: '' };
+        try {
+            obj = JSON.parse(trimmed);
+            parsedJson = true;
+        } catch {
+            const clipped = trimmed.length > 2500 ? `${trimmed.slice(0, 2500)}\n\n…(truncated)` : trimmed;
+            return { summary: '', inspectText: clipped };
+        }
+    }
+
+    // Prior context should not carry categories (RAG already injects them each turn).
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        obj = { ...obj, categories: [] };
+    }
+
+    const summary = parseRetrieveResult(obj);
+    if (summary) return { summary, inspectText: summary };
+
+    if (parsedJson || (obj && typeof obj === 'object')) {
+        return { summary: '', inspectText: '' };
+    }
+
+    const asText = String(raw);
+    const clipped = asText.length > 2500 ? `${asText.slice(0, 2500)}\n\n…(truncated)` : asText;
+    return { summary: '', inspectText: clipped };
+}
+
+function formatMemoryCacheForPrompt(raw: any): string {
+    if (!Array.isArray(raw)) return '';
+    const lines = raw
+        .map((v: any) => String(v ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 7);
+    if (lines.length === 0) return '';
+    return lines.map((line) => `- ${line}`).join('\n');
+}
+
+function formatIntentionsForPrompt(raw: any): string {
+    if (!raw || typeof raw !== 'object') return '';
+    const items = Array.isArray((raw as any).items) ? (raw as any).items : [];
+    if (items.length === 0) return '';
+    const lines: string[] = [];
+    for (const row of items) {
+        if (!row || typeof row !== 'object') continue;
+        if ((row as any).active === false) continue;
+        const text = String((row as any).text ?? '').trim();
+        if (!text) continue;
+        const priority = Number((row as any).priority);
+        const p = Number.isFinite(priority) ? ` (p=${priority.toFixed(1)})` : '';
+        lines.push(`- ${text}${p}`);
+    }
+    return lines.join('\n');
+}
+
 function trackPendingAPImw(conversationId: string, promise: Promise<any>): void {
     const wrapped: Promise<void> = promise.finally(() => {
         if (_pendingAPImw?.promise === wrapped) {
@@ -389,10 +451,8 @@ function trackPendingAPImw(conversationId: string, promise: Promise<any>): void 
 async function failIfPendingAPImw(conversationId: string): Promise<void> {
     const pending = _pendingAPImw;
     if (!pending || pending.conversationId !== conversationId) return;
-    const message = `memu: previous APImw still running for ${conversationId}`;
-    (window as any).toastr?.error?.(message);
-    await st.eventSource.emit(st.event_types.GENERATION_STOPPED);
-    throw new Error(message);
+    const message = `memu: previous APImw still running for ${conversationId}; continuing RAG and skipping duplicate APImw`;
+    (window as any).toastr?.warning?.(message);
 }
 
 export function resetRetrievePipelineState(): void {
@@ -426,29 +486,92 @@ export function retrieveForLatestUserMessage(messageIdAny: any): void {
             soulId,
             queryText,
         };
+        stashInspectData({
+            timestamp: Date.now(),
+            query: queryText,
+            status: 'pending',
+            userId,
+            soulId,
+            method: 'rag',
+            conversationId,
+        });
     })();
 }
 
-export async function addPendingRetrieveToPrompt(eventData: STEventData, replaceSystem: boolean = true): Promise<void> {
-    const turn = _pendingRetrieveTurn;
+async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | null> {
+    if (_pendingRetrieveTurn) return _pendingRetrieveTurn;
+
+    try { await initChatExtraInfo(st.getContext()); } catch { }
+    if (!memuExtras.baseInfo) return null;
+
+    const ctx: any = st.getContext();
+    const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    let queryText = '';
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const item: any = chat[i];
+        const isUser = item?.is_user === true || (ctx?.name1 != null && String(item?.name || '') === String(ctx.name1));
+        if (!isUser) continue;
+        const text = typeof item?.mes === 'string' ? item.mes.trim() : '';
+        if (!text) continue;
+        queryText = text;
+        break;
+    }
+    if (!queryText) return null;
+
+    const conversationId = getChatIdSafe();
+    const userId = String(memuExtras.baseInfo.userId || '').trim();
+    const soulId = String(memuExtras.baseInfo.characterId || '').trim();
+    if (!conversationId || !userId || !soulId) return null;
+
+    return { conversationId, userId, soulId, queryText };
+}
+
+export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
+    const turn = await resolveRetrieveTurnForPrompt();
     if (!turn) {
         addSummaryToPrompt(eventData, replaceSystem);
         return;
     }
+    if (!_pendingRetrieveTurn) {
+        _pendingRetrieveTurn = turn;
+    }
 
     await failIfPendingAPImw(turn.conversationId);
-    const resp = await conversationRetrieve({
-        userId: turn.userId,
-        soulId: turn.soulId,
-        conversationId: turn.conversationId,
-        method: 'rag',
-        query: turn.queryText,
-    });
+    let resp: any;
+    try {
+        resp = await conversationRetrieve({
+            userId: turn.userId,
+            soulId: turn.soulId,
+            conversationId: turn.conversationId,
+            method: 'rag',
+            query: turn.queryText,
+        });
+    } catch (err: any) {
+        stashInspectData({
+            timestamp: Date.now(),
+            query: turn.queryText,
+            status: 'error',
+            error: err instanceof Error ? err.message : String(err),
+            userId: turn.userId,
+            soulId: turn.soulId,
+            method: 'rag',
+            conversationId: turn.conversationId,
+        });
+        throw err;
+    }
     const result = (resp as any)?.result ?? null;
+    const ragSummary = parseRetrieveResult(result);
+    const parsedPrior = parsePriorContext((resp as any)?.prior_context);
+    const workingNoteSummary = parsedPrior.summary;
+    const memoryCacheSummary = formatMemoryCacheForPrompt((resp as any)?.memory_cache);
+    const intentionSummary = formatIntentionsForPrompt((resp as any)?.active_intentions);
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
-        workingNote: (resp as any)?.prior_context != null ? String((resp as any).prior_context) : undefined,
+        status: 'ok',
+        workingNote: parsedPrior.inspectText || undefined,
+        userId: turn.userId,
+        soulId: turn.soulId,
         categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
             name: c.name || '?', score: c.score || 0, summary: c.summary,
         })) : [],
@@ -459,15 +582,21 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
         method: (resp as any)?.method,
         conversationId: (resp as any)?.conversation_id,
     });
-    const ragSummary = parseRetrieveResult(result);
-    const rawWorkingNote = (resp as any)?.prior_context;
-    const hasWorkingNote = rawWorkingNote != null && String(rawWorkingNote).trim() !== '';
-    const workingNoteSummary = hasWorkingNote
-        ? parseRetrieveResult(typeof rawWorkingNote === 'string' ? JSON.parse(rawWorkingNote) : rawWorkingNote)
-        : '';
-    const promptSummary = workingNoteSummary
-        ? [`[Prior context]\n${workingNoteSummary}`, ragSummary].filter(Boolean).join('\n\n\n')
-        : ragSummary;
+    const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
+    const promptSections: string[] = [];
+    if (hasPriorPayload) {
+        promptSections.push(`[Prior context]\n${workingNoteSummary || '(none)'}`);
+    }
+    if (memoryCacheSummary) {
+        promptSections.push(`[Memory cache]\n${memoryCacheSummary}`);
+    }
+    if (intentionSummary) {
+        promptSections.push(`[Intentions]\n${intentionSummary}`);
+    }
+    if (ragSummary) {
+        promptSections.push(`[Current retrieval]\n${ragSummary}`);
+    }
+    const promptSummary = promptSections.join('\n\n\n').trim();
     if (promptSummary) {
         setLiveRetrieveSummary(promptSummary);
         writeToStSummarizeMemory(promptSummary);
@@ -475,24 +604,21 @@ export async function addPendingRetrieveToPrompt(eventData: STEventData, replace
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
 }
 
-function getAPImwPromptInput(prompt: any): { query?: string; queries?: Array<Record<string, any> | string> } | null {
-    if (typeof prompt === 'string' && prompt) return { query: prompt };
-    if (Array.isArray(prompt) && prompt.length > 0) return { queries: prompt };
-    return null;
-}
-
 export function dispatchPendingAPImw(generateData: any): void {
     const turn = _pendingRetrieveTurn;
     if (!turn) return;
+    if (_pendingAPImw?.conversationId === turn.conversationId) {
+        _pendingRetrieveTurn = null;
+        return;
+    }
     _pendingRetrieveTurn = null;
-    const prompt = getAPImwPromptInput(generateData?.prompt);
-    if (!prompt) return;
+    void generateData;
     trackPendingAPImw(turn.conversationId, conversationRetrieve({
         userId: turn.userId,
         soulId: turn.soulId,
         conversationId: turn.conversationId,
         method: 'llm',
-        ...prompt,
+        query: turn.queryText,
     }));
 }
 
@@ -648,9 +774,6 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     const ctx: any = st.getContext();
     const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
     const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || baseInfo?.agentName || 'Character'));
-    const avatarKey = character?.avatar;
-
-    const createdBooks: string[] = [];
 
     for (const cat of categories) {
         const catName = sanitizeWorldInfoName(String((cat as any)?.name || 'category'));
@@ -669,20 +792,6 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
         const finalContent = filterCategoryForCharacter(catName, cleaned, characterName, baseInfo?.userName);
 
         await upsertWorldInfoLorebook(bookName, buildWorldInfoFileData(bookName, catName, finalContent));
-        createdBooks.push(bookName);
-    }
-
-    // Attach created lorebooks to the current character so they show up under Character → Lorebooks.
-    // IMPORTANT: attach *all* created books. Entries are disabled (UI-only) by default, so attaching
-    // does not inject them into prompts; it just makes them visible for debugging and manual enabling.
-    if (avatarKey && createdBooks.length > 0) {
-        try {
-            await charUpdateAddAuxWorld(String(avatarKey), createdBooks);
-        } catch (e) {
-            onceWarn("lorebooks-attach-failed", "lorebooks attach failed");
-        }
-    } else if (!avatarKey && createdBooks.length > 0) {
-        onceWarn("lorebooks-no-avatar", "lorebooks not attached (no avatar)");
     }
 
 
@@ -697,7 +806,7 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
 }
 
 export function addSummaryToPrompt(
-    eventData: STEventData,
+    eventData: any,
     replaceSystem: boolean = true,
     summaryOverride?: string | null,
 ): void {
@@ -707,7 +816,7 @@ export function addSummaryToPrompt(
     if (!memuSummary) {
         return;
     }
-    if (replaceSystem) {
+    if (replaceSystem && Array.isArray(eventData?.chat)) {
         const summary = findSystemSummary(st.promptManager.messages);
         if (summary) {
             replaceSystemSummary(summary, memuSummary, eventData);
@@ -717,8 +826,9 @@ export function addSummaryToPrompt(
     addSummary(memuSummary, eventData);
 }
 
-function replaceSystemSummary(summary: string, memuSummary: string, eventData: STEventData): void {
-    eventData.chat.forEach(msg => {
+function replaceSystemSummary(summary: string, memuSummary: string, eventData: any): void {
+    if (!Array.isArray(eventData?.chat)) return;
+    eventData.chat.forEach((msg: any) => {
         if (msg.content === summary) {
                         msg.content = memuSummary;
             return;
@@ -726,12 +836,18 @@ function replaceSystemSummary(summary: string, memuSummary: string, eventData: S
     });
 }
 
-function addSummary(memuSummary: string, eventData: STEventData): void {
-    eventData.chat.unshift({
-        role: 'system',
-        content: memuSummary,
-    });
+function addSummary(memuSummary: string, eventData: any): void {
+    if (Array.isArray(eventData?.chat)) {
+        eventData.chat.unshift({
+            role: 'system',
+            content: memuSummary,
+        });
+        return;
     }
+    if (typeof eventData?.prompt === 'string') {
+        eventData.prompt = `${memuSummary}\n\n${eventData.prompt}`;
+    }
+}
 
 /**
  * @copy from @silly-tavern/scripts/openai.js
@@ -775,26 +891,47 @@ function parseRetrieveResult(result: any): string {
 
     const blocks: string[] = [];
     const categoryText = parseSummary(categories);
-    if (categoryText) blocks.push(categoryText);
+    if (categoryText) blocks.push(`[Categories]\n${categoryText}`);
 
+    const dedupeKey = (text: string): string =>
+        String(text || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    const catKey = dedupeKey(categoryText);
+    const seenItemKeys = new Set<string>();
     const itemLines = items
         .map((item: any) => {
             const summary = String(item?.summary ?? '').trim();
             if (!summary) return '';
+            const key = dedupeKey(summary);
+            if (!key) return '';
+            if (seenItemKeys.has(key)) return '';
+            // If item summary is already captured in category summaries, skip to avoid token duplication.
+            if (catKey && key.length >= 24 && catKey.includes(key)) return '';
+            seenItemKeys.add(key);
             const memoryType = String(item?.memory_type ?? item?.memoryType ?? 'memory').trim();
             return `[${memoryType}] ${summary}`;
         })
         .filter(Boolean);
-    if (itemLines.length > 0) blocks.push(itemLines.join('\n\n'));
+    if (itemLines.length > 0) blocks.push(`[Items]\n${itemLines.join('\n\n')}`);
 
+    const seenResourceKeys = new Set<string>();
     const resourceLines = resources
         .map((resource: any) => {
             const caption = String(resource?.caption ?? '').trim();
             const url = String(resource?.url ?? '').trim();
-            return caption || url;
+            const value = caption || url;
+            if (!value) return '';
+            const key = dedupeKey(value);
+            if (!key || seenResourceKeys.has(key)) return '';
+            if (catKey && key.length >= 24 && catKey.includes(key)) return '';
+            seenResourceKeys.add(key);
+            return value;
         })
         .filter(Boolean);
-    if (resourceLines.length > 0) blocks.push(resourceLines.join('\n\n'));
+    if (resourceLines.length > 0) blocks.push(`[Resources]\n${resourceLines.join('\n\n')}`);
 
     return blocks.join('\n\n\n').trim();
 }

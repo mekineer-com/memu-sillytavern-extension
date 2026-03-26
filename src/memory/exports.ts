@@ -11,7 +11,8 @@ import {
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe } from "utils/network";
-import { info } from "utils/log";
+import { info, warn } from "utils/log";
+import { getInspectData, stashInspectData } from "ui/inspect-panel";
 
 const summaryIfNeedDebounced = st.debounce(() => {
     try {
@@ -115,7 +116,23 @@ export function onMessageSwiped(_msgIdAny: any): void {
 
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
-    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+    try {
+        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+    } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        warn(`memu retrieve skipped: ${msg}`);
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            status: 'error',
+            error: msg,
+        });
+    }
+}
+
+export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
+    await onChatCompletionPromptReady(eventData);
 }
 
 export function onGenerateAfterData(generateData: any, dryRun?: boolean): void {

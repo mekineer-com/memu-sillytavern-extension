@@ -5,8 +5,16 @@ import { estimateTokenUsage } from "utils/utils";
 function getStableLocalUserId(fallback: string | undefined): string {
     try {
         const existing = LOCAL_USER_ID.get();
-        if (existing && existing.trim()) return existing.trim();
         const seed = (fallback || '').trim();
+        if (existing && existing.trim()) {
+            const current = existing.trim();
+            // If the only difference is casing, keep it aligned with the visible ST username.
+            if (seed && current.toLowerCase() === seed.toLowerCase() && current !== seed) {
+                LOCAL_USER_ID.set(seed);
+                return seed;
+            }
+            return current;
+        }
         if (seed) {
             LOCAL_USER_ID.set(seed);
             return seed;
