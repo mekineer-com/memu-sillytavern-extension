@@ -477,6 +477,8 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             conversationId: turn.conversationId,
             method: 'rag',
             query: turn.queryText,
+            history: turn.history,
+            buildTurnPrompt: true,
         });
     } catch (err: any) {
         stashInspectData({
@@ -527,7 +529,29 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         resources: result?.resources,
         method: (resp as any)?.method,
         conversationId: (resp as any)?.conversation_id,
+        turnSystemPrompt: typeof (resp as any)?.turn_system_prompt === 'string'
+            ? (resp as any).turn_system_prompt : undefined,
+        turnPrompt: typeof (resp as any)?.turn_user_prompt === 'string'
+            ? (resp as any).turn_user_prompt : undefined,
+        turnStatus: ((resp as any)?.turn_system_prompt && (resp as any)?.turn_user_prompt)
+            ? 'ok' : undefined,
     });
+    const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
+        ? (resp as any).turn_system_prompt.trim() : '';
+    const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
+        ? (resp as any).turn_user_prompt.trim() : '';
+    if (turnSystemPrompt && turnUserPrompt && Array.isArray(eventData?.chat)) {
+        // Replace ST's entire chat array with the turn prompts.
+        // This is intentional — the soul's full context comes from memU,
+        // not from ST's character card / prompt assembly.
+        eventData.chat.length = 0;
+        eventData.chat.push(
+            { role: 'system', content: turnSystemPrompt },
+            { role: 'user', content: turnUserPrompt },
+        );
+        return; // Done — skip the old summary injection path
+    }
+
     const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
     const promptSections: string[] = [];
     if (hasPriorPayload) {

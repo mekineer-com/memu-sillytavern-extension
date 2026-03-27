@@ -22,6 +22,8 @@ export type ConversationRetrieveRequest = {
   method: 'rag' | 'llm';
   query?: string;
   queries?: Array<Record<string, any> | string>;
+  history?: Array<Record<string, any>>;
+  buildTurnPrompt?: boolean;
 };
 export type ConversationRetrieveResponse = {
   ok: boolean;
@@ -32,6 +34,10 @@ export type ConversationRetrieveResponse = {
   method?: string;
   conversation_id?: string;
   queries?: number;
+  turn_system_prompt?: string;
+  turn_user_prompt?: string;
+  memory_cache?: any[];
+  active_intentions?: any;
 };
 export type ConversationTurnRequest = {
   userId: string;

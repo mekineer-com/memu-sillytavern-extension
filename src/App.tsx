@@ -76,6 +76,8 @@ export default function App() {
   const [memoryText, setMemoryText] = useState<string>('');
   const [eyeHover, setEyeHover] = useState<boolean>(false);
   const skipNextAutosaveRef = useRef<boolean>(true);
+  const profilesSigRef = useRef<string>('');
+  const prevDefaultIsHordeRef = useRef<boolean>(false);
 
   useEffect(() => {
     st.eventSource.on(st.event_types.CHAT_CHANGED, () => {
@@ -114,12 +116,30 @@ export default function App() {
         }
 
         const prof = await getConnectionProfiles();
-        if (Array.isArray(prof?.profiles)) setProfiles(prof.profiles);
+        if (Array.isArray(prof?.profiles)) {
+          const sig = JSON.stringify(prof.profiles);
+          profilesSigRef.current = sig;
+          setProfiles(prof.profiles);
+        }
       } catch {
         setPluginOk(false);
       }
     })();
   }, []);
+
+  async function refreshProfiles(): Promise<void> {
+    try {
+      if (!pluginOk) return;
+      const prof = await getConnectionProfiles();
+      if (!Array.isArray(prof?.profiles)) return;
+      const sig = JSON.stringify(prof.profiles);
+      if (sig === profilesSigRef.current) return;
+      profilesSigRef.current = sig;
+      setProfiles(prof.profiles);
+    } catch {
+      // ignore
+    }
+  }
 
   // memory ui prefs
   useEffect(() => {
@@ -143,6 +163,36 @@ export default function App() {
     if (!pluginOk) return;
     void refreshServerCtl();
   }, [pluginOk, (pluginConfig as any)?.serverPath, (pluginConfig as any)?.autoStartServer]);
+
+  useEffect(() => {
+    if (!pluginOk) return;
+    const t = window.setInterval(() => {
+      void refreshProfiles();
+    }, 5000);
+
+    const onFocus = () => { void refreshProfiles(); };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refreshProfiles();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const settingsUpdatedEvent = (st as any)?.event_types?.SETTINGS_UPDATED;
+    const eventSourceAny = (st as any)?.eventSource;
+    const onSettingsUpdated = () => { void refreshProfiles(); };
+    if (settingsUpdatedEvent && eventSourceAny?.on) {
+      eventSourceAny.on(settingsUpdatedEvent, onSettingsUpdated);
+    }
+
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (settingsUpdatedEvent && eventSourceAny?.removeListener) {
+        eventSourceAny.removeListener(settingsUpdatedEvent, onSettingsUpdated);
+      }
+    };
+  }, [pluginOk]);
 
   async function doServerStart() {
     setServerCtlBusy('working');
@@ -264,12 +314,31 @@ export default function App() {
     if (!defaultIsHorde) return;
     if (showAdvancedMapping) return;
     setShowAdvancedMapping(true);
+  }, [defaultIsHorde, showAdvancedMapping]);
+
+  useEffect(() => {
+    const prev = prevDefaultIsHordeRef.current;
+    prevDefaultIsHordeRef.current = defaultIsHorde;
+    if (!prev || defaultIsHorde) return;
+
+    const stepMap = (pluginConfig as any)?.stepProfileId;
+    const hasExplicitOverrides = !!(
+      stepMap &&
+      typeof stepMap === 'object' &&
+      Object.values(stepMap).some((v) => {
+        const s = String(v ?? '').trim();
+        return !!s && s !== 'default';
+      })
+    );
+    if (hasExplicitOverrides) return;
+
+    setShowAdvancedMapping(false);
     try {
-      SHOW_ADVANCED_MAPPING.set(true);
+      SHOW_ADVANCED_MAPPING.set(false);
     } catch {
       // ignore
     }
-  }, [defaultIsHorde, showAdvancedMapping]);
+  }, [defaultIsHorde, pluginConfig?.stepProfileId]);
 
   useEffect(() => {
     const selected = String(pluginConfig?.embeddingModelSelected || '').trim();

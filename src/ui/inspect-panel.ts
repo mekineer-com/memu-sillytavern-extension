@@ -79,16 +79,6 @@ function renderInspectHtml(data: InspectData): string {
         const sp = String(data.turnSystemPrompt || '');
         const up = String(data.turnPrompt || '');
         parts.push(`<div style="opacity:0.75">turn prompt chars: user=${up.length} system=${sp.length}</div>`);
-        if (sp) {
-            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn System Prompt</b></summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(sp)}</pre>`);
-            parts.push(`</details>`);
-        }
-        if (up) {
-            parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn User Prompt</b></summary>`);
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:220px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(up)}</pre>`);
-            parts.push(`</details>`);
-        }
     }
 
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
