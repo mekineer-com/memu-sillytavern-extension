@@ -24,6 +24,7 @@ export type ConversationRetrieveRequest = {
   queries?: Array<Record<string, any> | string>;
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
+  soul_card?: string;
 };
 export type ConversationRetrieveResponse = {
   ok: boolean;
@@ -49,6 +50,7 @@ export type ConversationTurnRequest = {
   waitApimw?: boolean;
   dryRun?: boolean;
   debug?: boolean;
+  soul_card?: string;
 };
 export type ConversationTurnResponse = {
   ok: boolean;

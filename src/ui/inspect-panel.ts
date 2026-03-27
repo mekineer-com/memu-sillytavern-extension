@@ -43,7 +43,7 @@ function renderInspectHtml(data: InspectData): string {
     const parts: string[] = [];
     const status = data.status || (data.error ? 'error' : 'ok');
 
-    parts.push(`<div style="font-family:monospace;font-size:12px;max-height:300px;overflow:auto;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
+    parts.push(`<div style="font-family:monospace;font-size:12px;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
     parts.push(`<div style="font-weight:bold;margin-bottom:6px;color:#7dcaf7">memU Inspect</div>`);
 
     const cats = data.categories || [];

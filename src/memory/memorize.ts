@@ -357,7 +357,7 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
     if (!Array.isArray(chat) || endIdx < 0) return [];
     const start = Math.max(0, endIdx - 39);
     const out: Array<Record<string, any>> = [];
-    for (let i = start; i <= endIdx && i < chat.length; i++) {
+    for (let i = start; i < endIdx && i < chat.length; i++) {
         const row: any = chat[i];
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
@@ -425,6 +425,9 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         _pendingRetrieveTurn = turn;
     }
 
+    const retrieveCtx: any = st.getContext();
+    const retrieveSoulCard = String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim() || undefined;
+
     let resp: any;
     try {
         resp = await conversationRetrieve({
@@ -435,6 +438,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             query: turn.queryText,
             history: turn.history,
             buildTurnPrompt: true,
+            soul_card: retrieveSoulCard,
         });
     } catch (err: any) {
         stashInspectData({
@@ -552,6 +556,9 @@ export async function dispatchConversationTurn(
         });
     }
 
+    const turnCtx: any = st.getContext();
+    const turnSoulCard = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim() || undefined;
+
     const resp = await conversationTurn({
         userId: turn.userId,
         soulId: turn.soulId,
@@ -561,6 +568,7 @@ export async function dispatchConversationTurn(
         runApimw: true,
         waitApimw: false,
         debug: includeDebug,
+        soul_card: turnSoulCard,
     });
 
     const reply = String(resp?.response ?? '').trim();
