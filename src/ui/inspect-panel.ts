@@ -9,7 +9,7 @@
 export type InspectData = {
     timestamp: number;
     query?: string;
-    workingNote?: string;
+    priorContext?: string;
     memoryCache?: string[];
     intentions?: Array<{ text: string; priority?: number; active?: boolean; ephemeral?: boolean }>;
     status?: 'pending' | 'ok' | 'error';

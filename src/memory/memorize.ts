@@ -452,7 +452,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const result = (resp as any)?.result ?? null;
     const ragSummary = parseRetrieveResult(result);
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
-    const workingNoteSummary = parsedPrior.summary;
+    const priorContextSummary = parsedPrior.summary;
     const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
     const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active?.items) ? (resp as any).intentions_active.items : [];
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
@@ -461,7 +461,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         timestamp: Date.now(),
         query: turn.queryText,
         status: 'ok',
-        workingNote: parsedPrior.inspectText || undefined,
+        priorContext: parsedPrior.inspectText || undefined,
         memoryCache: memoryCacheRaw
             .map((v: any) => String(v ?? '').trim())
             .filter(Boolean)
@@ -511,7 +511,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
     const promptSections: string[] = [];
     if (hasPriorPayload) {
-        promptSections.push(`[Prior context]\n${workingNoteSummary || '(none)'}`);
+        promptSections.push(`[Prior context]\n${priorContextSummary || '(none)'}`);
     }
     if (memoryCacheSummary) {
         promptSections.push(`[Memory cache]\n${memoryCacheSummary}`);
