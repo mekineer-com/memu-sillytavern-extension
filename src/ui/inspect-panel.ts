@@ -21,11 +21,15 @@ export type InspectData = {
     resources?: any[];
     method?: string;
     conversationId?: string;
+    retrieveMs?: number;
     turnStatus?: 'pending' | 'ok' | 'error';
     turnError?: string;
     turnContract?: any;
     turnPrompt?: string;
     turnSystemPrompt?: string;
+    turnMs?: number;
+    apimwStatus?: string;
+    replyCh?: number;
 };
 
 let _lastInspectData: InspectData | null = null;
@@ -50,7 +54,14 @@ function renderInspectHtml(data: InspectData): string {
     const items = data.items || [];
     const resources = Array.isArray(data.resources) ? data.resources : [];
 
-    parts.push(`<div style="margin-bottom:6px"><b>Retrieve:</b> status=${esc(status)} categories=${cats.length} items=${items.length} resources=${resources.length}</div>`);
+    const rmsStr = data.retrieveMs != null ? ` ${data.retrieveMs}ms` : '';
+    parts.push(`<div style="margin-bottom:4px"><b>Retrieve:</b> status=${esc(status)} cats=${cats.length} items=${items.length} res=${resources.length}${rmsStr}</div>`);
+    const pcCh = data.priorContext ? data.priorContext.length : 0;
+    const mcN = data.memoryCache ? data.memoryCache.length : 0;
+    const intN = data.intentions ? data.intentions.length : 0;
+    if (pcCh || mcN || intN) {
+        parts.push(`<div style="opacity:0.7;margin-bottom:4px;font-size:11px">prior_ctx=${pcCh}ch · cache=${mcN} · intentions=${intN}</div>`);
+    }
 
     if (status === 'error') {
         const err = String(data.error || 'unknown error');
@@ -78,7 +89,12 @@ function renderInspectHtml(data: InspectData): string {
         parts.push(`</details>`);
         const sp = String(data.turnSystemPrompt || '');
         const up = String(data.turnPrompt || '');
-        parts.push(`<div style="opacity:0.75">turn prompt chars: user=${up.length} system=${sp.length}</div>`);
+        const tmsStr = data.turnMs != null ? ` · turn=${data.turnMs}ms` : '';
+        const repStr = data.replyCh != null ? ` · reply=${data.replyCh}ch` : '';
+        parts.push(`<div style="opacity:0.75">prompt: user=${up.length}ch sys=${sp.length}ch${repStr}${tmsStr}</div>`);
+        if (data.apimwStatus) {
+            parts.push(`<div style="opacity:0.75">apimw: ${esc(data.apimwStatus)}</div>`);
+        }
     }
 
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)

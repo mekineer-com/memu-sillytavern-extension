@@ -39,6 +39,7 @@ export type ConversationRetrieveResponse = {
   turn_user_prompt?: string;
   memory_cache?: any[];
   intentions_active?: any;
+  retrieve_ms?: number;
 };
 export type ConversationTurnRequest = {
   userId: string;
@@ -64,6 +65,11 @@ export type ConversationTurnResponse = {
   turn_system_prompt?: string;
   dry_run?: boolean;
   annulment_memory_ids?: string[];
+  retrieve_ms?: number;
+  turn_ms?: number;
+  reply_chars?: number;
+  turn_prompt_chars?: number;
+  turn_system_chars?: number;
 };
 export type ScopeStorageProbeResponse = {
   ok: boolean;

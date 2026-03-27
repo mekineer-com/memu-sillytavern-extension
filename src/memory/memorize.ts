@@ -5,7 +5,7 @@ import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
 import { status, warn, error as logError, onceWarn } from "utils/log";
-import { getInspectData, stashInspectData } from "ui/inspect-panel";
+import { getInspectData, stashInspectData, InspectData } from "ui/inspect-panel";
 
 let isSummarying = false;
 
@@ -489,6 +489,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         resources: result?.resources,
         method: (resp as any)?.method,
         conversationId: (resp as any)?.conversation_id,
+        retrieveMs: typeof (resp as any)?.retrieve_ms === 'number' ? (resp as any).retrieve_ms : undefined,
         turnSystemPrompt: typeof (resp as any)?.turn_system_prompt === 'string'
             ? (resp as any).turn_system_prompt : undefined,
         turnPrompt: typeof (resp as any)?.turn_user_prompt === 'string'
@@ -577,22 +578,26 @@ export async function dispatchConversationTurn(
     }
     (generateData as any).__memu_direct_reply = reply;
 
+    const prev2 = getInspectData();
+    const turnUpdate: InspectData = {
+        ...(prev2 || { timestamp: Date.now() }),
+        timestamp: Date.now(),
+        turnStatus: 'ok',
+        apimwStatus: typeof resp?.apimw === 'string' ? resp.apimw : undefined,
+        turnMs: typeof (resp as any)?.turn_ms === 'number' ? (resp as any).turn_ms : undefined,
+        replyCh: reply.length,
+    };
     if (includeDebug) {
-        const prev2 = getInspectData();
-        stashInspectData({
-            ...(prev2 || { timestamp: Date.now() }),
-            timestamp: Date.now(),
-            query: turn.queryText,
-            userId: turn.userId,
-            soulId: turn.soulId,
-            method: 'turn',
-            conversationId: turn.conversationId,
-            turnStatus: 'ok',
-            turnContract: resp?.turn_contract,
-            turnPrompt: typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined,
-            turnSystemPrompt: typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined,
-        });
+        turnUpdate.query = turn.queryText;
+        turnUpdate.userId = turn.userId;
+        turnUpdate.soulId = turn.soulId;
+        turnUpdate.method = 'turn';
+        turnUpdate.conversationId = turn.conversationId;
+        turnUpdate.turnContract = resp?.turn_contract;
+        turnUpdate.turnPrompt = typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined;
+        turnUpdate.turnSystemPrompt = typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined;
     }
+    stashInspectData(turnUpdate);
 }
 
 // --- World Info sync (view memU memories inside ST) ---
