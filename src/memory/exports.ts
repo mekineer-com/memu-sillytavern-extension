@@ -3,7 +3,6 @@ import {
     addPendingRetrieveToPrompt,
     summaryIfNeed,
     getChatIdSafe,
-    retrieveForLatestUserMessage,
     dispatchConversationTurn,
     dropPendingTurnIfStopped,
     resetRetrievePipelineState,
@@ -115,9 +114,7 @@ export function onMessageReceived(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
 
-export function onUserMessageSent(msgIdAny: any): void {
-    retrieveForLatestUserMessage(msgIdAny);
-}
+export function onUserMessageSent(_msgIdAny: any): void { }
 
 export function onMessageEdited(_msgIdAny: any): void {
     summaryIfNeedDebounced();

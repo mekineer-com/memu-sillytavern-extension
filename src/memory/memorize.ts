@@ -386,51 +386,7 @@ export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
     return false;
 }
 
-export function retrieveForLatestUserMessage(messageIdAny: any): void {
-    void (async () => {
-        try { await initChatExtraInfo(st.getContext()); } catch { }
-        if (!memuExtras.baseInfo) return;
-
-        const ctx: any = st.getContext();
-        const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
-        const messageId = Number(messageIdAny);
-        const idx = Number.isFinite(messageId) ? messageId : (chat.length - 1);
-        if (idx < 0 || idx >= chat.length) return;
-
-        const chatItem: any = chat[idx];
-        const rawText = typeof chatItem?.mes === 'string' ? chatItem.mes : '';
-        const queryText = rawText.trim();
-        if (!queryText) return;
-
-        const conversationId = getChatIdSafe();
-        const userId = String(memuExtras.baseInfo.userId || '').trim();
-        const soulId = String(memuExtras.baseInfo.characterId || '').trim();
-        if (!conversationId || !userId || !soulId) return;
-        const history = buildTurnHistory(chat, idx, String(ctx?.name1 || ''));
-        clearLiveRetrieveSummary();
-        _pendingRetrieveTurn = {
-            createdAt: Date.now(),
-            conversationId,
-            userId,
-            soulId,
-            queryText,
-            history,
-        };
-        stashInspectData({
-            timestamp: Date.now(),
-            query: queryText,
-            status: 'pending',
-            userId,
-            soulId,
-            method: 'rag',
-            conversationId,
-        });
-    })();
-}
-
 async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | null> {
-    if (_pendingRetrieveTurn) return _pendingRetrieveTurn;
-
     try { await initChatExtraInfo(st.getContext()); } catch { }
     if (!memuExtras.baseInfo) return null;
 
