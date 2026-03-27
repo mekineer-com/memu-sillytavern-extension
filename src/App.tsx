@@ -321,11 +321,13 @@ export default function App() {
     prevDefaultIsHordeRef.current = defaultIsHorde;
     if (!prev || defaultIsHorde) return;
 
+    const advancedSteps: MemuStep[] = ['preprocess', 'memory_extract', 'category_update', 'reflection', 'ranking'];
     const stepMap = (pluginConfig as any)?.stepProfileId;
     const hasExplicitOverrides = !!(
       stepMap &&
       typeof stepMap === 'object' &&
-      Object.values(stepMap).some((v) => {
+      advancedSteps.some((k) => {
+        const v = (stepMap as any)?.[k];
         const s = String(v ?? '').trim();
         return !!s && s !== 'default';
       })
