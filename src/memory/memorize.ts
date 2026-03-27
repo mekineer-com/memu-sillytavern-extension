@@ -498,9 +498,9 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
     const workingNoteSummary = parsedPrior.summary;
     const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
-    const intentionItemsRaw = Array.isArray((resp as any)?.active_intentions?.items) ? (resp as any).active_intentions.items : [];
+    const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active?.items) ? (resp as any).intentions_active.items : [];
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
-    const intentionSummary = formatIntentionsForPrompt((resp as any)?.active_intentions);
+    const intentionSummary = formatIntentionsForPrompt((resp as any)?.intentions_active);
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,

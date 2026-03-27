@@ -37,7 +37,7 @@ export type ConversationRetrieveResponse = {
   turn_system_prompt?: string;
   turn_user_prompt?: string;
   memory_cache?: any[];
-  active_intentions?: any;
+  intentions_active?: any;
 };
 export type ConversationTurnRequest = {
   userId: string;
