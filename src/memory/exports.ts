@@ -9,7 +9,7 @@ import {
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
-import { getPluginPing, scopeStorageProbe } from "utils/network";
+import { getPluginPing, scopeStorageProbe, conversationTurnUndo, conversationCacheClear } from "utils/network";
 import { info, warn } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
@@ -120,8 +120,25 @@ export function onMessageEdited(_msgIdAny: any): void {
     summaryIfNeedDebounced();
 }
 
+export function onMessageDeleted(): void {
+    const ctx = st.getContext();
+    const conversationId = getChatIdSafe();
+    const userId = String(ctx.name1 || '');
+    const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
+    if (conversationId && userId && soulId) {
+        void conversationCacheClear(conversationId, userId, soulId).catch(() => {});
+    }
+}
+
 export function onMessageSwiped(_msgIdAny: any): void {
     summaryIfNeedDebounced();
+    const ctx = st.getContext();
+    const conversationId = getChatIdSafe();
+    const userId = String(ctx.name1 || '');
+    const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
+    if (conversationId && userId && soulId) {
+        void conversationTurnUndo(conversationId, userId, soulId).catch(() => {});
+    }
 }
 
 export function onGenerationStopped(): void {

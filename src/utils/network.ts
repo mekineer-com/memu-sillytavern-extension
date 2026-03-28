@@ -154,6 +154,14 @@ export async function conversationTurn(body: ConversationTurnRequest): Promise<C
   return request<ConversationTurnResponse>('/conversationTurn', body);
 }
 
+export async function conversationTurnUndo(conversationId: string, userId: string, soulId: string): Promise<{ status: string }> {
+  return request<{ status: string }>('/conversationTurnUndo', { conversationId, userId, soulId });
+}
+
+export async function conversationCacheClear(conversationId: string, userId: string, soulId: string): Promise<{ status: string }> {
+  return request<{ status: string }>('/conversationCacheClear', { conversationId, userId, soulId });
+}
+
 export async function scopeStorageProbe(userId: string, soulId: string): Promise<ScopeStorageProbeResponse> {
   return request<ScopeStorageProbeResponse>('/scopeStorageProbe', { userId, soulId });
 }

@@ -47,7 +47,7 @@ function renderInspectHtml(data: InspectData): string {
     const parts: string[] = [];
     const status = data.status || (data.error ? 'error' : 'ok');
 
-    parts.push(`<div style="font-family:monospace;font-size:12px;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
+    parts.push(`<div style="font-family:monospace;font-size:13px;pointer-events:auto;user-select:text;overscroll-behavior:contain;position:relative;z-index:5;padding:8px;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px;border:1px solid rgba(128,128,128,0.3)">`);
     parts.push(`<div style="font-weight:bold;margin-bottom:6px;color:#7dcaf7">memU Inspect</div>`);
 
     const cats = data.categories || [];
@@ -60,13 +60,13 @@ function renderInspectHtml(data: InspectData): string {
     const mcN = data.memoryCache ? data.memoryCache.length : 0;
     const intN = data.intentions ? data.intentions.length : 0;
     if (pcCh || mcN || intN) {
-        parts.push(`<div style="opacity:0.7;margin-bottom:4px;font-size:11px">prior_apimw=${pcCh}ch · cache=${mcN} · intentions=${intN}</div>`);
+        parts.push(`<div style="opacity:0.7;margin-bottom:4px;font-size:12px">prior_apimw=${pcCh}ch · cache=${mcN} · intentions=${intN}</div>`);
     }
 
     if (status === 'error') {
         const err = String(data.error || 'unknown error');
         parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Retrieve Error</b></div>`);
-        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:12px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
     } else if (status === 'pending') {
         parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
     } else if (cats.length === 0 && items.length === 0 && resources.length === 0) {
@@ -78,11 +78,11 @@ function renderInspectHtml(data: InspectData): string {
     } else if (data.turnStatus === 'error') {
         const err = String(data.turnError || 'unknown error');
         parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Turn Error</b></div>`);
-        parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
+        parts.push(`<pre style="white-space:pre-wrap;font-size:12px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
     } else if (data.turnStatus === 'ok') {
         parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract</b></summary>`);
         if (data.turnContract) {
-            parts.push(`<pre style="white-space:pre-wrap;font-size:11px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
+            parts.push(`<pre style="white-space:pre-wrap;font-size:12px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
         } else {
             parts.push(`<div style="opacity:0.7">(no contract returned)</div>`);
         }
@@ -100,9 +100,9 @@ function renderInspectHtml(data: InspectData): string {
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
     const ts = Number.isFinite(data.timestamp) ? new Date(data.timestamp) : null;
     const stamp = ts ? ts.toLocaleTimeString() : '?';
-    parts.push(`<div style="opacity:0.5;font-size:10px;margin-top:4px">${stamp} · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
+    parts.push(`<div style="opacity:0.5;font-size:11px;margin-top:4px">${stamp} · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
     if (data.userId || data.soulId) {
-        parts.push(`<div style="opacity:0.55;font-size:10px">scope: user=${esc(data.userId || '?')} soul=${esc(data.soulId || '?')}</div>`);
+        parts.push(`<div style="opacity:0.55;font-size:11px">scope: user=${esc(data.userId || '?')} soul=${esc(data.soulId || '?')}</div>`);
     }
 
     parts.push(`</div>`);

@@ -10,6 +10,7 @@ import {
     onMessageEdited,
     onMessageReceived,
     onMessageSwiped,
+    onMessageDeleted,
     onUserMessageSent,
 } from 'memory/exports';
 import { st } from './utils/context-extra';
@@ -37,6 +38,7 @@ function installHooksWithRetry(): void {
             st.eventSource.on(st.event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
             st.eventSource.on(st.event_types.MESSAGE_EDITED, onMessageEdited);
             st.eventSource.on(st.event_types.MESSAGE_SWIPED, onMessageSwiped);
+            st.eventSource.on(st.event_types.MESSAGE_DELETED, onMessageDeleted);
             return true;
         } catch (e) {
             logError("hooks install failed", e);
