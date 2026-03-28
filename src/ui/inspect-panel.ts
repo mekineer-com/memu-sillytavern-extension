@@ -60,7 +60,7 @@ function renderInspectHtml(data: InspectData): string {
     const mcN = data.memoryCache ? data.memoryCache.length : 0;
     const intN = data.intentions ? data.intentions.length : 0;
     if (pcCh || mcN || intN) {
-        parts.push(`<div style="opacity:0.7;margin-bottom:4px;font-size:11px">prior_ctx=${pcCh}ch · cache=${mcN} · intentions=${intN}</div>`);
+        parts.push(`<div style="opacity:0.7;margin-bottom:4px;font-size:11px">prior_apimw=${pcCh}ch · cache=${mcN} · intentions=${intN}</div>`);
     }
 
     if (status === 'error') {
