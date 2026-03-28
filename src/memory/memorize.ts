@@ -595,7 +595,7 @@ export async function dispatchConversationTurn(
         turnUpdate.method = 'turn';
         turnUpdate.conversationId = turn.conversationId;
         turnUpdate.turnContract = resp?.turn_contract;
-        turnUpdate.turnPrompt = typeof resp?.turn_prompt === 'string' ? resp.turn_prompt : undefined;
+        turnUpdate.turnPrompt = typeof resp?.turn_user_prompt === 'string' ? resp.turn_user_prompt : undefined;
         turnUpdate.turnSystemPrompt = typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined;
     }
     stashInspectData(turnUpdate);
