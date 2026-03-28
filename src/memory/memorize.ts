@@ -441,6 +441,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             soul_card: retrieveSoulCard,
         });
     } catch (err: any) {
+        _pendingRetrieveTurn = null;
         stashInspectData({
             timestamp: Date.now(),
             query: turn.queryText,
