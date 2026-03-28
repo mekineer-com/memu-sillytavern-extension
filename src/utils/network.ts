@@ -61,7 +61,7 @@ export type ConversationTurnResponse = {
   state?: any;
   path?: string;
   turn_contract?: any;
-  turn_prompt?: string;
+  turn_user_prompt?: string;
   turn_system_prompt?: string;
   dry_run?: boolean;
   annulment_memory_ids?: string[];
