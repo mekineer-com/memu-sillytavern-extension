@@ -496,7 +496,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         turnPrompt: typeof (resp as any)?.turn_user_prompt === 'string'
             ? (resp as any).turn_user_prompt : undefined,
         turnStatus: ((resp as any)?.turn_system_prompt && (resp as any)?.turn_user_prompt)
-            ? 'ok' : undefined,
+            ? 'pending' : undefined,
     });
     const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
         ? (resp as any).turn_system_prompt.trim() : '';
