@@ -2,6 +2,7 @@ import { CategoryResponse } from "memu-js";
 import { memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
+import { getChatCompletionModel, oai_settings } from "@silly-tavern/scripts/openai.js";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
 import { status, warn, error as logError, onceWarn } from "utils/log";
@@ -397,6 +398,62 @@ function _chatContentText(raw: any): string {
     return '';
 }
 
+function _numberOr(value: any, fallback: number): number {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function _intOr(value: any, fallback: number): number {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    const x = Math.trunc(n);
+    return x > 0 ? x : fallback;
+}
+
+function _compactObject<T extends Record<string, any>>(obj: T): T {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj || {})) {
+        if (v === undefined || v === null) continue;
+        if (typeof v === 'string' && !v.trim()) continue;
+        out[k] = v;
+    }
+    return out as T;
+}
+
+function buildStChatCompletionPayload(): {
+    temperature: number;
+    max_tokens: number;
+    response_format: { type: 'json_object' };
+    st_chat_completion: Record<string, any>;
+} {
+    const settings: any = (oai_settings as any) || {};
+    const source = String(settings.chat_completion_source || '').trim();
+    const model = String(getChatCompletionModel(settings) || '').trim();
+
+    return {
+        temperature: _numberOr(settings.temp_openai, 0.2),
+        max_tokens: _intOr(settings.openai_max_tokens, 1000),
+        response_format: { type: 'json_object' },
+        st_chat_completion: _compactObject({
+            source,
+            model,
+            top_p: _numberOr(settings.top_p_openai, 1.0),
+            frequency_penalty: _numberOr(settings.freq_pen_openai, 0),
+            presence_penalty: _numberOr(settings.pres_pen_openai, 0),
+            top_k: _numberOr(settings.top_k_openai, 0),
+            min_p: _numberOr(settings.min_p_openai, 0),
+            repetition_penalty: _numberOr(settings.repetition_penalty_openai, 1),
+            top_a: _numberOr(settings.top_a_openai, 0),
+            reasoning_effort: String(settings.reasoning_effort || '').trim() || undefined,
+            verbosity: String(settings.verbosity || '').trim() || undefined,
+            enable_web_search: Boolean(settings.enable_web_search),
+            request_images: Boolean(settings.request_images),
+            seed: _intOr(settings.seed, -1),
+            n: _intOr(settings.n, 1),
+        }),
+    };
+}
+
 
 export function resetRetrievePipelineState(): void {
     _pendingRetrieveTurn = null;
@@ -493,18 +550,18 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
+    const stChatPayload = buildStChatCompletionPayload();
     const turnPayload = (turnSystemPrompt && turnUserPrompt)
         ? {
             system_prompt: turnSystemPrompt,
             user_prompt: turnUserPrompt,
+            temperature: stChatPayload.temperature,
+            max_tokens: stChatPayload.max_tokens,
+            response_format: stChatPayload.response_format,
+            st_chat_completion: stChatPayload.st_chat_completion,
         }
         : null;
-    const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
-        ? [
-            { role: 'system', content: turnSystemPrompt },
-            { role: 'user', content: turnUserPrompt },
-        ]
-        : null;
+    const turnPayloadInspect = turnPayload ? turnPayload : null;
     const turnPayloadJson = turnPayloadInspect ? JSON.stringify(turnPayloadInspect, null, 2) : undefined;
     stashInspectData({
         timestamp: Date.now(),
@@ -624,9 +681,14 @@ export async function dispatchConversationTurn(
                 const sys = parsed.find((m: any) => m?.role === 'system');
                 const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
                 if (!usr) throw new Error('PI message array has no user message — message not sent.');
+                const fallbackPayload = turn.promptOverridePayload || {};
                 promptOverridePayload = {
                     system_prompt: sys ? String(sys.content || '') : '',
                     user_prompt: String(usr.content || ''),
+                    ...(typeof fallbackPayload.temperature === 'number' ? { temperature: fallbackPayload.temperature } : {}),
+                    ...(typeof fallbackPayload.max_tokens === 'number' ? { max_tokens: fallbackPayload.max_tokens } : {}),
+                    ...(fallbackPayload.response_format ? { response_format: fallbackPayload.response_format } : {}),
+                    ...(fallbackPayload.st_chat_completion ? { st_chat_completion: fallbackPayload.st_chat_completion } : {}),
                 };
             } else {
                 promptOverridePayload = parsed as Record<string, any>;
