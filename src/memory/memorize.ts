@@ -28,6 +28,7 @@ type PendingRetrieveTurn = {
 };
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
+let _cachedStWorldInfo: string = '';
 
 export function getChatIdSafe(): string {
     try {
@@ -362,6 +363,20 @@ function formatIntentionsForPrompt(raw: any): string {
     return lines.join('\n');
 }
 
+const _ST_LORE_IDS = new Set(['worldInfoBefore', 'worldInfoAfter', 'authorsNote', 'charPersonality', 'scenario']);
+
+function extractStWorldInfo(chat: any[]): string {
+    return chat
+        .filter((m: any) => _ST_LORE_IDS.has(String(m?.identifier || '')))
+        .map((m: any) => String(m?.content || '').trim())
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function buildSoulCard(charDesc: string, worldInfo: string): string | undefined {
+    return [charDesc, worldInfo].filter(Boolean).join('\n\n') || undefined;
+}
+
 function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
     if (!Array.isArray(chat) || endIdx < 0) return [];
     const start = Math.max(0, endIdx - 39);
@@ -455,7 +470,9 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
 
     const retrieveCtx: any = st.getContext();
-    const retrieveSoulCard = String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim() || undefined;
+    const retrieveCharDesc = String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim();
+    _cachedStWorldInfo = Array.isArray(eventData?.chat) ? extractStWorldInfo(eventData.chat) : '';
+    const retrieveSoulCard = buildSoulCard(retrieveCharDesc, _cachedStWorldInfo);
 
     let resp: any;
     try {
@@ -603,7 +620,8 @@ export async function dispatchConversationTurn(
     }
 
     const turnCtx: any = st.getContext();
-    const turnSoulCard = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim() || undefined;
+    const turnCharDesc = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim();
+    const turnSoulCard = buildSoulCard(turnCharDesc, _cachedStWorldInfo);
     const promptOverrideRaw = readInspectPromptTextarea();
     let promptOverride: string | undefined;
     let promptOverridePayload: Record<string, any> | undefined;
