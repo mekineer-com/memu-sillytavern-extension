@@ -138,7 +138,7 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
     try {
-        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
         warn(`memu retrieve skipped: ${msg}`);
@@ -157,7 +157,7 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
     if (main_api === 'openai') return;
     if (typeof eventData?.prompt !== 'string') return;
     try {
-        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
         warn(`memu retrieve skipped: ${msg}`);

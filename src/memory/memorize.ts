@@ -442,7 +442,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history };
 }
 
-export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
+export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true, skipStashOverride = false): Promise<void> {
     const turn = await resolveRetrieveTurnForPrompt();
     if (!turn) {
         addSummaryToPrompt(eventData, replaceSystem);
@@ -562,7 +562,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
     if (turnPayload && turnPayloadJson) {
-        if (_pendingRetrieveTurn) {
+        if (_pendingRetrieveTurn && !skipStashOverride) {
             _pendingRetrieveTurn.promptOverridePayload = turnPayload;
         }
         seedInspectPromptTextarea(turnPayloadJson);
