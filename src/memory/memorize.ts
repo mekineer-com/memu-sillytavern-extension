@@ -397,26 +397,6 @@ function _chatContentText(raw: any): string {
     return '';
 }
 
-function extractStSystemContext(chat: any[]): string {
-    if (!Array.isArray(chat) || chat.length === 0) return '';
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const row of chat) {
-        const role = String(row?.role || '').trim().toLowerCase();
-        if (role !== 'system') continue;
-        const text = _chatContentText(row?.content);
-        if (!text) continue;
-        if (text.startsWith('[Prior context]')) continue;
-        if (text.startsWith('[Memory cache]')) continue;
-        if (text.startsWith('[Intentions]')) continue;
-        if (text.startsWith('[Current retrieval]')) continue;
-        if (text.startsWith('[Summary:')) continue;
-        if (seen.has(text)) continue;
-        seen.add(text);
-        out.push(text);
-    }
-    return out.join('\n\n').trim();
-}
 
 export function resetRetrievePipelineState(): void {
     _pendingRetrieveTurn = null;
@@ -513,20 +493,16 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
-    const stSystemContext = extractStSystemContext(Array.isArray(eventData?.chat) ? eventData.chat : []);
-    const mergedTurnUserPrompt = stSystemContext
-        ? `${turnUserPrompt}\n\n[SillyTavern system context]\n${stSystemContext}`
-        : turnUserPrompt;
-    const turnPayload = (turnSystemPrompt && mergedTurnUserPrompt)
+    const turnPayload = (turnSystemPrompt && turnUserPrompt)
         ? {
             system_prompt: turnSystemPrompt,
-            user_prompt: mergedTurnUserPrompt,
+            user_prompt: turnUserPrompt,
         }
         : null;
-    const turnPayloadInspect = (turnSystemPrompt && mergedTurnUserPrompt)
+    const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
         ? [
             { role: 'system', content: turnSystemPrompt },
-            { role: 'user', content: mergedTurnUserPrompt },
+            { role: 'user', content: turnUserPrompt },
         ]
         : null;
     const turnPayloadJson = turnPayloadInspect ? JSON.stringify(turnPayloadInspect, null, 2) : undefined;
