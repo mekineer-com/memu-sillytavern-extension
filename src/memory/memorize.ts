@@ -5,7 +5,13 @@ import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
 import { status, warn, error as logError, onceWarn } from "utils/log";
-import { getInspectData, stashInspectData, InspectData } from "ui/inspect-panel";
+import {
+    getInspectData,
+    stashInspectData,
+    InspectData,
+    seedInspectPromptTextarea,
+    readInspectPromptTextarea,
+} from "ui/inspect-panel";
 
 let isSummarying = false;
 
@@ -462,6 +468,23 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active?.items) ? (resp as any).intentions_active.items : [];
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
     const intentionSummary = formatIntentionsForPrompt((resp as any)?.intentions_active);
+    const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
+        ? (resp as any).turn_system_prompt.trim() : '';
+    const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
+        ? (resp as any).turn_user_prompt.trim() : '';
+    const turnPayloadJson = (turnSystemPrompt && turnUserPrompt)
+        ? JSON.stringify(
+            {
+                system_prompt: turnSystemPrompt,
+                user_prompt: turnUserPrompt,
+                temperature: 0.0,
+                max_tokens: 1000,
+                response_format: { type: 'json_object' },
+            },
+            null,
+            2,
+        )
+        : undefined;
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
@@ -493,16 +516,12 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         retrieveMs: typeof (resp as any)?.retrieve_ms === 'number' ? (resp as any).retrieve_ms : undefined,
         turnSystemPrompt: typeof (resp as any)?.turn_system_prompt === 'string'
             ? (resp as any).turn_system_prompt : undefined,
-        turnPrompt: typeof (resp as any)?.turn_user_prompt === 'string'
-            ? (resp as any).turn_user_prompt : undefined,
+        turnPrompt: turnPayloadJson,
         turnStatus: ((resp as any)?.turn_system_prompt && (resp as any)?.turn_user_prompt)
             ? 'pending' : undefined,
     });
-    const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
-        ? (resp as any).turn_system_prompt.trim() : '';
-    const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
-        ? (resp as any).turn_user_prompt.trim() : '';
     if (turnSystemPrompt && turnUserPrompt && Array.isArray(eventData?.chat)) {
+        if (turnPayloadJson) seedInspectPromptTextarea(turnPayloadJson);
         // Replace ST's entire chat array with the turn prompts.
         // This is intentional — the soul's full context comes from memU,
         // not from ST's character card / prompt assembly.
@@ -560,6 +579,26 @@ export async function dispatchConversationTurn(
 
     const turnCtx: any = st.getContext();
     const turnSoulCard = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim() || undefined;
+    const promptOverrideRaw = readInspectPromptTextarea();
+    let promptOverride: string | undefined;
+    let promptOverridePayload: Record<string, any> | undefined;
+    if (promptOverrideRaw) {
+        const trimmed = promptOverrideRaw.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            let parsed: any;
+            try {
+                parsed = JSON.parse(trimmed);
+            } catch (err: any) {
+                throw new Error(`Prompt Inspector payload JSON invalid: ${err?.message || String(err)}`);
+            }
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                throw new Error('Prompt Inspector payload must be a JSON object');
+            }
+            promptOverridePayload = parsed as Record<string, any>;
+        } else {
+            promptOverride = promptOverrideRaw;
+        }
+    }
 
     const resp = await conversationTurn({
         userId: turn.userId,
@@ -571,6 +610,8 @@ export async function dispatchConversationTurn(
         waitApimw: false,
         debug: includeDebug,
         soul_card: turnSoulCard,
+        ...(promptOverride ? { promptOverride } : {}),
+        ...(promptOverridePayload ? { promptOverridePayload } : {}),
     });
 
     const reply = String(resp?.response ?? '').trim();
@@ -589,13 +630,20 @@ export async function dispatchConversationTurn(
         replyCh: reply.length,
     };
     if (includeDebug) {
+        const finalTurnPayload = (resp as any)?.final_turn_payload;
+        const finalTurnPrompt =
+            finalTurnPayload && typeof finalTurnPayload === 'object'
+                ? JSON.stringify(finalTurnPayload, null, 2)
+                : (typeof (resp as any)?.final_turn_prompt === 'string'
+                    ? (resp as any).final_turn_prompt
+                    : (typeof resp?.turn_user_prompt === 'string' ? resp.turn_user_prompt : undefined));
         turnUpdate.query = turn.queryText;
         turnUpdate.userId = turn.userId;
         turnUpdate.soulId = turn.soulId;
         turnUpdate.method = 'turn';
         turnUpdate.conversationId = turn.conversationId;
         turnUpdate.turnContract = resp?.turn_contract;
-        turnUpdate.turnPrompt = typeof resp?.turn_user_prompt === 'string' ? resp.turn_user_prompt : undefined;
+        turnUpdate.turnPrompt = finalTurnPrompt;
         turnUpdate.turnSystemPrompt = typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined;
     }
     stashInspectData(turnUpdate);

@@ -52,6 +52,8 @@ export type ConversationTurnRequest = {
   dryRun?: boolean;
   debug?: boolean;
   soul_card?: string;
+  promptOverride?: string;
+  promptOverridePayload?: Record<string, any>;
 };
 export type ConversationTurnResponse = {
   ok: boolean;
@@ -63,6 +65,9 @@ export type ConversationTurnResponse = {
   turn_contract?: any;
   turn_user_prompt?: string;
   turn_system_prompt?: string;
+  final_turn_prompt?: string;
+  final_turn_payload?: Record<string, any>;
+  prompt_override_used?: boolean;
   dry_run?: boolean;
   annulment_memory_ids?: string[];
   retrieve_ms?: number;

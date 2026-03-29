@@ -33,6 +33,8 @@ export type InspectData = {
 };
 
 let _lastInspectData: InspectData | null = null;
+let _pendingInspectPromptSeed: string | null = null;
+let _inspectPromptMirror: string | null = null;
 
 export function stashInspectData(data: InspectData): void {
     _lastInspectData = data;
@@ -41,6 +43,52 @@ export function stashInspectData(data: InspectData): void {
 
 export function getInspectData(): InspectData | null {
     return _lastInspectData;
+}
+
+function inspectPromptTextarea(): HTMLTextAreaElement | null {
+    const el = document.querySelector('#inspectPrompt');
+    return el instanceof HTMLTextAreaElement ? el : null;
+}
+
+function applyPendingInspectPromptSeed(): void {
+    if (_pendingInspectPromptSeed == null) return;
+    const ta = inspectPromptTextarea();
+    if (!ta) return;
+    if (ta.value !== _pendingInspectPromptSeed) {
+        ta.value = _pendingInspectPromptSeed;
+        _inspectPromptMirror = _pendingInspectPromptSeed;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    _pendingInspectPromptSeed = null;
+}
+
+export function seedInspectPromptTextarea(text: string): void {
+    const next = String(text || '');
+    if (!next.trim()) return;
+    _inspectPromptMirror = next;
+    _pendingInspectPromptSeed = next;
+    applyPendingInspectPromptSeed();
+    scheduleRefresh();
+}
+
+export function readInspectPromptTextarea(): string | null {
+    const ta = inspectPromptTextarea();
+    const value = ta ? String(ta.value || '') : String(_inspectPromptMirror || '');
+    return value.trim() ? value : null;
+}
+
+function bindInspectPromptMirror(): void {
+    const ta = inspectPromptTextarea();
+    if (!ta) return;
+    if ((ta as any)._memuBound === true) return;
+    const sync = () => {
+        _inspectPromptMirror = String(ta.value || '');
+    };
+    ta.addEventListener('input', sync);
+    ta.addEventListener('change', sync);
+    (ta as any)._memuBound = true;
+    sync();
 }
 
 function renderInspectHtml(data: InspectData): string {
@@ -152,6 +200,8 @@ export function isInspectUiVisible(): boolean {
 }
 
 function refreshInspectPanels(): void {
+    bindInspectPromptMirror();
+    applyPendingInspectPromptSeed();
     const legacyPopup = document.querySelector('.popup');
     if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
         injectIntoLegacyPopup(legacyPopup);
