@@ -466,9 +466,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
     const priorContextSummary = parsedPrior.summary;
     const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
-    const intentionsActiveRaw = ((resp as any)?.intentions_active && typeof (resp as any).intentions_active === 'object')
-        ? (resp as any).intentions_active
-        : undefined;
     const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active?.items) ? (resp as any).intentions_active.items : [];
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
     const intentionSummary = formatIntentionsForPrompt((resp as any)?.intentions_active);
@@ -480,11 +477,15 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? {
             system_prompt: turnSystemPrompt,
             user_prompt: turnUserPrompt,
-            memory_cache: memoryCacheRaw,
-            intentions_active: intentionsActiveRaw,
         }
         : null;
-    const turnPayloadJson = turnPayload ? JSON.stringify(turnPayload, null, 2) : undefined;
+    const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
+        ? [
+            { role: 'system', content: turnSystemPrompt },
+            { role: 'user', content: turnUserPrompt },
+        ]
+        : null;
+    const turnPayloadJson = turnPayloadInspect ? JSON.stringify(turnPayloadInspect, null, 2) : undefined;
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
