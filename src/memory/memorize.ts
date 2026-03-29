@@ -602,13 +602,14 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
 
 export async function dispatchConversationTurn(
     generateData: any,
-    opts: { debug?: boolean } = {},
+    opts: { debug?: boolean; applyTurnMaintenance?: boolean } = {},
 ): Promise<void> {
     const turn = _pendingRetrieveTurn;
     if (!turn) return;
     _pendingRetrieveTurn = null;
 
     const includeDebug = opts.debug === true;
+    const applyTurnMaintenance = opts.applyTurnMaintenance !== false;
     if (includeDebug) {
         const prev = getInspectData();
         stashInspectData({
@@ -670,6 +671,7 @@ export async function dispatchConversationTurn(
         history: turn.history,
         runApimw: true,
         waitApimw: false,
+        applyTurnMaintenance,
         debug: includeDebug,
         soul_card: turnSoulCard,
         ...(promptOverride ? { promptOverride } : {}),

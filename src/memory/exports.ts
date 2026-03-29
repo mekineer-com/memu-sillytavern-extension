@@ -22,6 +22,7 @@ const summaryIfNeedDebounced = st.debounce(() => {
 
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
+let _skipTurnMaintenanceOnce = false;
 
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
@@ -118,6 +119,7 @@ export function onMessageDeleted(): void {
 }
 
 export function onMessageSwiped(_msgIdAny: any): void {
+    _skipTurnMaintenanceOnce = true;
     summaryIfNeedDebounced();
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
@@ -182,8 +184,11 @@ export async function onGenerateAfterData(generateData: any, dryRun?: boolean): 
         return;
     }
     try {
-        await dispatchConversationTurn(generateData, { debug: true });
+        const applyTurnMaintenance = !_skipTurnMaintenanceOnce;
+        _skipTurnMaintenanceOnce = false;
+        await dispatchConversationTurn(generateData, { debug: true, applyTurnMaintenance });
     } catch (e: any) {
+        _skipTurnMaintenanceOnce = false;
         const msg = e instanceof Error ? e.message : String(e);
         const prev = getInspectData();
         stashInspectData({
