@@ -3,6 +3,8 @@ import { memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
+import { getChatCompletionPreset } from "@silly-tavern/scripts/openai.js";
+import { main_api } from "@silly-tavern/script.js";
 import { initChatExtraInfo } from "./utils";
 import { status, warn, error as logError, onceWarn } from "utils/log";
 import {
@@ -639,6 +641,12 @@ export async function dispatchConversationTurn(
         promptOverridePayload = turn.promptOverridePayload;
     }
 
+    const stGenParams: Record<string, number> = {};
+    if (main_api === 'openai') {
+        const preset = getChatCompletionPreset();
+        if (typeof preset?.temperature === 'number') stGenParams.temperature = preset.temperature;
+    }
+
     const resp = await conversationTurn({
         userId: turn.userId,
         soulId: turn.soulId,
@@ -650,6 +658,7 @@ export async function dispatchConversationTurn(
         applyTurnMaintenance,
         debug: includeDebug,
         soul_card: turnSoulCard,
+        ...stGenParams,
         ...(promptOverride ? { promptOverride } : {}),
         ...(promptOverridePayload ? { promptOverridePayload } : {}),
     });
