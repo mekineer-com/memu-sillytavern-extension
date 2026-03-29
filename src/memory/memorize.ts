@@ -586,13 +586,15 @@ export async function dispatchConversationTurn(
         const trimmed = promptOverrideRaw.trim();
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
             let parsed: any;
-            try {
-                parsed = JSON.parse(trimmed);
-            } catch (err: any) {
-                throw new Error(`Prompt Inspector payload JSON invalid: ${err?.message || String(err)}`);
+            let parseErr: string | null = null;
+            for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
+                try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
+            }
+            if (parseErr !== null) {
+                throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
             }
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                throw new Error('Prompt Inspector payload must be a JSON object');
+                throw new Error('PI prompt must be a JSON object — message not sent.');
             }
             promptOverridePayload = parsed as Record<string, any>;
         } else {
