@@ -378,56 +378,6 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
     return out;
 }
 
-function _chatMsgText(raw: any): string {
-    if (typeof raw === 'string') return raw.trim();
-    if (Array.isArray(raw)) {
-        return raw
-            .map((part: any) => {
-                if (typeof part === 'string') return part;
-                if (part && typeof part === 'object' && typeof part.text === 'string') return part.text;
-                return '';
-            })
-            .filter(Boolean)
-            .join('\n')
-            .trim();
-    }
-    return '';
-}
-
-function buildPromptOverridePayloadFromChat(
-    chat: any[],
-    opts: {
-        memoryCache: any[];
-        intentionsActive: any;
-    },
-): Record<string, any> | null {
-    if (!Array.isArray(chat) || chat.length === 0) return null;
-    const systemParts: string[] = [];
-    const convoLines: string[] = [];
-    for (const row of chat) {
-        const role = String(row?.role || '').trim().toLowerCase();
-        const content = _chatMsgText(row?.content);
-        if (!content) continue;
-        if (role === 'system') {
-            systemParts.push(content);
-            continue;
-        }
-        convoLines.push(`[${role || 'user'}] ${content}`);
-    }
-    let userPrompt = convoLines.join('\n\n').trim();
-    if (!userPrompt) {
-        const lastUser = [...chat].reverse().find((row: any) => String(row?.role || '').toLowerCase() === 'user');
-        userPrompt = _chatMsgText(lastUser?.content);
-    }
-    if (!userPrompt.trim()) return null;
-    return {
-        system_prompt: systemParts.join('\n\n').trim(),
-        user_prompt: userPrompt,
-        memory_cache: opts.memoryCache,
-        intentions_active: opts.intentionsActive,
-    };
-}
-
 export function resetRetrievePipelineState(): void {
     _pendingRetrieveTurn = null;
 }
@@ -526,7 +476,15 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
-    let turnPayloadJson: string | undefined;
+    const turnPayload = (turnSystemPrompt && turnUserPrompt)
+        ? {
+            system_prompt: turnSystemPrompt,
+            user_prompt: turnUserPrompt,
+            memory_cache: memoryCacheRaw,
+            intentions_active: intentionsActiveRaw,
+        }
+        : null;
+    const turnPayloadJson = turnPayload ? JSON.stringify(turnPayload, null, 2) : undefined;
     stashInspectData({
         timestamp: Date.now(),
         query: turn.queryText,
@@ -582,25 +540,18 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         setLiveRetrieveSummary(promptSummary);
     }
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
-    if (Array.isArray(eventData?.chat)) {
-        const payload = buildPromptOverridePayloadFromChat(eventData.chat, {
-            memoryCache: memoryCacheRaw,
-            intentionsActive: intentionsActiveRaw,
-        });
-        if (payload) {
-            turnPayloadJson = JSON.stringify(payload, null, 2);
-            if (_pendingRetrieveTurn) {
-                _pendingRetrieveTurn.promptOverridePayload = payload;
-            }
-            seedInspectPromptTextarea(turnPayloadJson);
-            const prev = getInspectData();
-            stashInspectData({
-                ...(prev || { timestamp: Date.now() }),
-                timestamp: Date.now(),
-                turnPrompt: turnPayloadJson,
-                turnStatus: 'pending',
-            });
+    if (turnPayload && turnPayloadJson) {
+        if (_pendingRetrieveTurn) {
+            _pendingRetrieveTurn.promptOverridePayload = turnPayload;
         }
+        seedInspectPromptTextarea(turnPayloadJson);
+        const prev = getInspectData();
+        stashInspectData({
+            ...(prev || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            turnPrompt: turnPayloadJson,
+            turnStatus: 'pending',
+        });
     }
 }
 
