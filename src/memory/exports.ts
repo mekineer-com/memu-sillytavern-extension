@@ -23,19 +23,6 @@ const summaryIfNeedDebounced = st.debounce(() => {
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
 
-function stripWorldInfoInjection(eventData: any): void {
-    const chat = eventData?.chat;
-    if (!Array.isArray(chat) || chat.length === 0) return;
-
-    for (let i = chat.length - 1; i >= 0; i--) {
-        const row: any = chat[i];
-        const id = String(row?.identifier || '');
-        if (id === 'worldInfoBefore' || id === 'worldInfoAfter') {
-            chat.splice(i, 1);
-        }
-    }
-}
-
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
  * 1) backend restarted with ephemeral DB (in-memory reset),
@@ -149,8 +136,6 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
     try {
-        // Keep ST lorebooks UI-only; never inject World Info into model context.
-        stripWorldInfoInjection(eventData);
         await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);

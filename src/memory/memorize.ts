@@ -523,10 +523,10 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             user_prompt: mergedTurnUserPrompt,
         }
         : null;
-    const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
+    const turnPayloadInspect = (turnSystemPrompt && mergedTurnUserPrompt)
         ? [
             { role: 'system', content: turnSystemPrompt },
-            { role: 'user', content: turnUserPrompt },
+            { role: 'user', content: mergedTurnUserPrompt },
         ]
         : null;
     const turnPayloadJson = turnPayloadInspect ? JSON.stringify(turnPayloadInspect, null, 2) : undefined;
