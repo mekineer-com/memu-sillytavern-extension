@@ -477,9 +477,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             {
                 system_prompt: turnSystemPrompt,
                 user_prompt: turnUserPrompt,
-                temperature: 0.0,
-                max_tokens: 1000,
-                response_format: { type: 'json_object' },
             },
             null,
             2,
