@@ -36,6 +36,7 @@ let _lastInspectData: InspectData | null = null;
 let _pendingInspectPromptSeed: string | null = null;
 let _inspectPromptMirror: string | null = null;
 let _inspectPromptBaseline: string | null = null;
+let _inspectPromptEditedByUser = false;
 
 export function stashInspectData(data: InspectData): void {
     _lastInspectData = data;
@@ -67,16 +68,28 @@ function applyPendingInspectPromptSeed(): void {
 export function seedInspectPromptTextarea(text: string): void {
     const next = String(text || '');
     if (!next.trim()) return;
+    _inspectPromptEditedByUser = false;
     _inspectPromptMirror = next;
     _inspectPromptBaseline = next;
     _pendingInspectPromptSeed = next;
     applyPendingInspectPromptSeed();
+    window.setTimeout(() => {
+        if (_inspectPromptBaseline !== next) return;
+        _pendingInspectPromptSeed = next;
+        applyPendingInspectPromptSeed();
+    }, 0);
+    window.setTimeout(() => {
+        if (_inspectPromptBaseline !== next) return;
+        _pendingInspectPromptSeed = next;
+        applyPendingInspectPromptSeed();
+    }, 50);
     scheduleRefresh();
 }
 
 export function readInspectPromptTextarea(): string | null {
     const ta = inspectPromptTextarea();
     if (!ta) return null;
+    if (!_inspectPromptEditedByUser) return null;
     const value = String(ta.value || '');
     if (!value.trim()) return null;
     if (value === _inspectPromptBaseline) return null;
@@ -87,8 +100,11 @@ function bindInspectPromptMirror(): void {
     const ta = inspectPromptTextarea();
     if (!ta) return;
     if ((ta as any)._memuBound === true) return;
-    const sync = () => {
+    const sync = (ev?: Event) => {
         _inspectPromptMirror = String(ta.value || '');
+        if (ev?.isTrusted) {
+            _inspectPromptEditedByUser = true;
+        }
     };
     ta.addEventListener('input', sync);
     ta.addEventListener('change', sync);
