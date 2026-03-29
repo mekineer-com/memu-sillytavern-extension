@@ -35,6 +35,7 @@ export type InspectData = {
 let _lastInspectData: InspectData | null = null;
 let _pendingInspectPromptSeed: string | null = null;
 let _inspectPromptMirror: string | null = null;
+let _inspectPromptBaseline: string | null = null;
 
 export function stashInspectData(data: InspectData): void {
     _lastInspectData = data;
@@ -67,6 +68,7 @@ export function seedInspectPromptTextarea(text: string): void {
     const next = String(text || '');
     if (!next.trim()) return;
     _inspectPromptMirror = next;
+    _inspectPromptBaseline = next;
     _pendingInspectPromptSeed = next;
     applyPendingInspectPromptSeed();
     scheduleRefresh();
@@ -74,8 +76,11 @@ export function seedInspectPromptTextarea(text: string): void {
 
 export function readInspectPromptTextarea(): string | null {
     const ta = inspectPromptTextarea();
-    const value = ta ? String(ta.value || '') : String(_inspectPromptMirror || '');
-    return value.trim() ? value : null;
+    if (!ta) return null;
+    const value = String(ta.value || '');
+    if (!value.trim()) return null;
+    if (value === _inspectPromptBaseline) return null;
+    return value;
 }
 
 function bindInspectPromptMirror(): void {
