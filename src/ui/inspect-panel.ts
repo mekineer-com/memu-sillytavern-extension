@@ -34,7 +34,6 @@ export type InspectData = {
 
 let _lastInspectData: InspectData | null = null;
 let _pendingInspectPromptSeed: string | null = null;
-let _inspectPromptMirror: string | null = null;
 let _inspectPromptBaseline: string | null = null;
 let _inspectPromptEditedByUser = false;
 
@@ -58,7 +57,6 @@ function applyPendingInspectPromptSeed(): void {
     if (!ta) return;
     if (ta.value !== _pendingInspectPromptSeed) {
         ta.value = _pendingInspectPromptSeed;
-        _inspectPromptMirror = _pendingInspectPromptSeed;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
         ta.dispatchEvent(new Event('change', { bubbles: true }));
     }
@@ -69,7 +67,6 @@ export function seedInspectPromptTextarea(text: string): void {
     const next = String(text || '');
     if (!next.trim()) return;
     _inspectPromptEditedByUser = false;
-    _inspectPromptMirror = next;
     _inspectPromptBaseline = next;
     _pendingInspectPromptSeed = next;
     applyPendingInspectPromptSeed();
@@ -101,7 +98,6 @@ function bindInspectPromptMirror(): void {
     if (!ta) return;
     if ((ta as any)._memuBound === true) return;
     const sync = (ev?: Event) => {
-        _inspectPromptMirror = String(ta.value || '');
         if (ev?.isTrusted) {
             _inspectPromptEditedByUser = true;
         }
