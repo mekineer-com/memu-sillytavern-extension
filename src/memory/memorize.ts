@@ -474,10 +474,10 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_user_prompt.trim() : '';
     const turnPayloadJson = (turnSystemPrompt && turnUserPrompt)
         ? JSON.stringify(
-            {
-                system_prompt: turnSystemPrompt,
-                user_prompt: turnUserPrompt,
-            },
+            [
+                { role: 'system', content: turnSystemPrompt },
+                { role: 'user', content: turnUserPrompt },
+            ],
             null,
             2,
         )
@@ -590,10 +590,21 @@ export async function dispatchConversationTurn(
             if (parseErr !== null) {
                 throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
             }
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                throw new Error('PI prompt must be a JSON object — message not sent.');
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error('PI prompt must be a JSON object or message array — message not sent.');
             }
-            promptOverridePayload = parsed as Record<string, any>;
+            if (Array.isArray(parsed)) {
+                // PI native format: [{role:'system',content:'...'},{role:'user',content:'...'}]
+                const sys = parsed.find((m: any) => m?.role === 'system');
+                const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
+                if (!usr) throw new Error('PI message array has no user message — message not sent.');
+                promptOverridePayload = {
+                    system_prompt: sys ? String(sys.content || '') : '',
+                    user_prompt: String(usr.content || ''),
+                };
+            } else {
+                promptOverridePayload = parsed as Record<string, any>;
+            }
         } else {
             promptOverride = promptOverrideRaw;
         }
