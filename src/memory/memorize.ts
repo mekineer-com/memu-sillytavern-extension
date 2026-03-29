@@ -378,6 +378,46 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
     return out;
 }
 
+function _chatContentText(raw: any): string {
+    if (typeof raw === 'string') return raw.trim();
+    if (Array.isArray(raw)) {
+        return raw
+            .map((part: any) => {
+                if (typeof part === 'string') return part;
+                if (part && typeof part === 'object' && typeof part.text === 'string') return part.text;
+                return '';
+            })
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+    }
+    if (raw && typeof raw === 'object' && typeof raw.text === 'string') {
+        return raw.text.trim();
+    }
+    return '';
+}
+
+function extractStSystemContext(chat: any[]): string {
+    if (!Array.isArray(chat) || chat.length === 0) return '';
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const row of chat) {
+        const role = String(row?.role || '').trim().toLowerCase();
+        if (role !== 'system') continue;
+        const text = _chatContentText(row?.content);
+        if (!text) continue;
+        if (text.startsWith('[Prior context]')) continue;
+        if (text.startsWith('[Memory cache]')) continue;
+        if (text.startsWith('[Intentions]')) continue;
+        if (text.startsWith('[Current retrieval]')) continue;
+        if (text.startsWith('[Summary:')) continue;
+        if (seen.has(text)) continue;
+        seen.add(text);
+        out.push(text);
+    }
+    return out.join('\n\n').trim();
+}
+
 export function resetRetrievePipelineState(): void {
     _pendingRetrieveTurn = null;
 }
@@ -473,10 +513,14 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
-    const turnPayload = (turnSystemPrompt && turnUserPrompt)
+    const stSystemContext = extractStSystemContext(Array.isArray(eventData?.chat) ? eventData.chat : []);
+    const mergedTurnUserPrompt = stSystemContext
+        ? `${turnUserPrompt}\n\n[SillyTavern system context]\n${stSystemContext}`
+        : turnUserPrompt;
+    const turnPayload = (turnSystemPrompt && mergedTurnUserPrompt)
         ? {
             system_prompt: turnSystemPrompt,
-            user_prompt: turnUserPrompt,
+            user_prompt: mergedTurnUserPrompt,
         }
         : null;
     const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
