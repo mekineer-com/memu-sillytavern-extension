@@ -663,6 +663,7 @@ export async function dispatchConversationTurn(
     if (main_api === 'openai') {
         const preset = getChatCompletionPreset();
         if (typeof preset?.temperature === 'number') stGenParams.temperature = preset.temperature;
+        if (typeof preset?.openai_max_tokens === 'number') stGenParams.max_tokens = preset.openai_max_tokens;
     }
 
     const resp = await conversationTurn({

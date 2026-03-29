@@ -174,6 +174,7 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
 export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
     if (dryRun) return;
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
+        _skipTurnMaintenanceOnce = false;
         const prev = getInspectData();
         stashInspectData({
             ...(prev || { timestamp: Date.now() }),
