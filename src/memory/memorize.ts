@@ -561,7 +561,18 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             st_chat_completion: stChatPayload.st_chat_completion,
         }
         : null;
-    const turnPayloadInspect = turnPayload ? turnPayload : null;
+    const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
+        ? {
+            messages: [
+                { role: 'system', content: turnSystemPrompt },
+                { role: 'user', content: turnUserPrompt },
+            ],
+            temperature: stChatPayload.temperature,
+            max_tokens: stChatPayload.max_tokens,
+            response_format: stChatPayload.response_format,
+            st_chat_completion: stChatPayload.st_chat_completion,
+        }
+        : null;
     const turnPayloadJson = turnPayloadInspect ? JSON.stringify(turnPayloadInspect, null, 2) : undefined;
     stashInspectData({
         timestamp: Date.now(),
@@ -691,7 +702,34 @@ export async function dispatchConversationTurn(
                     ...(fallbackPayload.st_chat_completion ? { st_chat_completion: fallbackPayload.st_chat_completion } : {}),
                 };
             } else {
-                promptOverridePayload = parsed as Record<string, any>;
+                const parsedObj = parsed as Record<string, any>;
+                if ((!parsedObj.user_prompt && !parsedObj.prompt) && Array.isArray(parsedObj.messages)) {
+                    const sys = parsedObj.messages.find((m: any) => String(m?.role || '').trim().toLowerCase() === 'system');
+                    const usr = [...parsedObj.messages].reverse().find((m: any) => String(m?.role || '').trim().toLowerCase() === 'user');
+                    const userPrompt = _chatContentText(usr?.content);
+                    if (!userPrompt) {
+                        throw new Error('PI object.messages has no user message — message not sent.');
+                    }
+                    const fallbackPayload = turn.promptOverridePayload || {};
+                    promptOverridePayload = {
+                        system_prompt: _chatContentText(sys?.content),
+                        user_prompt: userPrompt,
+                        ...(typeof parsedObj.temperature === 'number'
+                            ? { temperature: parsedObj.temperature }
+                            : (typeof fallbackPayload.temperature === 'number' ? { temperature: fallbackPayload.temperature } : {})),
+                        ...(typeof parsedObj.max_tokens === 'number'
+                            ? { max_tokens: parsedObj.max_tokens }
+                            : (typeof fallbackPayload.max_tokens === 'number' ? { max_tokens: fallbackPayload.max_tokens } : {})),
+                        ...(parsedObj.response_format
+                            ? { response_format: parsedObj.response_format }
+                            : (fallbackPayload.response_format ? { response_format: fallbackPayload.response_format } : {})),
+                        ...(parsedObj.st_chat_completion
+                            ? { st_chat_completion: parsedObj.st_chat_completion }
+                            : (fallbackPayload.st_chat_completion ? { st_chat_completion: fallbackPayload.st_chat_completion } : {})),
+                    };
+                } else {
+                    promptOverridePayload = parsedObj;
+                }
             }
         } else {
             promptOverride = promptOverrideRaw;
