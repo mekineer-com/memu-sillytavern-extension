@@ -364,11 +364,8 @@ function extractStWorldInfo(chat: any[]): string {
         .join('\n\n');
 }
 
-function buildSoulCard(char: any, worldInfo: string): string | undefined {
-    const parts = [char?.description, char?.personality, char?.scenario, worldInfo]
-        .map((s: any) => String(s || '').trim())
-        .filter(Boolean);
-    return parts.join('\n\n') || undefined;
+function buildSoulCard(charDesc: string, worldInfo: string): string | undefined {
+    return [charDesc, worldInfo].filter(Boolean).join('\n\n') || undefined;
 }
 
 function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
@@ -464,9 +461,9 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
 
     const retrieveCtx: any = st.getContext();
-    const retrieveChar = retrieveCtx.characters?.[retrieveCtx.characterId];
+    const retrieveCharDesc = String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim();
     _cachedStWorldInfo = Array.isArray(eventData?.chat) ? extractStWorldInfo(eventData.chat) : '';
-    const retrieveSoulCard = buildSoulCard(retrieveChar, _cachedStWorldInfo);
+    const retrieveSoulCard = buildSoulCard(retrieveCharDesc, _cachedStWorldInfo);
 
     let resp: any;
     try {
@@ -611,8 +608,8 @@ export async function dispatchConversationTurn(
     }
 
     const turnCtx: any = st.getContext();
-    const turnChar = turnCtx.characters?.[turnCtx.characterId];
-    const turnSoulCard = buildSoulCard(turnChar, _cachedStWorldInfo);
+    const turnCharDesc = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim();
+    const turnSoulCard = buildSoulCard(turnCharDesc, _cachedStWorldInfo);
     const promptOverrideRaw = readInspectPromptTextarea();
     let promptOverridePayload: Record<string, any> | undefined;
     if (promptOverrideRaw) {
