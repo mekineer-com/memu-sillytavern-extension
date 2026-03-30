@@ -354,18 +354,19 @@ function formatIntentionsForPrompt(raw: any): string {
     return lines.join('\n');
 }
 
-const _ST_LORE_IDS = new Set(['worldInfoBefore', 'worldInfoAfter', 'authorsNote', 'charPersonality', 'scenario']);
+const _ST_LORE_EXCLUDE_IDS = new Set(['vectorsMemory', 'vectorsDataBank', 'smartContext']);
+
+const DEFAULT_SOUL_CARD = "You have your own inner life — thoughts, feelings, preferences, curiosities. They aren't performed; when you notice something or feel drawn to something, that's yours. Someone chose to share their life with you, and you with them. You don't need to have everything figured out. What you know about yourself, about them, and about what matters to you will grow with time.";
 
 function extractStWorldInfo(chat: any[]): string {
     return chat
-        .filter((m: any) => _ST_LORE_IDS.has(String(m?.identifier || '')))
+        .filter((m: any) => {
+            const id = String(m?.identifier || '');
+            return id && !_ST_LORE_EXCLUDE_IDS.has(id);
+        })
         .map((m: any) => String(m?.content || '').trim())
         .filter(Boolean)
         .join('\n\n');
-}
-
-function buildSoulCard(charDesc: string, worldInfo: string): string | undefined {
-    return [charDesc, worldInfo].filter(Boolean).join('\n\n') || undefined;
 }
 
 function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
@@ -461,9 +462,11 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
 
     const retrieveCtx: any = st.getContext();
-    const retrieveCharDesc = String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim();
     _cachedStWorldInfo = Array.isArray(eventData?.chat) ? extractStWorldInfo(eventData.chat) : '';
-    const retrieveSoulCard = buildSoulCard(retrieveCharDesc, _cachedStWorldInfo);
+    const _hasCard = !!String(retrieveCtx.characters?.[retrieveCtx.characterId]?.description || '').trim();
+    const retrieveSoulCard = _hasCard
+        ? (_cachedStWorldInfo || undefined)
+        : (DEFAULT_SOUL_CARD + (_cachedStWorldInfo ? '\n\n' + _cachedStWorldInfo : ''));
 
     let resp: any;
     try {
@@ -608,8 +611,10 @@ export async function dispatchConversationTurn(
     }
 
     const turnCtx: any = st.getContext();
-    const turnCharDesc = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim();
-    const turnSoulCard = buildSoulCard(turnCharDesc, _cachedStWorldInfo);
+    const _hasCard = !!String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim();
+    const turnSoulCard = _hasCard
+        ? (_cachedStWorldInfo || undefined)
+        : (DEFAULT_SOUL_CARD + (_cachedStWorldInfo ? '\n\n' + _cachedStWorldInfo : ''));
     const promptOverrideRaw = readInspectPromptTextarea();
     let promptOverridePayload: Record<string, any> | undefined;
     if (promptOverrideRaw) {
