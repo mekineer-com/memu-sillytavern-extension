@@ -9,7 +9,7 @@ import {
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
-import { getPluginPing, scopeStorageProbe, conversationTurnUndo, conversationCacheClear } from "utils/network";
+import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/network";
 import { info } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
@@ -123,7 +123,7 @@ export function onMessageDeleted(): void {
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
-        void conversationCacheClear(conversationId, userId, soulId);
+        void conversationTurnUndo(conversationId, userId, soulId);
     }
 }
 
