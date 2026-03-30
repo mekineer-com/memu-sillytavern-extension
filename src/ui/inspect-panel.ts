@@ -36,6 +36,7 @@ let _lastInspectData: InspectData | null = null;
 let _pendingInspectPromptSeed: string | null = null;
 let _inspectPromptBaseline: string | null = null;
 let _inspectPromptEditedByUser = false;
+let _inspectPromptEditedValue: string | null = null;
 
 export function stashInspectData(data: InspectData): void {
     _lastInspectData = data;
@@ -67,6 +68,7 @@ export function seedInspectPromptTextarea(text: string): void {
     const next = String(text || '');
     if (!next.trim()) return;
     _inspectPromptEditedByUser = false;
+    _inspectPromptEditedValue = null;
     _inspectPromptBaseline = next;
     _pendingInspectPromptSeed = next;
     applyPendingInspectPromptSeed();
@@ -85,9 +87,8 @@ export function seedInspectPromptTextarea(text: string): void {
 
 export function readInspectPromptTextarea(): string | null {
     const ta = inspectPromptTextarea();
-    if (!ta) return null;
     if (!_inspectPromptEditedByUser) return null;
-    const value = String(ta.value || '');
+    const value = ta ? String(ta.value || '') : String(_inspectPromptEditedValue || '');
     if (!value.trim()) return null;
     if (value === _inspectPromptBaseline) return null;
     return value;
@@ -100,6 +101,7 @@ function bindInspectPromptMirror(): void {
     const sync = (ev?: Event) => {
         if (ev?.isTrusted) {
             _inspectPromptEditedByUser = true;
+            _inspectPromptEditedValue = String(ta.value || '');
         }
     };
     ta.addEventListener('input', sync);
