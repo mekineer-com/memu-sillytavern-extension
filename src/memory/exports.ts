@@ -23,6 +23,18 @@ const summaryIfNeedDebounced = st.debounce(() => {
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
 let _skipTurnMaintenanceOnce = false;
+let _pendingSwipeUndo: Promise<void> | null = null;
+
+async function waitForPendingSwipeUndo(): Promise<void> {
+    const pending = _pendingSwipeUndo;
+    if (!pending) return;
+    try {
+        await pending;
+    } catch { }
+    if (_pendingSwipeUndo === pending) {
+        _pendingSwipeUndo = null;
+    }
+}
 
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
@@ -126,7 +138,7 @@ export function onMessageSwiped(_msgIdAny: any): void {
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
-        void conversationTurnUndo(conversationId, userId, soulId).catch(() => {});
+        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId).then(() => {}).catch(() => {});
     }
 }
 
@@ -138,6 +150,7 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
     try {
+        await waitForPendingSwipeUndo();
         await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -157,6 +170,7 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
     if (main_api === 'openai') return;
     if (typeof eventData?.prompt !== 'string') return;
     try {
+        await waitForPendingSwipeUndo();
         await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
     } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -173,6 +187,7 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
 
 export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
     if (dryRun) return;
+    await waitForPendingSwipeUndo();
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         _skipTurnMaintenanceOnce = false;
         const prev = getInspectData();
