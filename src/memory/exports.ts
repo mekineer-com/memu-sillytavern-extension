@@ -139,6 +139,7 @@ export function onMessageDeleted(): void {
     const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
     const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
     if (deletedLatestAssistant && conversationId && userId && soulId) {
+        _skipTurnMaintenanceOnce = true;
         _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
     }
     refreshChatSnapshot();
