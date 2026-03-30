@@ -47,13 +47,10 @@ export type ConversationTurnRequest = {
   conversationId: string;
   message: string;
   history?: Array<Record<string, any>>;
-  runApimw?: boolean;
-  waitApimw?: boolean;
   applyTurnMaintenance?: boolean;
   dryRun?: boolean;
   debug?: boolean;
   soul_card?: string;
-  promptOverride?: string;
   promptOverridePayload?: Record<string, any>;
   temperature?: number;
   max_tokens?: number;

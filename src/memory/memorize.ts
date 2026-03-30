@@ -620,39 +620,37 @@ export async function dispatchConversationTurn(
     const turnCharDesc = String(turnCtx.characters?.[turnCtx.characterId]?.description || '').trim();
     const turnSoulCard = buildSoulCard(turnCharDesc, _cachedStWorldInfo);
     const promptOverrideRaw = readInspectPromptTextarea();
-    let promptOverride: string | undefined;
     let promptOverridePayload: Record<string, any> | undefined;
     if (promptOverrideRaw) {
         const trimmed = promptOverrideRaw.trim();
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-            let parsed: any;
-            let parseErr: string | null = null;
-            for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
-                try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
-            }
-            if (parseErr !== null) {
-                throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
-            }
-            if (!parsed || typeof parsed !== 'object') {
-                throw new Error('PI prompt must be a JSON object or message array — message not sent.');
-            }
-            if (Array.isArray(parsed)) {
-                // PI native format: [{role:'system',content:'...'},{role:'user',content:'...'}]
-                const sys = parsed.find((m: any) => m?.role === 'system');
-                const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
-                if (!usr) throw new Error('PI message array has no user message — message not sent.');
-                promptOverridePayload = {
-                    system_prompt: sys ? String(sys.content || '') : '',
-                    user_prompt: String(usr.content || ''),
-                };
-            } else {
-                promptOverridePayload = parsed as Record<string, any>;
-            }
+        if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+            throw new Error('PI prompt must be JSON — message not sent.');
+        }
+        let parsed: any;
+        let parseErr: string | null = null;
+        for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
+            try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
+        }
+        if (parseErr !== null) {
+            throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
+        }
+        if (!parsed || typeof parsed !== 'object') {
+            throw new Error('PI prompt must be a JSON object or message array — message not sent.');
+        }
+        if (Array.isArray(parsed)) {
+            // PI native format: [{role:'system',content:'...'},{role:'user',content:'...'}]
+            const sys = parsed.find((m: any) => m?.role === 'system');
+            const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
+            if (!usr) throw new Error('PI message array has no user message — message not sent.');
+            promptOverridePayload = {
+                system_prompt: sys ? String(sys.content || '') : '',
+                user_prompt: String(usr.content || ''),
+            };
         } else {
-            promptOverride = promptOverrideRaw;
+            promptOverridePayload = parsed as Record<string, any>;
         }
     }
-    if (!promptOverride && !promptOverridePayload && turn.promptOverridePayload) {
+    if (!promptOverridePayload && turn.promptOverridePayload) {
         promptOverridePayload = turn.promptOverridePayload;
     }
 
@@ -669,13 +667,10 @@ export async function dispatchConversationTurn(
         conversationId: turn.conversationId,
         message: turn.queryText,
         history: turn.history,
-        runApimw: true,
-        waitApimw: false,
         applyTurnMaintenance,
         debug: includeDebug,
         soul_card: turnSoulCard,
         ...stGenParams,
-        ...(promptOverride ? { promptOverride } : {}),
         ...(promptOverridePayload ? { promptOverridePayload } : {}),
     });
 

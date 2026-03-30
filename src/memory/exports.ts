@@ -10,7 +10,7 @@ import {
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe, conversationTurnUndo, conversationCacheClear } from "utils/network";
-import { info, warn } from "utils/log";
+import { info } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
 
