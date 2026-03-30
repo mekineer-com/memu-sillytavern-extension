@@ -24,7 +24,6 @@ type PendingRetrieveTurn = {
     soulId: string;
     queryText: string;
     history: Array<Record<string, any>>;
-    promptOverridePayload?: Record<string, any>;
 };
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
@@ -456,7 +455,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history };
 }
 
-export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true, skipStashOverride = false): Promise<void> {
+export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
     const turn = await resolveRetrieveTurnForPrompt();
     if (!turn) {
         addSummaryToPrompt(eventData, replaceSystem);
@@ -578,9 +577,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
     if (turnPayload && turnPayloadJson) {
-        if (_pendingRetrieveTurn && !skipStashOverride) {
-            _pendingRetrieveTurn.promptOverridePayload = turnPayload;
-        }
         seedInspectPromptTextarea(turnPayloadJson);
         const prev = getInspectData();
         stashInspectData({
@@ -627,13 +623,7 @@ export async function dispatchConversationTurn(
             throw new Error('PI prompt must be JSON — message not sent.');
         }
         let parsed: any;
-        let parseErr: string | null = null;
-        for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
-            try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
-        }
-        if (parseErr !== null) {
-            throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
-        }
+        try { parsed = JSON.parse(trimmed); } catch (e: any) { throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${e?.message || String(e)})`); }
         if (!parsed || typeof parsed !== 'object') {
             throw new Error('PI prompt must be a JSON object or message array — message not sent.');
         }
@@ -650,15 +640,12 @@ export async function dispatchConversationTurn(
             promptOverridePayload = parsed as Record<string, any>;
         }
     }
-    if (!promptOverridePayload && turn.promptOverridePayload) {
-        promptOverridePayload = turn.promptOverridePayload;
-    }
 
     const stGenParams: Record<string, number> = {};
     if (main_api === 'openai') {
         const preset = getChatCompletionPreset();
         if (typeof preset?.temperature === 'number') stGenParams.temperature = preset.temperature;
-        if (typeof preset?.openai_max_tokens === 'number') stGenParams.max_tokens = preset.openai_max_tokens;
+        if (typeof preset?.openai_max_tokens === 'number') stGenParams.maxTokens = preset.openai_max_tokens;
     }
 
     const resp = await conversationTurn({

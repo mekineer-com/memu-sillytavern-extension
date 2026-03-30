@@ -53,7 +53,6 @@ export type ConversationTurnRequest = {
   soul_card?: string;
   promptOverridePayload?: Record<string, any>;
   temperature?: number;
-  max_tokens?: number;
   maxTokens?: number;
 };
 export type ConversationTurnResponse = {

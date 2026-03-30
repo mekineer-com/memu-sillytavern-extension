@@ -195,16 +195,8 @@ function ensurePanel(parent: Element): HTMLDivElement {
     return panel;
 }
 
-function isVisible(el: Element | null): boolean {
-    if (!(el instanceof HTMLElement)) return false;
-    const cs = window.getComputedStyle(el);
-    if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-    return el.offsetParent !== null || cs.position === 'fixed';
-}
-
-function injectIntoLegacyPopup(popupEl: Element): void {
-    const textarea = popupEl.querySelector('#inspectPrompt');
-    const target = textarea?.parentElement || popupEl.querySelector('.popup-content') || popupEl;
+function injectInspectPanel(textarea: HTMLTextAreaElement): void {
+    const target = textarea.parentElement || textarea;
     const panel = ensurePanel(target);
     const html = renderInspectHtml(currentInspectData());
     if (panel.innerHTML !== html) {
@@ -213,18 +205,11 @@ function injectIntoLegacyPopup(popupEl: Element): void {
     if (!panel.parentElement) target.appendChild(panel);
 }
 
-export function isInspectUiVisible(): boolean {
-    const legacyPopup = document.querySelector('.popup');
-    return !!(legacyPopup && legacyPopup.querySelector('#inspectPrompt') && isVisible(legacyPopup));
-}
-
 function refreshInspectPanels(): void {
     bindInspectPromptMirror();
     applyPendingInspectPromptSeed();
-    const legacyPopup = document.querySelector('.popup');
-    if (legacyPopup && legacyPopup.querySelector('#inspectPrompt')) {
-        injectIntoLegacyPopup(legacyPopup);
-    }
+    const textarea = inspectPromptTextarea();
+    if (textarea) injectInspectPanel(textarea);
 }
 
 let _observer: MutationObserver | null = null;
@@ -245,8 +230,7 @@ export function startInspectObserver(): void {
     const nodeHasRelevantTarget = (node: Node): boolean => {
         if (!(node instanceof Element)) return false;
         if (node.id === 'inspectPrompt') return true;
-        if (node.classList.contains('popup')) return true;
-        return !!node.querySelector?.('#inspectPrompt,.popup');
+        return !!node.querySelector?.('#inspectPrompt');
     };
 
     _observer = new MutationObserver((mutations) => {

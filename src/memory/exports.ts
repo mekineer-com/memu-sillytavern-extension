@@ -147,7 +147,7 @@ export async function onChatCompletionPromptReady(eventData: any): Promise<void>
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
     await waitForPendingSwipeUndo();
-    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
+    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
 }
 
 export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
@@ -155,7 +155,7 @@ export async function onGenerateAfterCombinePrompts(eventData: any): Promise<voi
     if (main_api === 'openai') return;
     if (typeof eventData?.prompt !== 'string') return;
     await waitForPendingSwipeUndo();
-    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
+    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
 }
 
 export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
