@@ -22,6 +22,15 @@ const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
 let _skipTurnMaintenanceOnce = false;
 let _pendingSwipeUndo: Promise<void> | null = null;
+let _lastChatLength = 0;
+let _lastTailIsUser = false;
+
+function refreshChatSnapshot(): void {
+    const ctx = st.getContext();
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    _lastChatLength = chat.length;
+    _lastTailIsUser = !!chat[chat.length - 1]?.is_user;
+}
 
 async function waitForPendingSwipeUndo(): Promise<void> {
     const pending = _pendingSwipeUndo;
@@ -109,9 +118,12 @@ async function maybeClearStaleLocalState(): Promise<void> {
 
 export function onMessageReceived(_msgIdAny: any): void {
     summaryIfNeedDebounced();
+    refreshChatSnapshot();
 }
 
-export function onUserMessageSent(_msgIdAny: any): void { }
+export function onUserMessageSent(_msgIdAny: any): void {
+    refreshChatSnapshot();
+}
 
 export function onMessageEdited(_msgIdAny: any): void {
     summaryIfNeedDebounced();
@@ -122,9 +134,14 @@ export function onMessageDeleted(): void {
     const conversationId = getChatIdSafe();
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
-    if (conversationId && userId && soulId) {
-        void conversationTurnUndo(conversationId, userId, soulId);
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    const nowLength = chat.length;
+    const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
+    const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
+    if (deletedLatestAssistant && conversationId && userId && soulId) {
+        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
     }
+    refreshChatSnapshot();
 }
 
 export function onMessageSwiped(_msgIdAny: any): void {
@@ -137,6 +154,7 @@ export function onMessageSwiped(_msgIdAny: any): void {
     if (conversationId && userId && soulId) {
         _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
     }
+    refreshChatSnapshot();
 }
 
 export function onGenerationStopped(): void {
@@ -196,6 +214,7 @@ export function onChatChanged(): void {
 
     if (ctx.getCurrentChatId() === undefined) {
         stopSummaryPolling();
+        refreshChatSnapshot();
         return;
     }
 
@@ -207,6 +226,7 @@ export function onChatChanged(): void {
         // On chat-open: run the normal "should we memorize?" check.
         summaryIfNeedDebounced();
         await maybeClearStaleLocalState();
+        refreshChatSnapshot();
     }
     void init();
 }
