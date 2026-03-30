@@ -221,11 +221,10 @@ export default function App() {
       const base = prev ?? defaultCfg();
       const next: any = { ...base, ...patch };
 
-      // embedding model: dropdown overrides manual overrides legacy
+      // embedding model: dropdown overrides manual
       const selected = typeof next.embeddingModelSelected === 'string' ? next.embeddingModelSelected.trim() : '';
       const manual = typeof next.embeddingModelManual === 'string' ? next.embeddingModelManual.trim() : '';
-      const legacy = typeof next.embeddingModel === 'string' ? next.embeddingModel.trim() : '';
-      const effective = selected || manual || legacy;
+      const effective = selected || manual;
 
       if (selected) next.embeddingModelSelected = selected;
       else delete next.embeddingModelSelected;

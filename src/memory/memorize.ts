@@ -156,24 +156,19 @@ export async function doSummary(from: number, to: number, force: boolean = false
         {
             const localTaskId = (typeof (response as any)?.taskId === 'string' && (response as any).taskId.trim())
                 ? (response as any).taskId.trim()
-                : null;
+                : '';
+            if (!localTaskId) throw new Error('memorizeConversation response missing taskId');
 
             memuExtras.summary = {
                 summaryRange: [from, to],
                 summaryTaskId: localTaskId,
-                summaryTaskStatus: localTaskId ? MemuTaskStatus.PENDING : MemuTaskStatus.SUCCESS,
-                isReady: localTaskId ? false : true,
+                summaryTaskStatus: MemuTaskStatus.PENDING,
+                isReady: false,
                 force,
                 failureCount: 0,
                 lastError: undefined,
             };
             await st.saveChat();
-
-            // Legacy/sync fallback: no task id means we should retrieve immediately.
-            if (!localTaskId) {
-                await retrieveMemories(memuExtras.summary);
-                return;
-            }
 
             // One-shot: if categories already exist, ensure lorebooks can appear quickly.
             await syncLorebooksNow("after-memorize-local-pending");
@@ -623,7 +618,13 @@ export async function dispatchConversationTurn(
             throw new Error('PI prompt must be JSON — message not sent.');
         }
         let parsed: any;
-        try { parsed = JSON.parse(trimmed); } catch (e: any) { throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${e?.message || String(e)})`); }
+        let parseErr: string | null = null;
+        for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
+            try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
+        }
+        if (parseErr !== null) {
+            throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
+        }
         if (!parsed || typeof parsed !== 'object') {
             throw new Error('PI prompt must be a JSON object or message array — message not sent.');
         }
