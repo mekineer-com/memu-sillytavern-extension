@@ -149,40 +149,16 @@ export function onGenerationStopped(): void {
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
     if (!Array.isArray(eventData?.chat)) return;
-    try {
-        await waitForPendingSwipeUndo();
-        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
-    } catch (e: any) {
-        const msg = e instanceof Error ? e.message : String(e);
-        warn(`memu retrieve skipped: ${msg}`);
-        const prev = getInspectData();
-        stashInspectData({
-            ...(prev || { timestamp: Date.now() }),
-            timestamp: Date.now(),
-            status: 'error',
-            error: msg,
-        });
-    }
+    await waitForPendingSwipeUndo();
+    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
 }
 
 export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
     if (eventData?.dryRun) return;
     if (main_api === 'openai') return;
     if (typeof eventData?.prompt !== 'string') return;
-    try {
-        await waitForPendingSwipeUndo();
-        await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
-    } catch (e: any) {
-        const msg = e instanceof Error ? e.message : String(e);
-        warn(`memu retrieve skipped: ${msg}`);
-        const prev = getInspectData();
-        stashInspectData({
-            ...(prev || { timestamp: Date.now() }),
-            timestamp: Date.now(),
-            status: 'error',
-            error: msg,
-        });
-    }
+    await waitForPendingSwipeUndo();
+    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get(), _skipTurnMaintenanceOnce);
 }
 
 export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
