@@ -72,59 +72,56 @@ export async function summaryIfNeed(): Promise<void> {
     }
 
     isSummarying = true;
+    try {
+        // Ensure per-chat baseInfo reflects the *current* character before we decide to digest.
+        await initChatExtraInfo(st.getContext());
 
-    // Ensure per-chat baseInfo reflects the *current* character before we decide to digest.
-    await initChatExtraInfo(st.getContext());
+        const chatId = getChatIdSafe();
+        if (!chatId) {
+            // Chat not fully initialized yet (no stable chatId). Avoid a false "re-digest" on load.
+            return;
+        }
 
-    const chatId = getChatIdSafe();
-    if (!chatId) {
-        // Chat not fully initialized yet (no stable chatId). Avoid a false "re-digest" on load.
+        const lastToFromSummary = memuExtras.summary?.summaryRange?.[1];
+        const lastToFromRetrieve = memuExtras.retrieve?.nowRetrieve?.summaryRange?.[1];
+
+        const lastTo = Math.max(
+            Number.isFinite(lastToFromSummary as any) ? (lastToFromSummary as any as number) : -1,
+            Number.isFinite(lastToFromRetrieve as any) ? (lastToFromRetrieve as any as number) : -1,
+        );
+
+        const from = lastTo + 1;
+        const chat = st.getContext().chat;
+
+        // Nothing new since last digest.
+        if (from >= chat.length) {
+            return;
+        }
+
+        // If a summary task is already running, let the poller handle it.
+        if (memuExtras.summary && (memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PROCESSING)) {
+            return;
+        }
+
+        // Backoff (minimal): if we failed recently, pause auto-digest for a bit.
+        const sf: any = memuExtras.summary;
+        const nowMs = Date.now();
+        const pauseUntilMs = Number(sf?.pauseUntilMs ?? 0);
+        if (pauseUntilMs && nowMs < pauseUntilMs) {
+            return;
+        }
+        if (sf && sf.summaryTaskStatus === MemuTaskStatus.FAILURE) {
+            const fc = Number(sf.failureCount ?? 0);
+            const pauseMs = (fc >= 3) ? (5 * 60_000) : 10_000;
+            sf.pauseUntilMs = nowMs + pauseMs;
+            return;
+        }
+        const chatLen = chat.length;
+        status(chatLen, from);
+        await doSummary(from, chat.length - 1);
+    } finally {
         isSummarying = false;
-        return;
     }
-
-    const lastToFromSummary = memuExtras.summary?.summaryRange?.[1];
-    const lastToFromRetrieve = memuExtras.retrieve?.nowRetrieve?.summaryRange?.[1];
-
-    const lastTo = Math.max(
-        Number.isFinite(lastToFromSummary as any) ? (lastToFromSummary as any as number) : -1,
-        Number.isFinite(lastToFromRetrieve as any) ? (lastToFromRetrieve as any as number) : -1,
-    );
-
-    const from = lastTo + 1;
-    const chat = st.getContext().chat;
-
-    // Nothing new since last digest.
-    if (from >= chat.length) {
-        isSummarying = false;
-        return;
-    }
-
-    // If a summary task is already running, let the poller handle it.
-    if (memuExtras.summary && (memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PROCESSING)) {
-        isSummarying = false;
-        return;
-    }
-
-    // Backoff (minimal): if we failed recently, pause auto-digest for a bit.
-    const sf: any = memuExtras.summary;
-    const nowMs = Date.now();
-    const pauseUntilMs = Number(sf?.pauseUntilMs ?? 0);
-    if (pauseUntilMs && nowMs < pauseUntilMs) {
-        isSummarying = false;
-        return;
-    }
-    if (sf && sf.summaryTaskStatus === MemuTaskStatus.FAILURE) {
-        const fc = Number(sf.failureCount ?? 0);
-        const pauseMs = (fc >= 3) ? (5 * 60_000) : 10_000;
-        sf.pauseUntilMs = nowMs + pauseMs;
-        isSummarying = false;
-        return;
-    }
-    const chatLen = chat.length;
-    status(chatLen, from);
-    await doSummary(from, chat.length - 1);
-    isSummarying = false;
 }
 
 export async function doSummary(from: number, to: number, force: boolean = false): Promise<void> {

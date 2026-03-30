@@ -26,9 +26,12 @@ let _pendingSwipeUndo: Promise<void> | null = null;
 async function waitForPendingSwipeUndo(): Promise<void> {
     const pending = _pendingSwipeUndo;
     if (!pending) return;
-    await pending;
-    if (_pendingSwipeUndo === pending) {
-        _pendingSwipeUndo = null;
+    try {
+        await pending;
+    } finally {
+        if (_pendingSwipeUndo === pending) {
+            _pendingSwipeUndo = null;
+        }
     }
 }
 
@@ -132,7 +135,7 @@ export function onMessageSwiped(_msgIdAny: any): void {
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
-        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId).then(() => {});
+        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
     }
 }
 
@@ -200,10 +203,10 @@ export function onChatChanged(): void {
         setIsTerminated(false);
         await initChatExtraInfo(ctx);
         window.dispatchEvent(new Event('memu:server-ready'));
-        await maybeClearStaleLocalState();
         startSummaryPolling();
         // On chat-open: run the normal "should we memorize?" check.
         summaryIfNeedDebounced();
+        await maybeClearStaleLocalState();
     }
     void init();
 }
