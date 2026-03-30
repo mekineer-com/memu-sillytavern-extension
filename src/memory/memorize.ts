@@ -971,7 +971,7 @@ async function prepareConversationData(from: number, to: number): Promise<Conver
         return {
             role: chatItem.is_user
                 ? (chatItem.name === memuExtras.baseInfo.userName ? 'user' : 'participant')
-                : 'assistant',
+                : 'soul',
             name: chatItem.is_user && chatItem.name !== memuExtras.baseInfo.userName ? chatItem.name : undefined,
             content: regexedMessage,
             // Preserve timestamp if available (ST chat.jsonl uses ISO send_date).
