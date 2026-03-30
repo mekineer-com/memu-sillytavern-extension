@@ -106,7 +106,7 @@ export interface ConversationData {
 }
 
 export interface ConversationMessage {
-  role: 'user' | 'assistant' | 'participant';
+  role: 'user' | 'soul' | 'participant';
   content: string;
   name?: string;
   // Optional: message timestamp in epoch milliseconds (UTC). Prefer this for deterministic splits.

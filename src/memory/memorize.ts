@@ -368,7 +368,7 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
         const row: any = chat[i];
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
-        const role = row?.is_user ? 'user' : 'assistant';
+        const role = row?.is_user ? 'user' : 'soul';
         const item: Record<string, any> = { role, content };
         if (row?.is_user && String(row?.name || '') !== String(userName || '')) {
             item.name = String(row?.name || '');
