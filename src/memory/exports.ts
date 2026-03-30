@@ -15,9 +15,7 @@ import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
 
 const summaryIfNeedDebounced = st.debounce(() => {
-    try {
-        void summaryIfNeed();
-    } catch { }
+    void summaryIfNeed();
 }, st.debounce_timeout.extended);
 
 const staleCursorResetOnceByScope = new Set<string>();
@@ -28,9 +26,7 @@ let _pendingSwipeUndo: Promise<void> | null = null;
 async function waitForPendingSwipeUndo(): Promise<void> {
     const pending = _pendingSwipeUndo;
     if (!pending) return;
-    try {
-        await pending;
-    } catch { }
+    await pending;
     if (_pendingSwipeUndo === pending) {
         _pendingSwipeUndo = null;
     }
@@ -80,8 +76,7 @@ async function maybeClearStaleLocalState(): Promise<void> {
 
     // If scoped storage is missing/empty but we still have a local cursor, clear once so digest restarts at 0.
     if (!cursorCleared && hasCursor && userId && soulId) {
-        try {
-            const probe = await scopeStorageProbe(userId, soulId);
+        const probe = await scopeStorageProbe(userId, soulId);
             const missingOrEmpty = probe?.ok === true && probe?.missingOrEmpty === true;
             if (missingOrEmpty) {
                 const alreadyReset = scopeKey ? staleCursorResetOnceByScope.has(scopeKey) : false;
@@ -97,7 +92,6 @@ async function maybeClearStaleLocalState(): Promise<void> {
                 // Storage recovered/populated: allow a future one-shot reset if the DB is reset again.
                 staleCursorResetOnceByScope.delete(scopeKey);
             }
-        } catch { }
     }
 
     if (pingSession && prevSession !== pingSession) {
@@ -126,7 +120,7 @@ export function onMessageDeleted(): void {
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
-        void conversationCacheClear(conversationId, userId, soulId).catch(() => {});
+        void conversationCacheClear(conversationId, userId, soulId);
     }
 }
 
@@ -138,7 +132,7 @@ export function onMessageSwiped(_msgIdAny: any): void {
     const userId = String(ctx.name1 || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
-        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId).then(() => {}).catch(() => {});
+        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId).then(() => {});
     }
 }
 
@@ -203,15 +197,13 @@ export function onChatChanged(): void {
     }
 
     async function init() {
-        try {
-            setIsTerminated(false);
-            await initChatExtraInfo(ctx);
-            window.dispatchEvent(new Event('memu:server-ready'));
-            await maybeClearStaleLocalState();
-            startSummaryPolling();
-            // On chat-open: run the normal "should we memorize?" check.
-            summaryIfNeedDebounced();
-        } catch { }
+        setIsTerminated(false);
+        await initChatExtraInfo(ctx);
+        window.dispatchEvent(new Event('memu:server-ready'));
+        await maybeClearStaleLocalState();
+        startSummaryPolling();
+        // On chat-open: run the normal "should we memorize?" check.
+        summaryIfNeedDebounced();
     }
     void init();
 }

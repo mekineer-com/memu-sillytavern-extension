@@ -74,7 +74,7 @@ export async function summaryIfNeed(): Promise<void> {
     isSummarying = true;
 
     // Ensure per-chat baseInfo reflects the *current* character before we decide to digest.
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
 
     const chatId = getChatIdSafe();
     if (!chatId) {
@@ -128,7 +128,7 @@ export async function summaryIfNeed(): Promise<void> {
 }
 
 export async function doSummary(from: number, to: number, force: boolean = false): Promise<void> {
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
         return;
@@ -202,7 +202,7 @@ export async function doSummary(from: number, to: number, force: boolean = false
 }
 
 export async function memorizeNow(): Promise<void> {
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
     const chat = st.getContext().chat;
     if (!Array.isArray(chat) || chat.length === 0) {
         warn("memorize now skipped: empty chat");
@@ -216,7 +216,7 @@ export async function memorizeNow(): Promise<void> {
 // One-shot: (re)create and populate memU World Info lorebooks right now.
 // Useful when lorebooks were deleted, or when digest/retrieve is delayed.
 export async function syncLorebooksNow(reason: string = "manual"): Promise<void> {
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
     try {
         if (!memuExtras.baseInfo) return;
         const resp = await retrieveDefaultCategories(memuExtras.baseInfo.userId, memuExtras.baseInfo.characterId);
@@ -230,7 +230,7 @@ export async function syncLorebooksNow(reason: string = "manual"): Promise<void>
 }
 
 export async function retrieveMemories(summary: MemuSummary): Promise<void> {
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
     try {
         const response = await retrieveDefaultCategories(
             memuExtras.baseInfo.userId,
@@ -431,7 +431,7 @@ export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
 }
 
 async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | null> {
-    try { await initChatExtraInfo(st.getContext()); } catch { }
+    await initChatExtraInfo(st.getContext());
     if (!memuExtras.baseInfo) return null;
 
     const ctx: any = st.getContext();
@@ -863,12 +863,8 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
 
     // ST UI doesn't always refresh the World Info lists immediately when aux books change.
     // Force a lightweight refresh so the lorebooks appear without a full page reload.
-    try {
-        await updateWorldInfoList();
-    } catch { }
-    try {
-        (st as any)?.eventSource?.emit?.((st as any)?.event_types?.SETTINGS_UPDATED);
-    } catch { }
+    await updateWorldInfoList();
+    (st as any)?.eventSource?.emit?.((st as any)?.event_types?.SETTINGS_UPDATED);
 }
 
 export function addSummaryToPrompt(

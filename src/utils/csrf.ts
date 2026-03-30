@@ -8,7 +8,7 @@ export async function getCsrfTokenCached(): Promise<string> {
     }
 
     const tokenResp = await fetch('/csrf-token');
-    const parsed = await tokenResp.json().catch(() => ({} as any));
+    const parsed = await tokenResp.json();
     const token = String(parsed?.token || '');
     _csrfCache = { token, at: now };
     return token;
@@ -30,5 +30,5 @@ export async function postJsonWithCsrf<T = any>(url: string, body?: any): Promis
         throw new Error(`${url} failed (${resp.status}): ${txt}`);
     }
 
-    return resp.json().catch(() => ({} as T));
+    return resp.json();
 }
