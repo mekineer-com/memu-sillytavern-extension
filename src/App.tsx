@@ -224,16 +224,11 @@ export default function App() {
       // embedding model: dropdown overrides manual
       const selected = typeof next.embeddingModelSelected === 'string' ? next.embeddingModelSelected.trim() : '';
       const manual = typeof next.embeddingModelManual === 'string' ? next.embeddingModelManual.trim() : '';
-      const effective = selected || manual;
-
       if (selected) next.embeddingModelSelected = selected;
       else delete next.embeddingModelSelected;
 
       if (manual) next.embeddingModelManual = manual;
       else delete next.embeddingModelManual;
-
-      if (effective) next.embeddingModel = effective;
-      else delete next.embeddingModel;
 
       next.version = 4;
       next.updatedAt = new Date().toISOString();
@@ -367,7 +362,6 @@ export default function App() {
       updatePluginConfig({
         embeddingModelSelected: undefined,
         embeddingModelManual: undefined,
-        embeddingModel: undefined,
       } as any);
       return;
     }
@@ -375,7 +369,6 @@ export default function App() {
       setEmbedCustomMode(true);
       updatePluginConfig({
         embeddingModelSelected: undefined,
-        embeddingModel: undefined,
       } as any);
       return;
     }
@@ -383,7 +376,6 @@ export default function App() {
     updatePluginConfig({
       embeddingModelSelected: v,
       embeddingModelManual: undefined,
-      embeddingModel: v,
     } as any);
   }
 

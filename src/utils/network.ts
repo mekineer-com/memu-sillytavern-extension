@@ -63,9 +63,6 @@ export type ConversationTurnResponse = {
   state?: any;
   path?: string;
   turn_contract?: any;
-  turn_user_prompt?: string;
-  turn_system_prompt?: string;
-  final_turn_prompt?: string;
   final_turn_payload?: Record<string, any>;
   prompt_override_used?: boolean;
   dry_run?: boolean;

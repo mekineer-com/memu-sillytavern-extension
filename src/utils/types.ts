@@ -21,11 +21,6 @@ export interface MemuPluginConfigV1 {
   defaultProfileId?: string;
   stepProfileId?: Partial<Record<MemuStep, string>>;
 
-  /**
-   * Effective embedding model (derived).
-   * UI stores a dropdown selection and optional manual override.
-   */
-  embeddingModel?: string;
   embeddingModelSelected?: string;
   embeddingModelManual?: string;
 

@@ -493,12 +493,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
-    const turnPayload = (turnSystemPrompt && turnUserPrompt)
-        ? {
-            system_prompt: turnSystemPrompt,
-            user_prompt: turnUserPrompt,
-        }
-        : null;
     const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
         ? [
             { role: 'system', content: turnSystemPrompt },
@@ -561,7 +555,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         setLiveRetrieveSummary(promptSummary);
     }
     addSummaryToPrompt(eventData, replaceSystem, promptSummary);
-    if (turnPayload && turnPayloadJson) {
+    if (turnPayloadJson) {
         seedInspectPromptTextarea(turnPayloadJson);
         const prev = getInspectData();
         stashInspectData({
@@ -668,12 +662,9 @@ export async function dispatchConversationTurn(
     };
     if (includeDebug) {
         const finalTurnPayload = (resp as any)?.final_turn_payload;
-        const finalTurnPrompt =
-            finalTurnPayload && typeof finalTurnPayload === 'object'
-                ? JSON.stringify(finalTurnPayload, null, 2)
-                : (typeof (resp as any)?.final_turn_prompt === 'string'
-                    ? (resp as any).final_turn_prompt
-                    : (typeof resp?.turn_user_prompt === 'string' ? resp.turn_user_prompt : undefined));
+        const finalTurnPrompt = finalTurnPayload && typeof finalTurnPayload === 'object'
+            ? JSON.stringify(finalTurnPayload, null, 2)
+            : undefined;
         turnUpdate.query = turn.queryText;
         turnUpdate.userId = turn.userId;
         turnUpdate.soulId = turn.soulId;
@@ -681,7 +672,9 @@ export async function dispatchConversationTurn(
         turnUpdate.conversationId = turn.conversationId;
         turnUpdate.turnContract = resp?.turn_contract;
         turnUpdate.turnPrompt = finalTurnPrompt;
-        turnUpdate.turnSystemPrompt = typeof resp?.turn_system_prompt === 'string' ? resp.turn_system_prompt : undefined;
+        turnUpdate.turnSystemPrompt = typeof finalTurnPayload?.system_prompt === 'string'
+            ? finalTurnPayload.system_prompt
+            : undefined;
     }
     stashInspectData(turnUpdate);
 }
