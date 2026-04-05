@@ -369,10 +369,7 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
         const role = row?.is_user ? 'user' : 'soul';
-        const item: Record<string, any> = { role, content };
-        if (row?.is_user && String(row?.name || '') !== String(userName || '')) {
-            item.name = String(row?.name || '');
-        }
+        const item: Record<string, any> = { role, content, name: String(row?.name || '') };
         out.push(item);
     }
     return out;
@@ -965,7 +962,7 @@ async function prepareConversationData(from: number, to: number): Promise<Conver
             role: chatItem.is_user
                 ? (chatItem.name === memuExtras.baseInfo.userName ? 'user' : 'participant')
                 : 'soul',
-            name: chatItem.is_user && chatItem.name !== memuExtras.baseInfo.userName ? chatItem.name : undefined,
+            name: chatItem.name,
             content: regexedMessage,
             // Preserve timestamp if available (ST chat.jsonl uses ISO send_date).
             ts_ms: (() => {
