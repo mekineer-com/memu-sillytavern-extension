@@ -360,6 +360,26 @@ function resolveSoulCard(ctx: any): string {
     return card || DEFAULT_SOUL_CARD;
 }
 
+function resolveMessageTsMs(row: any): number | undefined {
+    const numeric = (v: any): number | undefined => {
+        const n = typeof v === 'number' ? v : Number(v);
+        if (!Number.isFinite(n)) return undefined;
+        return Math.trunc(n);
+    };
+
+    const fromTsMs = numeric(row?.ts_ms);
+    if (fromTsMs !== undefined) return fromTsMs;
+
+    const fromTimestamp = numeric(row?.timestamp);
+    if (fromTimestamp !== undefined) return fromTimestamp;
+
+    const sendDate = String(row?.send_date ?? '').trim();
+    if (!sendDate) return undefined;
+    const parsed = Date.parse(sendDate);
+    if (!Number.isFinite(parsed)) return undefined;
+    return Math.trunc(parsed);
+}
+
 function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
     if (!Array.isArray(chat) || endIdx < 0) return [];
     const start = Math.max(0, endIdx - 39);
@@ -369,7 +389,14 @@ function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
         const role = row?.is_user ? 'user' : 'soul';
-        const item: Record<string, any> = { role, content, name: String(row?.name || '') };
+        const item: Record<string, any> = {
+            role,
+            content,
+            name: String(row?.name || ''),
+            source_message_id: String(i),
+        };
+        const tsMs = resolveMessageTsMs(row);
+        if (tsMs !== undefined) item.ts_ms = tsMs;
         out.push(item);
     }
     return out;

@@ -88,22 +88,27 @@ async function maybeClearStaleLocalState(): Promise<void> {
 
     // If scoped storage is missing/empty but we still have a local cursor, clear once so digest restarts at 0.
     if (!cursorCleared && hasCursor && userId && soulId) {
-        const probe = await scopeStorageProbe(userId, soulId);
-            const missingOrEmpty = probe?.ok === true && probe?.missingOrEmpty === true;
-            if (missingOrEmpty) {
-                const alreadyReset = scopeKey ? staleCursorResetOnceByScope.has(scopeKey) : false;
-                if (!alreadyReset) {
-                    memuExtras.summary = undefined;
-                    memuExtras.retrieve = undefined;
-                    changed = true;
-                    cursorCleared = true;
-                    if (scopeKey) staleCursorResetOnceByScope.add(scopeKey);
-                    info(`cursor cleared (storage probe missing/empty, userId=${userId}, soulId=${soulId}, reason=${String(probe?.reason || 'none')})`);
-                }
-            } else if (scopeKey) {
-                // Storage recovered/populated: allow a future one-shot reset if the DB is reset again.
-                staleCursorResetOnceByScope.delete(scopeKey);
+        let probe: any = null;
+        try {
+            probe = await scopeStorageProbe(userId, soulId);
+        } catch {
+            probe = null;
+        }
+        const missingOrEmpty = probe?.ok === true && probe?.missingOrEmpty === true;
+        if (missingOrEmpty) {
+            const alreadyReset = scopeKey ? staleCursorResetOnceByScope.has(scopeKey) : false;
+            if (!alreadyReset) {
+                memuExtras.summary = undefined;
+                memuExtras.retrieve = undefined;
+                changed = true;
+                cursorCleared = true;
+                if (scopeKey) staleCursorResetOnceByScope.add(scopeKey);
+                info(`cursor cleared (storage probe missing/empty, userId=${userId}, soulId=${soulId}, reason=${String(probe?.reason || 'none')})`);
             }
+        } else if (scopeKey && probe?.ok === true) {
+            // Storage recovered/populated: allow a future one-shot reset if the DB is reset again.
+            staleCursorResetOnceByScope.delete(scopeKey);
+        }
     }
 
     if (pingSession && prevSession !== pingSession) {

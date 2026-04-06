@@ -2,6 +2,20 @@ import { LOCAL_USER_ID, memuExtras, st } from "utils/context-extra";
 import { estimateTokenUsage } from "utils/utils";
 
 
+async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, delayMs: number = 120): Promise<any | null> {
+    let ctx = initialCtx;
+    for (let i = 0; i < attempts; i++) {
+        const character = ctx?.characters?.[ctx?.characterId];
+        if (character) return character;
+        if (i < attempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            ctx = st.getContext();
+        }
+    }
+    return null;
+}
+
+
 function getStableLocalUserId(fallback: string | undefined): string {
     try {
         const existing = LOCAL_USER_ID.get();
@@ -29,7 +43,7 @@ function getStableLocalUserId(fallback: string | undefined): string {
 
 export async function initChatExtraInfo(ctx: any): Promise<void> {
     // IMPORTANT: never guess the character. If SillyTavern context isn"t ready yet, bail and try again later.
-    const character = ctx?.characters?.[ctx?.characterId];
+    const character = await waitForActiveCharacter(ctx);
     if (!character) {
         return;
     }
