@@ -663,6 +663,8 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         method: (resp as any)?.method,
         conversationId: (resp as any)?.conversation_id,
         retrieveMs: typeof (resp as any)?.retrieve_ms === 'number' ? (resp as any).retrieve_ms : undefined,
+        queries: typeof (resp as any)?.queries === 'number' ? (resp as any).queries : undefined,
+        needsRetrieval: typeof (result as any)?.needs_retrieval === 'boolean' ? (result as any).needs_retrieval : undefined,
         turnSystemPrompt: typeof (resp as any)?.turn_system_prompt === 'string'
             ? (resp as any).turn_system_prompt : undefined,
         turnPrompt: turnPayloadJson,

@@ -22,6 +22,8 @@ export type InspectData = {
     method?: string;
     conversationId?: string;
     retrieveMs?: number;
+    queries?: number;
+    needsRetrieval?: boolean;
     turnStatus?: 'pending' | 'ok' | 'error';
     turnError?: string;
     turnContract?: any;
@@ -127,8 +129,9 @@ function renderInspectHtml(data: InspectData): string {
     const items = data.items || [];
     const resources = Array.isArray(data.resources) ? data.resources : [];
 
+    const qStr = typeof data.queries === 'number' ? ` q=${data.queries}` : '';
     const rmsStr = data.retrieveMs != null ? ` ${secondsFromMs(data.retrieveMs)}` : '';
-    parts.push(`<div style="margin-bottom:4px"><b>Retrieve:</b> status=${esc(status)} cats=${cats.length} items=${items.length} res=${resources.length}${rmsStr}</div>`);
+    parts.push(`<div style="margin-bottom:4px"><b>Retrieve:</b> status=${esc(status)}${qStr} cats=${cats.length} items=${items.length} res=${resources.length}${rmsStr}</div>`);
     const pcCh = data.priorContext ? data.priorContext.length : 0;
     const mcN = data.memoryCache ? data.memoryCache.length : 0;
     const intN = data.intentions ? data.intentions.length : 0;
@@ -143,7 +146,13 @@ function renderInspectHtml(data: InspectData): string {
     } else if (status === 'pending') {
         parts.push(`<div style="opacity:0.7">(retrieve pending; waiting for prompt build)</div>`);
     } else if (cats.length === 0 && items.length === 0 && resources.length === 0) {
-        parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
+        if (data.needsRetrieval === false) {
+            parts.push(`<div style="opacity:0.7">(route_intention said NO_RETRIEVE for this message)</div>`);
+        } else if (data.needsRetrieval === true) {
+            parts.push(`<div style="opacity:0.7">(retrieve ran, but found no matching items/categories)</div>`);
+        } else {
+            parts.push(`<div style="opacity:0.7">(retrieve returned 0 items/categories)</div>`);
+        }
     }
 
     if (data.turnStatus === 'pending') {
