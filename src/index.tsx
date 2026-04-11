@@ -16,6 +16,7 @@ import {
 import { st } from './utils/context-extra';
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
+import { installAutomationHooks } from './ui/automation-hooks';
 
 function installHooksWithRetry(): void {
     const w = window as any;
@@ -198,3 +199,4 @@ if (!tryMount()) {
 
 installChatOptionResetCursor();
 startInspectObserver();
+installAutomationHooks();
