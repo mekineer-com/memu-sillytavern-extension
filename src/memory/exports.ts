@@ -1,6 +1,7 @@
 import { OVERRIDE_SUMMARIZER, memuExtras, st } from "utils/context-extra";
 import {
     addPendingRetrieveToPrompt,
+    cancelPendingRetrieveRequest,
     summaryIfNeed,
     getChatIdSafe,
     dispatchConversationTurn,
@@ -165,6 +166,7 @@ export function onMessageSwiped(_msgIdAny: any): void {
 
 export function onGenerationStopped(): void {
     lastGenerationStoppedAt = Date.now();
+    cancelPendingRetrieveRequest('Retrieve cancelled by stop button');
 }
 
 export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
@@ -187,13 +189,6 @@ export async function onGenerateAfterData(generateData: any, dryRun?: boolean): 
     await waitForPendingSwipeUndo();
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         _skipTurnMaintenanceOnce = false;
-        const prev = getInspectData();
-        stashInspectData({
-            ...(prev || { timestamp: Date.now() }),
-            timestamp: Date.now(),
-            turnStatus: 'error',
-            turnError: 'Generation cancelled before memU turn dispatch',
-        });
         return;
     }
     try {

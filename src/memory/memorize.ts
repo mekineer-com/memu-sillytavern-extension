@@ -27,6 +27,21 @@ type PendingRetrieveTurn = {
 };
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
+let _pendingRetrieveAbort: AbortController | null = null;
+let _pendingRetrieveAbortReason: string | null = null;
+const RETRIEVE_REQUEST_TIMEOUT_MS = 30_000;
+
+function isAbortError(err: any): boolean {
+    if (!err) return false;
+    const name = String((err as any)?.name || '').trim();
+    if (name === 'AbortError') return true;
+    const msg = String((err as any)?.message || err);
+    return /\babort(ed)?\b/i.test(msg);
+}
+
+function isStopButtonCancelReason(reason: string): boolean {
+    return /\bstop button\b/i.test(String(reason || ''));
+}
 
 export function getChatIdSafe(): string {
     try {
@@ -423,7 +438,32 @@ function _chatContentText(raw: any): string {
 
 
 export function resetRetrievePipelineState(): void {
+    if (_pendingRetrieveAbort) {
+        _pendingRetrieveAbortReason = 'Retrieve pipeline reset';
+        _pendingRetrieveAbort.abort(_pendingRetrieveAbortReason);
+        _pendingRetrieveAbort = null;
+    }
     _pendingRetrieveTurn = null;
+}
+
+export function cancelPendingRetrieveRequest(reason: string = 'Retrieve cancelled'): boolean {
+    const hadPending = _pendingRetrieveTurn != null || _pendingRetrieveAbort != null;
+    if (!hadPending) return false;
+    if (_pendingRetrieveAbort) {
+        _pendingRetrieveAbortReason = reason;
+        _pendingRetrieveAbort.abort(reason);
+        _pendingRetrieveAbort = null;
+    }
+    _pendingRetrieveTurn = null;
+    if (isStopButtonCancelReason(reason)) return true;
+    const prev = getInspectData();
+    stashInspectData({
+        ...(prev || { timestamp: Date.now() }),
+        timestamp: Date.now(),
+        status: 'error',
+        error: reason,
+    });
+    return true;
 }
 
 export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
@@ -431,6 +471,11 @@ export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
     const turn = _pendingRetrieveTurn;
     if (!turn) return false;
     if (turn.createdAt <= stoppedAtMs) {
+        if (_pendingRetrieveAbort) {
+            _pendingRetrieveAbortReason = 'Generation stopped before retrieve finished';
+            _pendingRetrieveAbort.abort(_pendingRetrieveAbortReason);
+            _pendingRetrieveAbort = null;
+        }
         _pendingRetrieveTurn = null;
         return true;
     }
@@ -480,6 +525,16 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const retrieveSoulCard = resolveSoulCard(retrieveCtx);
 
     let resp: any;
+    const retrieveAbort = new AbortController();
+    const retrieveStartedAt = Date.now();
+    const retrieveTimeoutHandle = window.setTimeout(() => {
+        if (!retrieveAbort.signal.aborted) {
+            _pendingRetrieveAbortReason = `Retrieve timed out after ${Math.round(RETRIEVE_REQUEST_TIMEOUT_MS / 1000)}s`;
+            retrieveAbort.abort(_pendingRetrieveAbortReason);
+        }
+    }, RETRIEVE_REQUEST_TIMEOUT_MS);
+    _pendingRetrieveAbort = retrieveAbort;
+    _pendingRetrieveAbortReason = null;
     try {
         resp = await conversationRetrieve({
             userId: turn.userId,
@@ -490,8 +545,40 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             history: turn.history,
             buildTurnPrompt: true,
             soul_card: retrieveSoulCard,
-        });
+        }, { signal: retrieveAbort.signal });
     } catch (err: any) {
+        if (isAbortError(err)) {
+            const reasonRaw = (retrieveAbort.signal as any)?.reason;
+            const reason = typeof reasonRaw === 'string' && reasonRaw.trim()
+                ? reasonRaw
+                : (_pendingRetrieveAbortReason || 'Retrieve cancelled');
+            if (isStopButtonCancelReason(reason)) {
+                if (eventData && typeof eventData === 'object') {
+                    (eventData as any).__memu_cancelled = true;
+                }
+                _pendingRetrieveTurn = null;
+                return;
+            }
+            const cachedSummary = String(
+                memuExtras.retrieve?.liveRetrieve?.summary || memuExtras.retrieve?.nowRetrieve?.summary || '',
+            ).trim();
+            const fallbackReason = /\btime(d)?\s*out\b/i.test(reason) ? 'retrieve timed out' : 'retrieve cancelled';
+            const fallbackSummary = cachedSummary || `Retrieved memory context:\n(nothing this time — ${fallbackReason})`;
+            _pendingRetrieveTurn = null;
+            stashInspectData({
+                timestamp: Date.now(),
+                query: turn.queryText,
+                status: 'error',
+                error: reason,
+                userId: turn.userId,
+                soulId: turn.soulId,
+                method: 'rag',
+                conversationId: turn.conversationId,
+                retrieveMs: Date.now() - retrieveStartedAt,
+            });
+            addSummaryToPrompt(eventData, replaceSystem, fallbackSummary);
+            return;
+        }
         _pendingRetrieveTurn = null;
         stashInspectData({
             timestamp: Date.now(),
@@ -504,6 +591,14 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             conversationId: turn.conversationId,
         });
         throw err;
+    } finally {
+        window.clearTimeout(retrieveTimeoutHandle);
+        if (_pendingRetrieveAbort === retrieveAbort) {
+            _pendingRetrieveAbort = null;
+        }
+        if (_pendingRetrieveAbortReason != null) {
+            _pendingRetrieveAbortReason = null;
+        }
     }
     const result = (resp as any)?.result ?? null;
     const ragSummary = parseRetrieveResult(result);

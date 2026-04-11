@@ -111,6 +111,12 @@ function bindInspectPromptMirror(): void {
 }
 
 function renderInspectHtml(data: InspectData): string {
+    const secondsFromMs = (ms: number): string => {
+        const value = Number(ms) / 1000;
+        if (!Number.isFinite(value)) return '?s';
+        return value >= 10 ? `${value.toFixed(1)}s` : `${value.toFixed(2)}s`;
+    };
+
     const parts: string[] = [];
     const status = data.status || (data.error ? 'error' : 'ok');
 
@@ -121,7 +127,7 @@ function renderInspectHtml(data: InspectData): string {
     const items = data.items || [];
     const resources = Array.isArray(data.resources) ? data.resources : [];
 
-    const rmsStr = data.retrieveMs != null ? ` ${data.retrieveMs}ms` : '';
+    const rmsStr = data.retrieveMs != null ? ` ${secondsFromMs(data.retrieveMs)}` : '';
     parts.push(`<div style="margin-bottom:4px"><b>Retrieve:</b> status=${esc(status)} cats=${cats.length} items=${items.length} res=${resources.length}${rmsStr}</div>`);
     const pcCh = data.priorContext ? data.priorContext.length : 0;
     const mcN = data.memoryCache ? data.memoryCache.length : 0;
@@ -156,7 +162,7 @@ function renderInspectHtml(data: InspectData): string {
         parts.push(`</details>`);
         const sp = String(data.turnSystemPrompt || '');
         const up = String(data.turnPrompt || '');
-        const tmsStr = data.turnMs != null ? ` · turn=${data.turnMs}ms` : '';
+        const tmsStr = data.turnMs != null ? ` · turn=${secondsFromMs(data.turnMs)}` : '';
         const repStr = data.replyCh != null ? ` · reply=${data.replyCh}ch` : '';
         parts.push(`<div style="opacity:0.75">prompt: user=${up.length}ch sys=${sp.length}ch${repStr}${tmsStr}</div>`);
         if (data.apimwStatus) {

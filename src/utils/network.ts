@@ -26,6 +26,9 @@ export type ConversationRetrieveRequest = {
   buildTurnPrompt?: boolean;
   soul_card?: string;
 };
+type RequestOptions = {
+  signal?: AbortSignal;
+};
 export type ConversationRetrieveResponse = {
   ok: boolean;
   result?: any;
@@ -148,8 +151,11 @@ export async function retrieveDefaultCategories(userId: string, soulId: string):
   return request<DefaultCategoriesResponse>('/retrieveDefaultCategories', { userId, soulId });
 }
 
-export async function conversationRetrieve(body: ConversationRetrieveRequest): Promise<ConversationRetrieveResponse> {
-  return request<ConversationRetrieveResponse>('/conversationRetrieve', body);
+export async function conversationRetrieve(
+  body: ConversationRetrieveRequest,
+  options?: RequestOptions,
+): Promise<ConversationRetrieveResponse> {
+  return request<ConversationRetrieveResponse>('/conversationRetrieve', body, 'POST', { 'Content-Type': 'application/json' }, options);
 }
 
 export async function conversationTurn(body: ConversationTurnRequest): Promise<ConversationTurnResponse> {
@@ -189,6 +195,7 @@ async function request<T>(
   body: any | undefined,
   method: string = 'POST',
   headers: Record<string, string> = { 'Content-Type': 'application/json' },
+  options?: RequestOptions,
 ): Promise<T> {
   const csrfToken = await getCsrfTokenCached();
 
@@ -198,6 +205,7 @@ async function request<T>(
       ...headers,
       'x-csrf-token': csrfToken,
     },
+    signal: options?.signal,
     ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
   });
 
