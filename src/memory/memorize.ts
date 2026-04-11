@@ -24,6 +24,7 @@ type PendingRetrieveTurn = {
     soulId: string;
     queryText: string;
     history: Array<Record<string, any>>;
+    preparedPayload: Record<string, any> | null;
 };
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
@@ -508,7 +509,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     if (!conversationId || !userId || !soulId) return null;
     const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), String(ctx?.name1 || ''));
 
-    return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history };
+    return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history, preparedPayload: null };
 }
 
 export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
@@ -517,9 +518,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         addSummaryToPrompt(eventData, replaceSystem);
         return;
     }
-    if (!_pendingRetrieveTurn) {
-        _pendingRetrieveTurn = turn;
-    }
+    _pendingRetrieveTurn = turn;
 
     const retrieveCtx: any = st.getContext();
     const retrieveSoulCard = resolveSoulCard(retrieveCtx);
@@ -559,11 +558,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
                 _pendingRetrieveTurn = null;
                 return;
             }
-            const cachedSummary = String(
-                memuExtras.retrieve?.liveRetrieve?.summary || memuExtras.retrieve?.nowRetrieve?.summary || '',
-            ).trim();
-            const fallbackReason = /\btime(d)?\s*out\b/i.test(reason) ? 'retrieve timed out' : 'retrieve cancelled';
-            const fallbackSummary = cachedSummary || `Retrieved memory context:\n(nothing this time — ${fallbackReason})`;
             _pendingRetrieveTurn = null;
             stashInspectData({
                 timestamp: Date.now(),
@@ -576,8 +570,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
                 conversationId: turn.conversationId,
                 retrieveMs: Date.now() - retrieveStartedAt,
             });
-            addSummaryToPrompt(eventData, replaceSystem, fallbackSummary);
-            return;
+            throw new Error(reason);
         }
         _pendingRetrieveTurn = null;
         stashInspectData({
@@ -612,6 +605,29 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
+    const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
+    if (!turnUserPrompt) {
+        _pendingRetrieveTurn = null;
+        throw new Error('conversationRetrieve missing turn_user_prompt — turn blocked.');
+    }
+    const preparedPayload: Record<string, any> = {
+        system_prompt: turnSystemPrompt,
+        user_prompt: turnUserPrompt,
+        prior_context: hasPriorPayload ? String((resp as any).prior_context || '') : '',
+        memory_cache: memoryCacheRaw
+            .map((v: any) => String(v ?? '').trim())
+            .filter(Boolean),
+        intentions_active: ((resp as any)?.intentions_active && typeof (resp as any).intentions_active === 'object')
+            ? (resp as any).intentions_active
+            : { items: [] },
+        retrieve_rag: (result && typeof result === 'object')
+            ? result
+            : { categories: [], items: [], resources: [] },
+    };
+    if (typeof (resp as any)?.retrieve_ms === 'number') {
+        preparedPayload.retrieve_ms = (resp as any).retrieve_ms;
+    }
+    _pendingRetrieveTurn = { ...turn, preparedPayload };
     const turnPayloadInspect = (turnSystemPrompt && turnUserPrompt)
         ? [
             { role: 'system', content: turnSystemPrompt },
@@ -655,7 +671,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             ? 'pending' : undefined,
     });
 
-    const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
     const promptSections: string[] = [];
     if (hasPriorPayload) {
         promptSections.push(`[Prior context]\n${priorContextSummary || '(none)'}`);
@@ -691,7 +706,9 @@ export async function dispatchConversationTurn(
     opts: { debug?: boolean; applyTurnMaintenance?: boolean } = {},
 ): Promise<void> {
     const turn = _pendingRetrieveTurn;
-    if (!turn) return;
+    if (!turn) {
+        throw new Error('memU pending retrieve is missing — retrieve must complete before turn.');
+    }
     _pendingRetrieveTurn = null;
 
     const includeDebug = opts.debug === true;
@@ -713,7 +730,11 @@ export async function dispatchConversationTurn(
     const turnCtx: any = st.getContext();
     const turnSoulCard = resolveSoulCard(turnCtx);
     const promptOverrideRaw = readInspectPromptTextarea();
-    let promptOverridePayload: Record<string, any> | undefined;
+    const preparedPayload = turn.preparedPayload;
+    if (!preparedPayload || typeof preparedPayload !== 'object') {
+        throw new Error('memU prepared payload is missing — retrieve must complete before turn.');
+    }
+    let promptOverridePayload: Record<string, any> = { ...preparedPayload };
     if (promptOverrideRaw) {
         const trimmed = promptOverrideRaw.trim();
         if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
@@ -736,12 +757,22 @@ export async function dispatchConversationTurn(
             const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
             if (!usr) throw new Error('PI message array has no user message — message not sent.');
             promptOverridePayload = {
+                ...promptOverridePayload,
                 system_prompt: sys ? String(sys.content || '') : '',
                 user_prompt: String(usr.content || ''),
             };
         } else {
-            promptOverridePayload = parsed as Record<string, any>;
+            const parsedObj = parsed as Record<string, any>;
+            if (Object.prototype.hasOwnProperty.call(parsedObj, 'system_prompt')) {
+                promptOverridePayload.system_prompt = String(parsedObj.system_prompt || '');
+            }
+            if (Object.prototype.hasOwnProperty.call(parsedObj, 'user_prompt')) {
+                promptOverridePayload.user_prompt = String(parsedObj.user_prompt || '');
+            }
         }
+    }
+    if (!String(promptOverridePayload.user_prompt || '').trim()) {
+        throw new Error('memU prepared payload has empty user_prompt — message not sent.');
     }
 
     const stGenParams: Record<string, number> = {};
@@ -761,7 +792,7 @@ export async function dispatchConversationTurn(
         debug: includeDebug,
         soul_card: turnSoulCard,
         ...stGenParams,
-        ...(promptOverridePayload ? { promptOverridePayload } : {}),
+        promptOverridePayload,
     });
 
     const reply = String(resp?.response ?? '').trim();
