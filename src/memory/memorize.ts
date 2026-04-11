@@ -613,7 +613,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const preparedPayload: Record<string, any> = {
         system_prompt: turnSystemPrompt,
         user_prompt: turnUserPrompt,
-        prior_context: hasPriorPayload ? String((resp as any).prior_context || '') : '',
         memory_cache: memoryCacheRaw
             .map((v: any) => String(v ?? '').trim())
             .filter(Boolean),
