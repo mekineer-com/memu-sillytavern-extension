@@ -1,4 +1,5 @@
 import MemoryShowModal from 'component/MemoryShowModal';
+import NarrativeSuggestion from 'component/NarrativeSuggestion';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { memorizeNow } from 'memory/memorize';
 import EyeIcon from 'ui/icons';
@@ -819,6 +820,11 @@ export default function App() {
                 <small style={{ opacity: 0.85 }}>
                   Force extraction of the current accumulated chat even if no sleep gap has been detected yet.
                 </small>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label>Narrative Suggestion</label>
+                <NarrativeSuggestion />
               </div>
             </div>
           </div>

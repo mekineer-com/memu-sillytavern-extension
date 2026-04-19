@@ -190,6 +190,10 @@ export async function memorizeConversation(
   });
 }
 
+export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<void> {
+  await request<unknown>('/narrativeSuggestion', { userId, soulId, suggestion });
+}
+
 async function request<T>(
   url: string,
   body: any | undefined,

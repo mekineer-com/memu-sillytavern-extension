@@ -21,6 +21,8 @@ License: see LICENSE (upstream license applies).
 
 ### MemU Extension for SillyTavern
 
+**Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
+
 A seamless, powerful memory plugin powered by MemU!
 Requires a server plugin to function: [MemU-Plugin](https://github.com/mekineer-com/memu-sillytavern-plugin).
 
