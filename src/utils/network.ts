@@ -190,8 +190,8 @@ export async function memorizeConversation(
   });
 }
 
-export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<void> {
-  await request<unknown>('/narrativeSuggestion', { userId, soulId, suggestion });
+export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<{ narrative_self?: string }> {
+  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion });
 }
 
 async function request<T>(
