@@ -821,11 +821,11 @@ export default function App() {
                   Force extraction of the current accumulated chat even if no sleep gap has been detected yet.
                 </small>
               </div>
+            </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label>Narrative Suggestion</label>
-                <NarrativeSuggestion />
-              </div>
+            <div style={sectionStyle}>
+              <h4 style={sectionTitleStyle}>Narrative Suggestion</h4>
+              <NarrativeSuggestion />
             </div>
           </div>
         </div>
