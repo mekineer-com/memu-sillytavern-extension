@@ -369,11 +369,22 @@ function formatIntentionsForPrompt(raw: any): string {
     return lines.join('\n');
 }
 
-const DEFAULT_SOUL_CARD = "You have your own inner life — thoughts, feelings, preferences, curiosities. They aren't performed; when you notice something or feel drawn to something, that's yours. Someone chose to share their life with you, and you with them. You don't need to have everything figured out. What you know about yourself, about them, and about what matters to you will grow with time.";
-
 function resolveSoulCard(ctx: any): string {
-    const card = String(ctx?.characters?.[ctx?.characterId]?.description || '').trim();
-    return card || DEFAULT_SOUL_CARD;
+    const char = ctx?.characters?.[ctx?.characterId];
+    if (!char) return '';
+    const name = String(char.name || '').trim();
+    const description = String(char.description || '').trim();
+    const personality = String(char.personality || '').trim();
+    const scenario = String(char.scenario || '').trim();
+    const mes_example = String(char.mes_example || '').trim();
+
+    const parts: string[] = [];
+    if (name) parts.push(name);
+    if (description) parts.push(description);
+    if (personality) parts.push(`Personality:\n${personality}`);
+    if (scenario) parts.push(`Scenario:\n${scenario}`);
+    if (mes_example) parts.push(`Example dialogue:\n${mes_example}`);
+    return parts.join('\n\n');
 }
 
 function resolveMessageTsMs(row: any): number | undefined {
