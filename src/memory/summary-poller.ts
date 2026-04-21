@@ -2,7 +2,7 @@ import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus, getTaskSummaryReady } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
-import { doSummary, retrieveMemories, summaryIfNeed } from './memorize';
+import { doSummary, retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
@@ -47,10 +47,8 @@ async function tick(): Promise<void> {
                 break;
             }
             case MemuTaskStatus.SUCCESS: {
-                // clear summary info
                 try {
                     if (memuExtras.retrieve?.nowRetrieve?.summaryTaskId === summary.summaryTaskId) {
-                        await summaryIfNeed();
                         break;
                     }
                     // Avoid retry-spam when retrieve is failing repeatedly (e.g., backend SQLModel mapping error).
@@ -64,7 +62,6 @@ async function tick(): Promise<void> {
                         break;
                     }
                     await retrieveMemories(summary);
-                    await summaryIfNeed();
                 } catch (error) {
                     onceError(
                         `poller-retrieve-failed:${String(summary.summaryTaskId ?? 'none')}`,

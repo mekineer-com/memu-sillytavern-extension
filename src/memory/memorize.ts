@@ -6,7 +6,7 @@ import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly
 import { getChatCompletionPreset } from "@silly-tavern/scripts/openai.js";
 import { main_api } from "@silly-tavern/script.js";
 import { initChatExtraInfo } from "./utils";
-import { status, warn, error as logError, onceWarn } from "utils/log";
+import { warn, error as logError, onceWarn } from "utils/log";
 import {
     getInspectData,
     stashInspectData,
@@ -14,8 +14,6 @@ import {
     seedInspectPromptTextarea,
     readInspectPromptTextarea,
 } from "ui/inspect-panel";
-
-let isSummarying = false;
 
 type PendingRetrieveTurn = {
     createdAt: number;
@@ -77,64 +75,6 @@ export function getChatFileNameRaw(): string {
         return s;
     } catch {
         return '';
-    }
-}
-
-export async function summaryIfNeed(): Promise<void> {
-    if (isSummarying) {
-        return;
-    }
-
-    isSummarying = true;
-    try {
-        // Ensure per-chat baseInfo reflects the *current* character before we decide to digest.
-        await initChatExtraInfo(st.getContext());
-
-        const chatId = getChatIdSafe();
-        if (!chatId) {
-            // Chat not fully initialized yet (no stable chatId). Avoid a false "re-digest" on load.
-            return;
-        }
-
-        const lastToFromSummary = memuExtras.summary?.summaryRange?.[1];
-        const lastToFromRetrieve = memuExtras.retrieve?.nowRetrieve?.summaryRange?.[1];
-
-        const lastTo = Math.max(
-            Number.isFinite(lastToFromSummary as any) ? (lastToFromSummary as any as number) : -1,
-            Number.isFinite(lastToFromRetrieve as any) ? (lastToFromRetrieve as any as number) : -1,
-        );
-
-        const from = lastTo + 1;
-        const chat = st.getContext().chat;
-
-        // Nothing new since last digest.
-        if (from >= chat.length) {
-            return;
-        }
-
-        // If a summary task is already running, let the poller handle it.
-        if (memuExtras.summary && (memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary.summaryTaskStatus === MemuTaskStatus.PROCESSING)) {
-            return;
-        }
-
-        // Backoff (minimal): if we failed recently, pause auto-digest for a bit.
-        const sf: any = memuExtras.summary;
-        const nowMs = Date.now();
-        const pauseUntilMs = Number(sf?.pauseUntilMs ?? 0);
-        if (pauseUntilMs && nowMs < pauseUntilMs) {
-            return;
-        }
-        if (sf && sf.summaryTaskStatus === MemuTaskStatus.FAILURE) {
-            const fc = Number(sf.failureCount ?? 0);
-            const pauseMs = (fc >= 3) ? (5 * 60_000) : 10_000;
-            sf.pauseUntilMs = nowMs + pauseMs;
-            return;
-        }
-        const chatLen = chat.length;
-        status(chatLen, from);
-        await doSummary(from, chat.length - 1);
-    } finally {
-        isSummarying = false;
     }
 }
 

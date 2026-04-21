@@ -2,7 +2,6 @@ import { OVERRIDE_SUMMARIZER, memuExtras, st } from "utils/context-extra";
 import {
     addPendingRetrieveToPrompt,
     cancelPendingRetrieveRequest,
-    summaryIfNeed,
     getChatIdSafe,
     dispatchConversationTurn,
     dropPendingTurnIfStopped,
@@ -14,10 +13,6 @@ import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/ne
 import { info } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
 import { main_api } from "@silly-tavern/script.js";
-
-const summaryIfNeedDebounced = st.debounce(() => {
-    void summaryIfNeed();
-}, st.debounce_timeout.extended);
 
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
@@ -123,7 +118,6 @@ async function maybeClearStaleLocalState(): Promise<void> {
 }
 
 export function onMessageReceived(_msgIdAny: any): void {
-    summaryIfNeedDebounced();
     refreshChatSnapshot();
 }
 
@@ -132,7 +126,7 @@ export function onUserMessageSent(_msgIdAny: any): void {
 }
 
 export function onMessageEdited(_msgIdAny: any): void {
-    summaryIfNeedDebounced();
+    refreshChatSnapshot();
 }
 
 export function onMessageDeleted(): void {
@@ -153,7 +147,6 @@ export function onMessageDeleted(): void {
 
 export function onMessageSwiped(_msgIdAny: any): void {
     _skipTurnMaintenanceOnce = true;
-    summaryIfNeedDebounced();
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const userId = String(ctx.name1 || '');
@@ -224,8 +217,6 @@ export function onChatChanged(): void {
         await initChatExtraInfo(ctx);
         window.dispatchEvent(new Event('memu:server-ready'));
         startSummaryPolling();
-        // On chat-open: run the normal "should we memorize?" check.
-        summaryIfNeedDebounced();
         await maybeClearStaleLocalState();
         refreshChatSnapshot();
     }
