@@ -734,6 +734,12 @@ export async function dispatchConversationTurn(
         if (typeof preset?.openai_max_tokens === 'number') stGenParams.maxTokens = preset.openai_max_tokens;
     }
 
+    let turnTimeZone: string | undefined;
+    try {
+        turnTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch { }
+    const turnTimeZoneOffsetMin = new Date().getTimezoneOffset();
+
     const resp = await conversationTurn({
         userId: turn.userId,
         soulId: turn.soulId,
@@ -743,6 +749,8 @@ export async function dispatchConversationTurn(
         applyTurnMaintenance,
         debug: includeDebug,
         soul_card: turnSoulCard,
+        timeZone: turnTimeZone,
+        timeZoneOffsetMin: turnTimeZoneOffsetMin,
         ...stGenParams,
         promptOverridePayload,
     });

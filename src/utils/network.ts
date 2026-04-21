@@ -57,6 +57,8 @@ export type ConversationTurnRequest = {
   promptOverridePayload?: Record<string, any>;
   temperature?: number;
   maxTokens?: number;
+  timeZone?: string;
+  timeZoneOffsetMin?: number;
 };
 export type ConversationTurnResponse = {
   ok: boolean;
