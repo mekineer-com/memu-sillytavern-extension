@@ -159,25 +159,27 @@ function renderInspectHtml(data: InspectData): string {
         const ts = typeof data.timestamp === 'number' ? data.timestamp : 0;
         const ageSec = ts ? Math.floor((Date.now() - ts) / 1000) : 0;
         const stale = ageSec > 30;
-        const suffix = ts
-            ? (stale ? ` — stalled ${ageSec}s; turn likely failed, check server log` : ` — ${ageSec}s`)
-            : '';
-        parts.push(`<div style="opacity:${stale ? '0.9' : '0.75'};${stale ? 'color:#ffb070' : ''}">(turn pending${suffix})</div>`);
+        if (stale) {
+            parts.push(`<div style="opacity:0.9;color:#ffb070">(memory save stalled ${ageSec}s — check server log)</div>`);
+        } else {
+            const suffix = ts ? ` · ${ageSec}s` : '';
+            parts.push(`<div style="opacity:0.75">(saving memory${suffix})</div>`);
+        }
     } else if (data.turnStatus === 'error') {
         const err = String(data.turnError || 'unknown error');
-        parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Turn Error</b></div>`);
+        parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Memory Save Failed</b></div>`);
         parts.push(`<pre style="white-space:pre-wrap;font-size:12px;max-height:160px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px;color:#ffb6b6">${esc(err)}</pre>`);
     } else if (data.turnStatus === 'ok') {
-        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Turn Contract</b></summary>`);
+        parts.push(`<details style="margin-bottom:6px"><summary style="cursor:pointer"><b>Memory Update</b></summary>`);
         if (data.turnContract) {
             parts.push(`<pre style="white-space:pre-wrap;font-size:12px;max-height:180px;overflow:auto;margin:4px 0;padding:4px;background:rgba(0,0,0,0.1);border-radius:4px">${esc(JSON.stringify(data.turnContract, null, 2))}</pre>`);
         } else {
-            parts.push(`<div style="opacity:0.7">(no contract returned)</div>`);
+            parts.push(`<div style="opacity:0.7">(soul returned no memory update)</div>`);
         }
         parts.push(`</details>`);
         const sp = String(data.turnSystemPrompt || '');
         const up = String(data.turnPrompt || '');
-        const tmsStr = data.turnMs != null ? ` · turn=${secondsFromMs(data.turnMs)}` : '';
+        const tmsStr = data.turnMs != null ? ` · save=${secondsFromMs(data.turnMs)}` : '';
         const repStr = data.replyCh != null ? ` · reply=${data.replyCh}ch` : '';
         parts.push(`<div style="opacity:0.75">prompt: user=${up.length}ch sys=${sp.length}ch${repStr}${tmsStr}</div>`);
         if (data.apimwStatus) {
