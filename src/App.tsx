@@ -808,7 +808,7 @@ export default function App() {
                 />
               </label>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 24 }}>
+              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 24 }}>
                 <button
                   type="button"
                   className="menu_button"
@@ -817,9 +817,11 @@ export default function App() {
                 >
                   {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
                 </button>
-                <small style={{ opacity: 0.85 }}>
-                  Force extraction of the current accumulated chat even if no sleep gap has been detected yet.
-                </small>
+                <i
+                  className="fa-solid fa-info-circle"
+                  title="Force extraction of the current accumulated chat even if no sleep gap has been detected yet."
+                  style={{ opacity: 0.8 }}
+                />
               </div>
             </div>
 
