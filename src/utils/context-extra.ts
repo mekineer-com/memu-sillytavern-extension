@@ -46,19 +46,59 @@ export const LOCAL_USER_ID = {
     set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_LOCAL_USER_ID, value),
 }
 
+// Per-soul prefs: stored as a JSON map { "<characterName>": boolean, ... }
+// under a single localStorage key. Reads fall back to the default when the
+// character has no entry (or when no character is selected at all).
+export function currentSelectedCharacterName(): string {
+    try {
+        const ctx: any = st.getContext?.();
+        const character = (ctx?.characters && ctx?.characterId != null) ? ctx.characters[ctx.characterId] : null;
+        return String(character?.name || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+function _readPerSoulMap(key: string): Record<string, boolean> {
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed as Record<string, boolean>;
+        }
+    } catch {}
+    return {};
+}
+
+function _getPerSoulBool(key: string, defaultValue: boolean): boolean {
+    const name = currentSelectedCharacterName();
+    if (!name) return defaultValue;
+    const map = _readPerSoulMap(key);
+    return name in map ? Boolean(map[name]) : defaultValue;
+}
+
+function _setPerSoulBool(key: string, value: boolean): void {
+    const name = currentSelectedCharacterName();
+    if (!name) return;
+    const map = _readPerSoulMap(key);
+    map[name] = value;
+    localStorage.setItem(key, JSON.stringify(map));
+}
+
 export const OVERRIDE_SUMMARIZER = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER) !== 'false',
-    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, value.toString()),
+    get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, true),
+    set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, value),
 }
 
 export const IMPORT_LOREBOOKS = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS) !== 'false',
-    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, value.toString()),
+    get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, true),
+    set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, value),
 }
 
 export const MENTAL_HEALTH_ADDON = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON) === 'true',
-    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, value.toString()),
+    get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, false),
+    set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, value),
 }
 
 export const AUTO_SUMMARY_BY_CONTEXT_SIZE = {

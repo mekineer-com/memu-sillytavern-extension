@@ -5,6 +5,7 @@ import { deleteMemuLorebooksForCurrentCharacter, memorizeNow, syncLorebooksNow }
 import EyeIcon from 'ui/icons';
 import MemuLogo from 'ui/logo';
 import {
+  currentSelectedCharacterName,
   memuExtras,
   OVERRIDE_SUMMARIZER,
   IMPORT_LOREBOOKS,
@@ -75,6 +76,7 @@ export default function App() {
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
   const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
   const [mentalHealthAddon, setMentalHealthAddon] = useState<boolean>(false);
+  const [currentCharacter, setCurrentCharacter] = useState<string>('');
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
 
   const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
@@ -146,12 +148,21 @@ export default function App() {
     }
   }
 
-  // memory ui prefs
+  // memory ui prefs — per-soul, so re-read whenever the active chat changes.
   useEffect(() => {
-    const savedOverride = OVERRIDE_SUMMARIZER.get();
-    if (savedOverride !== null) setOverrideSummarizer(savedOverride);
-    setImportLorebooks(IMPORT_LOREBOOKS.get());
-    setMentalHealthAddon(MENTAL_HEALTH_ADDON.get());
+    function reload() {
+      setCurrentCharacter(currentSelectedCharacterName());
+      setOverrideSummarizer(OVERRIDE_SUMMARIZER.get());
+      setImportLorebooks(IMPORT_LOREBOOKS.get());
+      setMentalHealthAddon(MENTAL_HEALTH_ADDON.get());
+    }
+    reload();
+    try {
+      st.eventSource?.on?.(st.event_types.CHAT_CHANGED, reload);
+    } catch { }
+    return () => {
+      try { st.eventSource?.removeListener?.(st.event_types.CHAT_CHANGED, reload); } catch { }
+    };
   }, []);
 
   async function refreshServerCtl() {
@@ -814,50 +825,71 @@ export default function App() {
             <div style={sectionStyle}>
               <h4 style={sectionTitleStyle}>Memory</h4>
 
-              <label className="checkbox_label expander" htmlFor="override_summarizer">
+              {!currentCharacter && (
+                <div style={{ opacity: 0.7, fontSize: '12px', marginBottom: 6 }}>
+                  Select a character to enable per-soul settings.
+                </div>
+              )}
+
+              <label
+                className="checkbox_label expander"
+                htmlFor="override_summarizer"
+                style={{ opacity: currentCharacter ? 1 : 0.5 }}
+              >
                 <input
                   id="override_summarizer"
                   type="checkbox"
                   className="checkbox"
                   checked={overrideSummarizer}
                   onChange={handleOverrideSummarizerChange}
+                  disabled={!currentCharacter}
                 />
                 <span>Override Summarizer</span>
                 <i
                   className="fa-solid fa-info-circle"
-                  title="If checked: replace SillyTavern's summary message with memU's summary. If unchecked: add memU summary alongside it."
+                  title="Per character. If checked: replace SillyTavern's summary message with memU's summary. If unchecked: add memU summary alongside it."
                   style={{ opacity: 0.8 }}
                 />
               </label>
 
-              <label className="checkbox_label expander" htmlFor="import_lorebooks">
+              <label
+                className="checkbox_label expander"
+                htmlFor="import_lorebooks"
+                style={{ opacity: currentCharacter ? 1 : 0.5 }}
+              >
                 <input
                   id="import_lorebooks"
                   type="checkbox"
                   className="checkbox"
                   checked={importLorebooks}
                   onChange={handleImportLorebooksChange}
+                  disabled={!currentCharacter}
                 />
                 <span>Import Lorebooks</span>
                 <i
                   className="fa-solid fa-info-circle"
-                  title="Publish memU category summaries as SillyTavern lorebooks (named memU - <Character> - <Category>) so you can browse them in the World Info panel. Unchecking deletes the memU-managed lorebooks for this character."
+                  title="Per character. Publish memU category summaries as SillyTavern lorebooks (named memU - <Character> - <Category>) so you can browse them in the World Info panel. Unchecking deletes the memU-managed lorebooks for this character."
                   style={{ opacity: 0.8 }}
                 />
               </label>
 
-              <label className="checkbox_label expander" htmlFor="mental_health_addon">
+              <label
+                className="checkbox_label expander"
+                htmlFor="mental_health_addon"
+                style={{ opacity: currentCharacter ? 1 : 0.5 }}
+              >
                 <input
                   id="mental_health_addon"
                   type="checkbox"
                   className="checkbox"
                   checked={mentalHealthAddon}
                   onChange={handleMentalHealthAddonChange}
+                  disabled={!currentCharacter}
                 />
                 <span>Mental Health Addon</span>
                 <i
                   className="fa-solid fa-info-circle"
-                  title="Enable the mental-health sidecar: an always-on parallel retrieval lookup over curated mental-health knowledge."
+                  title="Per character. Enable the mental-health sidecar: when the soul's retrieval router detects an MH theme, it pulls from a curated procedural-memory store alongside regular memories."
                   style={{ opacity: 0.8 }}
                 />
               </label>
