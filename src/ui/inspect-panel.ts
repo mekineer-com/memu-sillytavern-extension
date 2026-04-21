@@ -156,7 +156,13 @@ function renderInspectHtml(data: InspectData): string {
     }
 
     if (data.turnStatus === 'pending') {
-        parts.push(`<div style="opacity:0.75">(turn pending)</div>`);
+        const ts = typeof data.timestamp === 'number' ? data.timestamp : 0;
+        const ageSec = ts ? Math.floor((Date.now() - ts) / 1000) : 0;
+        const stale = ageSec > 30;
+        const suffix = ts
+            ? (stale ? ` — stalled ${ageSec}s; turn likely failed, check server log` : ` — ${ageSec}s`)
+            : '';
+        parts.push(`<div style="opacity:${stale ? '0.9' : '0.75'};${stale ? 'color:#ffb070' : ''}">(turn pending${suffix})</div>`);
     } else if (data.turnStatus === 'error') {
         const err = String(data.turnError || 'unknown error');
         parts.push(`<div style="margin-bottom:6px;color:#ff9d9d"><b>Turn Error</b></div>`);
