@@ -7,6 +7,8 @@ import MemuLogo from 'ui/logo';
 import {
   memuExtras,
   OVERRIDE_SUMMARIZER,
+  IMPORT_LOREBOOKS,
+  MENTAL_HEALTH_ADDON,
   SHOW_ADVANCED_MAPPING,
   st,
 } from 'utils/context-extra';
@@ -71,6 +73,8 @@ export default function App() {
   const [embedCustomMode, setEmbedCustomMode] = useState<boolean>(false);
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
+  const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
+  const [mentalHealthAddon, setMentalHealthAddon] = useState<boolean>(false);
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
 
   const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
@@ -146,6 +150,8 @@ export default function App() {
   useEffect(() => {
     const savedOverride = OVERRIDE_SUMMARIZER.get();
     if (savedOverride !== null) setOverrideSummarizer(savedOverride);
+    setImportLorebooks(IMPORT_LOREBOOKS.get());
+    setMentalHealthAddon(MENTAL_HEALTH_ADDON.get());
   }, []);
 
   async function refreshServerCtl() {
@@ -459,6 +465,16 @@ export default function App() {
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
     setOverrideSummarizer(e.target.checked);
     OVERRIDE_SUMMARIZER.set(e.target.checked);
+  }
+
+  function handleImportLorebooksChange(e: ChangeEvent<HTMLInputElement>) {
+    setImportLorebooks(e.target.checked);
+    IMPORT_LOREBOOKS.set(e.target.checked);
+  }
+
+  function handleMentalHealthAddonChange(e: ChangeEvent<HTMLInputElement>) {
+    setMentalHealthAddon(e.target.checked);
+    MENTAL_HEALTH_ADDON.set(e.target.checked);
   }
 
   async function handleMemorizeNow(): Promise<void> {
@@ -804,6 +820,38 @@ export default function App() {
                 <i
                   className="fa-solid fa-info-circle"
                   title="If checked: replace SillyTavern's summary message with memU's summary. If unchecked: add memU summary alongside it."
+                  style={{ opacity: 0.8 }}
+                />
+              </label>
+
+              <label className="checkbox_label expander" htmlFor="import_lorebooks">
+                <input
+                  id="import_lorebooks"
+                  type="checkbox"
+                  className="checkbox"
+                  checked={importLorebooks}
+                  onChange={handleImportLorebooksChange}
+                />
+                <span>Import Lorebooks</span>
+                <i
+                  className="fa-solid fa-info-circle"
+                  title="Import SillyTavern lorebooks for this character into memU as procedural knowledge (sidecar)."
+                  style={{ opacity: 0.8 }}
+                />
+              </label>
+
+              <label className="checkbox_label expander" htmlFor="mental_health_addon">
+                <input
+                  id="mental_health_addon"
+                  type="checkbox"
+                  className="checkbox"
+                  checked={mentalHealthAddon}
+                  onChange={handleMentalHealthAddonChange}
+                />
+                <span>Mental Health Addon</span>
+                <i
+                  className="fa-solid fa-info-circle"
+                  title="Enable the mental-health sidecar: an always-on parallel retrieval lookup over curated mental-health knowledge."
                   style={{ opacity: 0.8 }}
                 />
               </label>

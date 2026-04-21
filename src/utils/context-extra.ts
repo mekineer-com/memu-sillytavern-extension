@@ -6,7 +6,7 @@ import { ToolManager } from '@silly-tavern/scripts/tool-calling.js';
 import { debounce } from "@silly-tavern/scripts/utils.js";
 import { appendFileContent } from '@silly-tavern/scripts/chats.js';
 import { getRegexedString, regex_placement } from '@silly-tavern/scripts/extensions/regex/engine.js';
-import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN } from "./consts";
+import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -49,6 +49,16 @@ export const LOCAL_USER_ID = {
 export const OVERRIDE_SUMMARIZER = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER) !== 'false',
     set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, value.toString()),
+}
+
+export const IMPORT_LOREBOOKS = {
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS) === 'true',
+    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, value.toString()),
+}
+
+export const MENTAL_HEALTH_ADDON = {
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON) === 'true',
+    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, value.toString()),
 }
 
 export const AUTO_SUMMARY_BY_CONTEXT_SIZE = {
