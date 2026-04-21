@@ -177,9 +177,9 @@ function renderInspectHtml(data: InspectData): string {
     // Timestamp (fixed point in time; avoid constantly changing age text that forces rerenders)
     const ts = Number.isFinite(data.timestamp) ? new Date(data.timestamp) : null;
     const stamp = ts ? ts.toLocaleTimeString() : '?';
-    parts.push(`<div style="opacity:0.5;font-size:11px;margin-top:4px">${stamp} · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
+    parts.push(`<div style="opacity:0.5;font-size:12px;margin-top:4px">${stamp} · ${data.method || 'rag'} · ${data.conversationId || '?'}</div>`);
     if (data.userId || data.soulId) {
-        parts.push(`<div style="opacity:0.55;font-size:11px">scope: user=${esc(data.userId || '?')} soul=${esc(data.soulId || '?')}</div>`);
+        parts.push(`<div style="opacity:0.55;font-size:12px">scope: user=${esc(data.userId || '?')} soul=${esc(data.soulId || '?')}</div>`);
     }
 
     parts.push(`</div>`);
