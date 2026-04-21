@@ -1,5 +1,5 @@
 import { CategoryResponse } from "memu-js";
-import { IMPORT_LOREBOOKS, memuExtras, st } from "utils/context-extra";
+import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
@@ -533,6 +533,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             history: turn.history,
             buildTurnPrompt: true,
             soul_card: retrieveSoulCard,
+            mentalHealthAddon: MENTAL_HEALTH_ADDON.get(),
         }, { signal: retrieveAbort.signal });
     } catch (err: any) {
         if (isAbortError(err)) {

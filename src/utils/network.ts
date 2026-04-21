@@ -25,6 +25,7 @@ export type ConversationRetrieveRequest = {
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
   soul_card?: string;
+  mentalHealthAddon?: boolean;
 };
 type RequestOptions = {
   signal?: AbortSignal;
