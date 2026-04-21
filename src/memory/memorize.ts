@@ -1,5 +1,5 @@
 import { CategoryResponse } from "memu-js";
-import { memuExtras, st } from "utils/context-extra";
+import { IMPORT_LOREBOOKS, memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
@@ -163,6 +163,7 @@ export async function memorizeNow(): Promise<void> {
 // Useful when lorebooks were deleted, or when digest/retrieve is delayed.
 export async function syncLorebooksNow(reason: string = "manual"): Promise<void> {
     await initChatExtraInfo(st.getContext());
+    if (!IMPORT_LOREBOOKS.get()) return;
     try {
         if (!memuExtras.baseInfo) return;
         const resp = await retrieveDefaultCategories(memuExtras.baseInfo.userId, memuExtras.baseInfo.characterId);
@@ -172,6 +173,43 @@ export async function syncLorebooksNow(reason: string = "manual"): Promise<void>
         }
     } catch (e) {
         onceWarn(`lorebooks-sync-failed:${reason}`, `lorebooks sync failed (${reason})`);
+    }
+}
+
+// Delete every memU-managed lorebook for the current character.
+// Called when the user unchecks Import Lorebooks so the ST World Info
+// listing immediately reflects the new state.
+export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
+    await initChatExtraInfo(st.getContext());
+    const info = memuExtras.baseInfo;
+    if (!info) return;
+    const prefix = `memU - ${String(info.characterName || info.agentName || '').trim()} - `;
+    if (prefix === 'memU -  - ') return;
+    try {
+        const csrfResp = await fetch('/csrf-token');
+        const csrfJson = await csrfResp.json().catch(() => ({} as any));
+        const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
+        const listResp = await fetch('/api/worldinfo/list', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
+            body: JSON.stringify({}),
+        });
+        const list = await listResp.json().catch(() => []);
+        const all = Array.isArray(list) ? list : [];
+        const targets = all
+            .map((x: any) => String(x?.file_id || x?.name || '').trim())
+            .filter((n: string) => !!n && n.startsWith(prefix));
+        for (const name of targets) {
+            await fetch('/api/worldinfo/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
+                body: JSON.stringify({ name }),
+            });
+        }
+        await updateWorldInfoList();
+        (st as any)?.eventSource?.emit?.((st as any)?.event_types?.SETTINGS_UPDATED);
+    } catch (e) {
+        onceWarn('lorebooks-delete-failed', 'lorebooks delete failed');
     }
 }
 
@@ -907,6 +945,7 @@ async function upsertWorldInfoLorebook(name: string, data: any): Promise<void> {
 }
 
 async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name: string; summary: string }>): Promise<void> {
+    if (!IMPORT_LOREBOOKS.get()) return;
     if (!Array.isArray(categories) || categories.length === 0) return;
 
     const ctx: any = st.getContext();

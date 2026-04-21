@@ -52,7 +52,7 @@ export const OVERRIDE_SUMMARIZER = {
 }
 
 export const IMPORT_LOREBOOKS = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS) === 'true',
+    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS) !== 'false',
     set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, value.toString()),
 }
 

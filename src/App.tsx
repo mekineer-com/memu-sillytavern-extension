@@ -1,7 +1,7 @@
 import MemoryShowModal from 'component/MemoryShowModal';
 import NarrativeSuggestion from 'component/NarrativeSuggestion';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
-import { memorizeNow } from 'memory/memorize';
+import { deleteMemuLorebooksForCurrentCharacter, memorizeNow, syncLorebooksNow } from 'memory/memorize';
 import EyeIcon from 'ui/icons';
 import MemuLogo from 'ui/logo';
 import {
@@ -468,8 +468,14 @@ export default function App() {
   }
 
   function handleImportLorebooksChange(e: ChangeEvent<HTMLInputElement>) {
-    setImportLorebooks(e.target.checked);
-    IMPORT_LOREBOOKS.set(e.target.checked);
+    const next = e.target.checked;
+    setImportLorebooks(next);
+    IMPORT_LOREBOOKS.set(next);
+    if (next) {
+      void syncLorebooksNow('import-lorebooks-enabled');
+    } else {
+      void deleteMemuLorebooksForCurrentCharacter();
+    }
   }
 
   function handleMentalHealthAddonChange(e: ChangeEvent<HTMLInputElement>) {
@@ -717,7 +723,7 @@ export default function App() {
                         }
                       }}
                     />
-                    <span>Advanced mapping</span>
+                    <span>Advanced Mapping</span>
                   </label>
                 )}
 
