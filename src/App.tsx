@@ -841,7 +841,7 @@ export default function App() {
                 <span>Import Lorebooks</span>
                 <i
                   className="fa-solid fa-info-circle"
-                  title="Import SillyTavern lorebooks for this character into memU as procedural knowledge (sidecar)."
+                  title="Publish memU category summaries as SillyTavern lorebooks (named memU - <Character> - <Category>) so you can browse them in the World Info panel. Unchecking deletes the memU-managed lorebooks for this character."
                   style={{ opacity: 0.8 }}
                 />
               </label>
