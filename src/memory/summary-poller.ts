@@ -48,7 +48,12 @@ async function tick(): Promise<void> {
             }
             case MemuTaskStatus.SUCCESS: {
                 try {
-                    if (memuExtras.retrieve?.nowRetrieve?.summaryTaskId === summary.summaryTaskId) {
+                    const prev = memuExtras.retrieve?.nowRetrieve;
+                    // Skip only when we already pulled a populated sync for this taskId.
+                    // An empty summary means consolidation hadn't written the categories
+                    // yet when retrieveMemories first ran — keep retrying until it has.
+                    if (prev?.summaryTaskId === summary.summaryTaskId
+                        && String(prev?.summary || '').trim() !== '') {
                         break;
                     }
                     // Avoid retry-spam when retrieve is failing repeatedly (e.g., backend SQLModel mapping error).
