@@ -14,14 +14,19 @@ import {
   st,
 } from 'utils/context-extra';
 import {
+  createRelationship,
+  deleteRelationship,
   getConnectionProfiles,
   getPluginConfig,
+  listRelationships,
   getProfileModels,
   pingPlugin,
   serverStart,
   serverStatus,
   serverStop,
   setPluginConfig,
+  updateRelationship,
+  RelationshipRecord,
 } from 'utils/network';
 import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
@@ -56,6 +61,26 @@ function defaultCfg(): MemuPluginConfigV1 {
   return { version: 4, updatedAt: new Date().toISOString() };
 }
 
+type RelationshipEditorState = {
+  mode: 'add' | 'edit';
+  speakerId?: string;
+  name: string;
+  relationship: string;
+};
+
+const RELATIONSHIP_SUGGESTIONS = [
+  'parent',
+  'sibling',
+  'child',
+  'partner',
+  'friend',
+  'coworker',
+  'neighbor',
+  'pet',
+  'place',
+  'other',
+];
+
 export default function App() {
   const EMBED_CUSTOM = '__custom__';
   const [pluginOk, setPluginOk] = useState<boolean | null>(null);
@@ -77,7 +102,12 @@ export default function App() {
   const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
   const [mentalHealthAddon, setMentalHealthAddon] = useState<boolean>(false);
   const [currentCharacter, setCurrentCharacter] = useState<string>('');
+  const [currentUserId, setCurrentUserId] = useState<string>('');
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
+  const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
+  const [relationshipsStatus, setRelationshipsStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle');
+  const [relationshipsMessage, setRelationshipsMessage] = useState<string>('');
+  const [relationshipEditor, setRelationshipEditor] = useState<RelationshipEditorState | null>(null);
 
   const [showMemoryModal, setShowMemoryModal] = useState<boolean>(false);
   const [memoryText, setMemoryText] = useState<string>('');
@@ -148,10 +178,36 @@ export default function App() {
     }
   }
 
+  async function refreshRelationships(): Promise<void> {
+    if (!pluginOk || !currentCharacter || !currentUserId) {
+      setRelationships([]);
+      setRelationshipsStatus('idle');
+      setRelationshipsMessage('');
+      return;
+    }
+    setRelationshipsStatus('loading');
+    setRelationshipsMessage('');
+    try {
+      const resp = await listRelationships(currentUserId, currentCharacter);
+      const rows = Array.isArray(resp?.relationships) ? resp.relationships : [];
+      setRelationships(rows);
+      setRelationshipsStatus('idle');
+    } catch (e: any) {
+      setRelationships([]);
+      setRelationshipsStatus('error');
+      setRelationshipsMessage(e?.message || 'Failed to load relationships');
+    }
+  }
+
+  useEffect(() => {
+    void refreshRelationships();
+  }, [pluginOk, currentCharacter, currentUserId]);
+
   // memory ui prefs — per-soul, so re-read whenever the active chat changes.
   useEffect(() => {
     function reload() {
       setCurrentCharacter(currentSelectedCharacterName());
+      setCurrentUserId(String(memuExtras.baseInfo?.userId || '').trim());
       setOverrideSummarizer(OVERRIDE_SUMMARIZER.get());
       setImportLorebooks(IMPORT_LOREBOOKS.get());
       setMentalHealthAddon(MENTAL_HEALTH_ADDON.get());
@@ -500,6 +556,63 @@ export default function App() {
       await memorizeNow();
     } finally {
       setMemorizeNowBusy(false);
+    }
+  }
+
+  function openAddRelationshipEditor(): void {
+    setRelationshipEditor({
+      mode: 'add',
+      name: '',
+      relationship: '',
+    });
+  }
+
+  function openEditRelationshipEditor(row: RelationshipRecord): void {
+    setRelationshipEditor({
+      mode: 'edit',
+      speakerId: row.speaker_id,
+      name: String(row.name || ''),
+      relationship: String(row.relationship || ''),
+    });
+  }
+
+  async function saveRelationshipEditor(): Promise<void> {
+    if (!relationshipEditor || !currentCharacter || !currentUserId) return;
+    const name = String(relationshipEditor.name || '').trim();
+    const relationship = String(relationshipEditor.relationship || '').trim();
+    if (!name) return;
+    setRelationshipsStatus('saving');
+    setRelationshipsMessage('');
+    try {
+      if (relationshipEditor.mode === 'add') {
+        await createRelationship(currentUserId, currentCharacter, name, relationship);
+      } else if (relationshipEditor.speakerId) {
+        await updateRelationship(currentUserId, currentCharacter, relationshipEditor.speakerId, {
+          name,
+          relationship,
+        });
+      }
+      setRelationshipEditor(null);
+      await refreshRelationships();
+      setRelationshipsStatus('idle');
+    } catch (e: any) {
+      setRelationshipsStatus('error');
+      setRelationshipsMessage(e?.message || 'Failed to save relationship');
+    }
+  }
+
+  async function removeRelationship(speakerId: string): Promise<void> {
+    if (!speakerId || !currentCharacter || !currentUserId) return;
+    if (!window.confirm('Remove this relationship?')) return;
+    setRelationshipsStatus('saving');
+    setRelationshipsMessage('');
+    try {
+      await deleteRelationship(currentUserId, currentCharacter, speakerId);
+      await refreshRelationships();
+      setRelationshipsStatus('idle');
+    } catch (e: any) {
+      setRelationshipsStatus('error');
+      setRelationshipsMessage(e?.message || 'Failed to delete relationship');
     }
   }
 
@@ -894,6 +1007,69 @@ export default function App() {
                 />
               </label>
 
+              <div style={{ opacity: currentCharacter && currentUserId ? 1 : 0.5, display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong>Relationships</strong>
+                  <button
+                    type="button"
+                    className="menu_button"
+                    onClick={() => openAddRelationshipEditor()}
+                    disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                    style={{ padding: '4px 8px' } as any}
+                  >
+                    + Add
+                  </button>
+                </div>
+                {relationships.length > 20 && (
+                  <small style={{ opacity: 0.85, color: 'var(--SmartThemeWarnColor, #e6a817)' }}>
+                    Getting busy — consider whether some are acquaintance rather than named.
+                  </small>
+                )}
+                {relationshipsStatus === 'loading' && <small style={{ opacity: 0.75 }}>Loading relationships…</small>}
+                {relationshipsMessage && <small style={{ opacity: 0.85 }}>{relationshipsMessage}</small>}
+                {!relationships.length && relationshipsStatus !== 'loading' && (
+                  <small style={{ opacity: 0.75 }}>
+                    {currentCharacter && currentUserId ? 'No relationships yet.' : 'Select a character to enable relationships.'}
+                  </small>
+                )}
+                {relationships.map((row) => (
+                  <div
+                    key={row.speaker_id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) auto auto',
+                      gap: 6,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span title={row.speaker_id} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.name}
+                    </span>
+                    <span style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {row.relationship || '—'}
+                    </span>
+                    <button
+                      type="button"
+                      className="menu_button"
+                      onClick={() => openEditRelationshipEditor(row)}
+                      disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                      style={{ padding: '2px 8px' } as any}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="menu_button"
+                      onClick={() => void removeRelationship(row.speaker_id)}
+                      disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                      style={{ padding: '2px 8px' } as any}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                ))}
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 24 }}>
                 <button
                   type="button"
@@ -918,6 +1094,82 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {relationshipEditor && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+          }}
+          onClick={() => setRelationshipEditor(null)}
+        >
+          <div
+            style={{
+              width: 'min(520px, calc(100vw - 32px))',
+              background: 'var(--SmartThemeBlurTintColor, #1c1c1c)',
+              border: '1px solid rgba(128,128,128,0.35)',
+              borderRadius: 10,
+              padding: 12,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 style={{ margin: 0 }}>{relationshipEditor.mode === 'add' ? 'Add Relationship' : 'Edit Relationship'}</h4>
+            <label>Name</label>
+            <input
+              type="text"
+              maxLength={50}
+              className="text_pole"
+              value={relationshipEditor.name}
+              onChange={(e) => setRelationshipEditor((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+              placeholder="e.g. Brother"
+            />
+
+            <label>Relationship</label>
+            <input
+              type="text"
+              maxLength={50}
+              className="text_pole"
+              value={relationshipEditor.relationship}
+              onChange={(e) => setRelationshipEditor((prev) => (prev ? { ...prev, relationship: e.target.value } : prev))}
+              placeholder="e.g. sibling"
+            />
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {RELATIONSHIP_SUGGESTIONS.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className="menu_button"
+                  style={{ padding: '2px 8px' } as any}
+                  onClick={() => setRelationshipEditor((prev) => (prev ? { ...prev, relationship: item } : prev))}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="menu_button" onClick={() => setRelationshipEditor(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="menu_button"
+                onClick={() => void saveRelationshipEditor()}
+                disabled={!String(relationshipEditor.name || '').trim() || relationshipsStatus === 'saving'}
+              >
+                {relationshipsStatus === 'saving' ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <MemoryShowModal open={showMemoryModal} text={memoryText} onClose={() => setShowMemoryModal(false)} />
     </>

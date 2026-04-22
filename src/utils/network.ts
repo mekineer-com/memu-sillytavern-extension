@@ -93,6 +93,12 @@ export type ScopeStorageProbeResponse = {
   missingOrEmpty?: boolean;
   reason?: string;
 };
+export type RelationshipRecord = {
+  speaker_id: string;
+  name: string;
+  relationship: string;
+  entity_type: string;
+};
 
 export async function getPluginPing(): Promise<PluginPing> {
   return request<PluginPing>('/ping', undefined, 'GET');
@@ -195,6 +201,42 @@ export async function memorizeConversation(
 
 export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<{ narrative_self?: string }> {
   return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion });
+}
+
+export async function listRelationships(userId: string, soulId: string): Promise<{ relationships: RelationshipRecord[] }> {
+  const params = new URLSearchParams();
+  params.set('userId', userId);
+  params.set('soulId', soulId);
+  return request<{ relationships: RelationshipRecord[] }>(`/relationships?${params.toString()}`, undefined, 'GET');
+}
+
+export async function createRelationship(
+  userId: string,
+  soulId: string,
+  name: string,
+  relationship: string,
+): Promise<RelationshipRecord> {
+  return request<RelationshipRecord>('/relationships', { userId, soulId, name, relationship }, 'POST');
+}
+
+export async function updateRelationship(
+  userId: string,
+  soulId: string,
+  speakerId: string,
+  patch: { name?: string; relationship?: string },
+): Promise<RelationshipRecord> {
+  return request<RelationshipRecord>(`/relationships/${encodeURIComponent(speakerId)}`, { userId, soulId, ...patch }, 'PATCH');
+}
+
+export async function deleteRelationship(
+  userId: string,
+  soulId: string,
+  speakerId: string,
+): Promise<{ ok: boolean; speaker_id?: string }> {
+  const params = new URLSearchParams();
+  params.set('userId', userId);
+  params.set('soulId', soulId);
+  return request<{ ok: boolean; speaker_id?: string }>(`/relationships/${encodeURIComponent(speakerId)}?${params.toString()}`, undefined, 'DELETE');
 }
 
 async function request<T>(
