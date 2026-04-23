@@ -86,6 +86,31 @@ function _setPerSoulBool(key: string, value: boolean): void {
     localStorage.setItem(key, JSON.stringify(map));
 }
 
+// Drop entries for characters that no longer exist in ST's character list.
+// Called at extension startup; keeps the per-soul maps from growing forever
+// after character renames/deletes. Safe when ST context isn't ready yet
+// (bails silently; next startup retries).
+export function pruneStalePerSoulEntries(keys: string[]): void {
+    try {
+        const ctx: any = st.getContext?.();
+        const characters = ctx?.characters;
+        if (!Array.isArray(characters) || characters.length === 0) return;
+        const liveNames = new Set(
+            characters.map((c: any) => String(c?.name || '').trim()).filter(Boolean),
+        );
+        for (const key of keys) {
+            const map = _readPerSoulMap(key);
+            const kept: Record<string, boolean> = {};
+            for (const [name, value] of Object.entries(map)) {
+                if (liveNames.has(name)) kept[name] = value;
+            }
+            if (Object.keys(kept).length !== Object.keys(map).length) {
+                localStorage.setItem(key, JSON.stringify(kept));
+            }
+        }
+    } catch {}
+}
+
 export const OVERRIDE_SUMMARIZER = {
     get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, true),
     set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, value),

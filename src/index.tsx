@@ -13,7 +13,8 @@ import {
     onMessageDeleted,
     onUserMessageSent,
 } from 'memory/exports';
-import { st } from './utils/context-extra';
+import { st, pruneStalePerSoulEntries } from './utils/context-extra';
+import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from './utils/consts';
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
@@ -200,3 +201,8 @@ if (!tryMount()) {
 installChatOptionResetCursor();
 startInspectObserver();
 installAutomationHooks();
+pruneStalePerSoulEntries([
+    MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER,
+    MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS,
+    MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON,
+]);
