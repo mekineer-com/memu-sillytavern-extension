@@ -826,6 +826,11 @@ export async function dispatchConversationTurn(
             : undefined;
     }
     stashInspectData(turnUpdate);
+
+    // Server-side memorize bypasses the extension digest path, so the poller
+    // never fires retrieveMemories. Sync lorebooks after every turn so
+    // category summaries stay visible in the World Info panel.
+    void syncLorebooksNow("after-turn");
 }
 
 // --- World Info sync (view memU memories inside ST) ---
