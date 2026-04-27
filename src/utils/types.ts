@@ -14,6 +14,7 @@ export type MemuStep =
   | 'category_update'
   | 'reflection'
   | 'ranking'
+  | 'consolidation'
   | 'embeddings';
 
 export interface MemuPluginConfigV1 {

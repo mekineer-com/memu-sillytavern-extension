@@ -527,6 +527,7 @@ export default function App() {
     { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
     { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
     { step: 'ranking', label: 'Ranking', hint: 'Rerank candidates' },
+    { step: 'consolidation', label: 'Consolidation', hint: 'Weekly reflection — edges, intentions, diary' },
   ];
 
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
