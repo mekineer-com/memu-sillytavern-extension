@@ -12,7 +12,7 @@ export type PluginPing = {
 };
 
 export type MemorizeResponse = { taskId: string };
-export type MemorizeTaskStatusResponse = { status: string; error?: string };
+export type MemorizeTaskStatusResponse = { status: string; error?: string; progress?: { current: number; total: number } };
 export type MemorizeTaskSummaryReadyResponse = { allReady: boolean };
 export type DefaultCategoriesResponse = { categories: any[] };
 export type ConversationRetrieveRequest = {
@@ -154,6 +154,10 @@ export async function getTaskStatus(taskId: string): Promise<MemorizeTaskStatusR
 
 export async function getTaskSummaryReady(taskId: string): Promise<MemorizeTaskSummaryReadyResponse> {
   return request<MemorizeTaskSummaryReadyResponse>('/getTaskSummaryReady', { taskId });
+}
+
+export async function cancelMemorize(userId: string, soulId: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/cancelMemorize', { userId, soulId });
 }
 
 export async function retrieveDefaultCategories(userId: string, soulId: string): Promise<DefaultCategoriesResponse> {

@@ -1,3 +1,4 @@
+import MemorizeProgress from 'component/MemorizeProgress';
 import MemoryShowModal from 'component/MemoryShowModal';
 import NarrativeSuggestion from 'component/NarrativeSuggestion';
 import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
@@ -1173,6 +1174,7 @@ export default function App() {
       )}
 
       <MemoryShowModal open={showMemoryModal} text={memoryText} onClose={() => setShowMemoryModal(false)} />
+      <MemorizeProgress />
     </>
   );
 }

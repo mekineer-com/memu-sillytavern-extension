@@ -191,14 +191,11 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
             }
             // update summary value, do not do other logic
             memuExtras.summary = {
-                // IMPORTANT: never mutate/"shrink" the processed range based on a transient status probe.
-                // Some backends (especially local) may drop tasks quickly and briefly report FAILURE/Unknown taskId
-                // even though the digest actually completed. Shrinking the range corrupts our cursor and causes
-                // repeated re-digests on chat open.
                 summaryRange: range,
                 summaryTaskId: taskId,
                 summaryTaskStatus: mapped,
                 isReady: false,
+                progress: (resp as any)?.progress ?? undefined,
                 lastError: mapped === MemuTaskStatus.FAILURE ? (typeof err === 'string' ? err : undefined) : undefined,
                 failureCount: mapped === MemuTaskStatus.FAILURE ? (memuExtras.summary?.failureCount ?? 0) : 0,
             };

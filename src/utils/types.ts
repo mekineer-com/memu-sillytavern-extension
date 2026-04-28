@@ -79,6 +79,9 @@ export interface MemuSummary {
   isReady?: boolean;
   force?: boolean;
 
+  // Batch progress (from server polling)
+  progress?: { current: number; total: number };
+
   // Retry diagnostics
   failureCount?: number;
   lastError?: string;
