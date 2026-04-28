@@ -85,7 +85,9 @@ function installChatOptionResetCursor(): void {
         try {
             const { st } = await import('./utils/context-extra');
             const { initChatExtraInfo } = await import('./memory/utils');
-            const { doSummary } = await import('./memory/memorize');
+            const { doSummary, deleteMemuLorebooksForCurrentCharacter } = await import('./memory/memorize');
+
+            await deleteMemuLorebooksForCurrentCharacter();
 
             // Keep baseInfo; wipe progress markers so next digest starts from turn 0.
             const ctx: any = st.getContext() as any;
