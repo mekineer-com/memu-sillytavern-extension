@@ -43,6 +43,7 @@ const cancelBtn: CSSProperties = {
 
 export default function MemorizeProgress(): JSX.Element | null {
   const [tick, setTick] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
@@ -52,17 +53,24 @@ export default function MemorizeProgress(): JSX.Element | null {
   const summary = memuExtras.summary;
   if (!summary) return null;
   const status = summary.summaryTaskStatus;
-  if (status !== MemuTaskStatus.PENDING && status !== MemuTaskStatus.PROCESSING) return null;
+  if (status !== MemuTaskStatus.PENDING && status !== MemuTaskStatus.PROCESSING) {
+    if (cancelling) setCancelling(false);
+    return null;
+  }
 
   const progress = summary.progress;
-  const label = progress
-    ? `Memorizing... (${progress.current}/${progress.total})`
-    : 'Memorizing...';
+  const label = cancelling
+    ? 'Cancelling...'
+    : progress
+      ? `Memorizing... (${progress.current}/${progress.total})`
+      : 'Memorizing...';
   const pct = progress && progress.total > 0
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 
   async function handleCancel() {
+    if (cancelling) return;
+    setCancelling(true);
     const info = memuExtras.baseInfo;
     if (!info) return;
     await cancelMemorize(info.userId, info.characterId);
@@ -71,14 +79,16 @@ export default function MemorizeProgress(): JSX.Element | null {
   return createPortal(
     <div style={containerStyle}>
       <span>{label}</span>
-      {progress && progress.total > 0 && (
+      {!cancelling && progress && progress.total > 0 && (
         <div style={barOuter}>
           <div style={{ height: '100%', width: `${pct}%`, background: 'var(--SmartThemeQuoteColor, #6a9fb5)', borderRadius: 2, transition: 'width 0.3s' }} />
         </div>
       )}
-      <button type="button" style={cancelBtn} onClick={() => void handleCancel()} title="Cancel memorization">
-        ✕
-      </button>
+      {!cancelling && (
+        <button type="button" style={cancelBtn} onClick={() => void handleCancel()}>
+          Cancel
+        </button>
+      )}
     </div>,
     document.body,
   );
