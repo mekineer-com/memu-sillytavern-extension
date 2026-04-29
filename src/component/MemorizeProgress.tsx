@@ -1,4 +1,5 @@
 import { CSSProperties, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { memuExtras } from 'utils/context-extra';
 import { cancelMemorize } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
@@ -67,7 +68,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     await cancelMemorize(info.userId, info.characterId);
   }
 
-  return (
+  return createPortal(
     <div style={containerStyle}>
       <span>{label}</span>
       {progress && progress.total > 0 && (
@@ -78,6 +79,7 @@ export default function MemorizeProgress(): JSX.Element | null {
       <button type="button" style={cancelBtn} onClick={() => void handleCancel()} title="Cancel memorization">
         ✕
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
