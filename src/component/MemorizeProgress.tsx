@@ -44,6 +44,7 @@ const cancelBtn: CSSProperties = {
 export default function MemorizeProgress(): JSX.Element | null {
   const [tick, setTick] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [sawNumericProgress, setSawNumericProgress] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
@@ -53,15 +54,29 @@ export default function MemorizeProgress(): JSX.Element | null {
   const summary = memuExtras.summary;
   if (!summary) return null;
   const status = summary.summaryTaskStatus;
+  const progress = summary.progress;
+  useEffect(() => {
+    const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
+    if (!active) {
+      setCancelling(false);
+      setSawNumericProgress(false);
+      return;
+    }
+    if (progress && progress.total > 0) {
+      setSawNumericProgress(true);
+    }
+  }, [status, progress?.current, progress?.total]);
+
   if (status !== MemuTaskStatus.PENDING && status !== MemuTaskStatus.PROCESSING) {
-    if (cancelling) setCancelling(false);
     return null;
   }
 
-  const progress = summary.progress;
+  const inConsolidationPhase = !cancelling && !progress && sawNumericProgress;
   const label = cancelling
     ? 'Cancelling...'
-    : progress
+    : inConsolidationPhase
+      ? 'Finalizing...'
+      : progress
       ? `Memorizing... (${progress.current}/${progress.total})`
       : 'Memorizing...';
   const pct = progress && progress.total > 0
