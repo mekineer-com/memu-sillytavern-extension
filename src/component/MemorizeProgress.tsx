@@ -52,9 +52,8 @@ export default function MemorizeProgress(): JSX.Element | null {
 
   void tick;
   const summary = memuExtras.summary;
-  if (!summary) return null;
-  const status = summary.summaryTaskStatus;
-  const progress = summary.progress;
+  const status = summary?.summaryTaskStatus;
+  const progress = summary?.progress;
   useEffect(() => {
     const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
     if (!active) {
@@ -66,6 +65,7 @@ export default function MemorizeProgress(): JSX.Element | null {
       setSawNumericProgress(true);
     }
   }, [status, progress?.current, progress?.total]);
+  if (!summary) return null;
 
   if (status !== MemuTaskStatus.PENDING && status !== MemuTaskStatus.PROCESSING) {
     return null;
