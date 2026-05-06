@@ -107,7 +107,7 @@ function installChatOptionResetCursor(): void {
             }
 
             // Force a full digest immediately (do not require leaving/re-entering the chat).
-            await doSummary(0, chat.length - 1, true);
+            await doSummary(0, chat.length - 1, { force: true });
             info(`memorize from beginning started (messages=${chat.length})`);
         } catch (e) {
             logError("reset failed", e);

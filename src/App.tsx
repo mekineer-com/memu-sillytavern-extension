@@ -1077,7 +1077,7 @@ export default function App() {
                   type="button"
                   className="menu_button"
                   onClick={() => void handleMemorizeNow()}
-                  disabled={memorizeNowBusy}
+                  disabled={memorizeNowBusy || !currentCharacter}
                 >
                   {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
                 </button>

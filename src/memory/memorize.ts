@@ -78,7 +78,7 @@ export function getChatFileNameRaw(): string {
     }
 }
 
-export async function doSummary(from: number, to: number, force: boolean = false): Promise<void> {
+export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
     await initChatExtraInfo(st.getContext());
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
@@ -105,7 +105,7 @@ export async function doSummary(from: number, to: number, force: boolean = false
                 chatFileName: getChatFileNameRaw(),
                 timeZone,
                 timeZoneOffsetMin,
-            }, { force });
+            }, opts);
         // Local mode usually returns a task id and completes asynchronously.
         // Keep it pending so the poller drives retrieve/lorebook sync after success.
         {
@@ -119,7 +119,8 @@ export async function doSummary(from: number, to: number, force: boolean = false
                 summaryTaskId: localTaskId,
                 summaryTaskStatus: MemuTaskStatus.PENDING,
                 isReady: false,
-                force,
+                force: opts.force === true,
+                tail: opts.tail === true,
                 failureCount: 0,
                 lastError: undefined,
             };
@@ -137,7 +138,8 @@ export async function doSummary(from: number, to: number, force: boolean = false
             summaryTaskId: null,
             summaryTaskStatus: MemuTaskStatus.FAILURE,
             isReady: false,
-            force,
+            force: opts.force === true,
+            tail: opts.tail === true,
             failureCount: (memuExtras.summary?.failureCount ?? 0) + 1,
             lastError: error instanceof Error ? error.message : String(error),
             lastFailureAt: Date.now(),
@@ -154,7 +156,7 @@ export async function memorizeNow(): Promise<void> {
         warn("memorize now skipped: empty chat");
         return;
     }
-    await doSummary(0, chat.length - 1, true);
+    await doSummary(0, chat.length - 1, { tail: true });
 }
 
 
