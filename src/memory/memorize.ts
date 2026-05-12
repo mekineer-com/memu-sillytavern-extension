@@ -498,9 +498,10 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const userId = String(memuExtras.baseInfo.userId || '').trim();
     const soulId = String(memuExtras.baseInfo.characterId || '').trim();
     if (!conversationId || !userId || !soulId) return null;
-    const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), String(ctx?.name1 || ''));
+    const userName = String(ctx?.name1 || '').trim();
+    const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), userName);
 
-    return { createdAt: Date.now(), conversationId, userId, soulId, queryText, history, preparedPayload: null };
+    return { createdAt: Date.now(), conversationId, userId, soulId, userName, queryText, history, preparedPayload: null };
 }
 
 export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
@@ -530,6 +531,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             userId: turn.userId,
             soulId: turn.soulId,
             conversationId: turn.conversationId,
+            userName: turn.userName,
             method: 'rag',
             query: turn.queryText,
             history: turn.history,
@@ -785,6 +787,7 @@ export async function dispatchConversationTurn(
         userId: turn.userId,
         soulId: turn.soulId,
         conversationId: turn.conversationId,
+        userName: turn.userName,
         message: turn.queryText,
         history: turn.history,
         applyTurnMaintenance,
