@@ -1,6 +1,6 @@
 import { CSSProperties, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { memuExtras } from 'utils/context-extra';
+import { memuExtras, st } from 'utils/context-extra';
 import { cancelMemorize } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
 
@@ -89,6 +89,8 @@ export default function MemorizeProgress(): JSX.Element | null {
     const info = memuExtras.baseInfo;
     if (!info) return;
     await cancelMemorize(info.userId, info.characterId);
+    (memuExtras as any).summary = null;
+    await st.saveChat();
   }
 
   return createPortal(
