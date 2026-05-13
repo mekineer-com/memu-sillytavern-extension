@@ -58,10 +58,19 @@ export interface MemuBaseInfo {
   userId: string;
 }
 
+export interface MemuRetrieveFailure {
+  summaryTaskId: string;
+  failureCount: number;
+  lastError?: string;
+  lastFailureAt?: number;
+  lastAt?: number;
+}
+
 export interface MemuRetrieve {
   liveRetrieve?: MemuRetrieveHistory;
   nowRetrieve?: MemuRetrieveHistory;
   history: MemuRetrieveHistory[];
+  lastFailure?: MemuRetrieveFailure;
 }
 
 export interface MemuRetrieveHistory {

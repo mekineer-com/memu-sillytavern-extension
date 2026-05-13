@@ -57,7 +57,7 @@ async function tick(): Promise<void> {
                         break;
                     }
                     // Avoid retry-spam when retrieve is failing repeatedly (e.g., backend SQLModel mapping error).
-                    const lastFail: any = (memuExtras as any)?.retrieve?.lastFailure;
+                    const lastFail = memuExtras.retrieve?.lastFailure;
                     if (lastFail?.summaryTaskId === (summary.summaryTaskId ?? 'undefined')
                         && (lastFail?.failureCount ?? 0) >= MAX_RETRIEVE_FAILURE_RETRIES) {
                         break;
@@ -91,7 +91,7 @@ async function tick(): Promise<void> {
                             `poller-stale-taskid:${from}:${to}`,
                             `digest state cleared (no taskId, range=${from}-${to})`,
                         );
-                        (memuExtras as any).summary = null;
+                        memuExtras.summary = undefined;
                         await st.saveChat();
                         break;
                     }

@@ -89,7 +89,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     const info = memuExtras.baseInfo;
     if (!info) return;
     await cancelMemorize(info.userId, info.characterId);
-    (memuExtras as any).summary = null;
+    memuExtras.summary = undefined;
     await st.saveChat();
   }
 
