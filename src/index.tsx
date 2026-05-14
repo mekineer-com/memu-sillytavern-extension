@@ -133,6 +133,7 @@ function installChatOptionResetCursor(): void {
             ev.preventDefault();
             const { st } = await import('./utils/context-extra');
             const ctx: any = st.getContext() as any;
+            if (!ctx?.characterId && !ctx?.groupId) return;
             const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
             if (chat.length === 0) return;
             if (!window.confirm('memu: re-memorize this chat now?')) return;
