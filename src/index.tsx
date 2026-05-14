@@ -131,6 +131,10 @@ function installChatOptionResetCursor(): void {
 
         anchor.addEventListener('click', async (ev) => {
             ev.preventDefault();
+            const { st } = await import('./utils/context-extra');
+            const ctx: any = st.getContext() as any;
+            const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
+            if (chat.length === 0) return;
             if (!window.confirm('memu: re-memorize this chat now?')) return;
             await resetCursor();
 
