@@ -10,5 +10,5 @@ export const MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON = 'memu-mental-health-addon'
 export const MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE = 'memu-auto-summary-by-context-size';
 export const MEMU_LOCAL_STORAGE_SUMMARY_TURN = 'memu-summary-turn';
 
-export const MEMU_DEFAULT_TIMEOUT = 15_000;
+export const MEMU_DEFAULT_TIMEOUT = 30_000;
 export const MEMU_DEFAULT_MAX_RETRIES = 3;

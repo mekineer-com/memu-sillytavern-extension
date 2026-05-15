@@ -243,7 +243,7 @@ export default function App() {
     if (!pluginOk) return;
     const t = window.setInterval(() => {
       void refreshProfiles();
-    }, 5000);
+    }, 30_000);
 
     const onFocus = () => { void refreshProfiles(); };
     const onVisibility = () => {
