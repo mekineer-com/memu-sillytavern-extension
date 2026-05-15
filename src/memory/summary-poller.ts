@@ -6,10 +6,11 @@ import { doSummary, retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
+const ACTIVE_PROGRESS_INTERVAL_MS = 3_000;
 const MAX_SUMMARY_FAILURE_RETRIES = 2;
 const MAX_RETRIEVE_FAILURE_RETRIES = 2;
 
-let pollerTimer: ReturnType<typeof setInterval> | undefined;
+let pollerTimer: ReturnType<typeof setTimeout> | undefined;
 let isTerminated = false;
 
 export function setIsTerminated(value: boolean): void {
@@ -20,12 +21,22 @@ export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): v
     if (pollerTimer || isTerminated) {
         return;
     }
-    pollerTimer = setInterval(tick, intervalMs);
+    const loop = async (): Promise<void> => {
+        if (isTerminated) return;
+        await tick();
+        if (isTerminated) return;
+        const status = memuExtras.summary?.summaryTaskStatus;
+        const nextMs = (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING)
+            ? ACTIVE_PROGRESS_INTERVAL_MS
+            : intervalMs;
+        pollerTimer = setTimeout(() => { void loop(); }, nextMs);
+    };
+    void loop();
 }
 
 export function stopSummaryPolling(): void {
     if (pollerTimer) {
-        clearInterval(pollerTimer);
+        clearTimeout(pollerTimer);
         pollerTimer = undefined;
     }
     isTerminated = true;

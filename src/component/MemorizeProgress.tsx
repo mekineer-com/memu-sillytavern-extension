@@ -54,7 +54,6 @@ export default function MemorizeProgress(): JSX.Element | null {
   const summary = memuExtras.summary;
   const status = summary?.summaryTaskStatus;
   const progress = summary?.progress;
-  const phase = String(progress?.phase || '').toLowerCase();
   useEffect(() => {
     const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
     if (!active) {
@@ -73,20 +72,14 @@ export default function MemorizeProgress(): JSX.Element | null {
   }
 
   const inConsolidationPhase = !cancelling && !progress && sawNumericProgress;
-  const inExtractPhase = !cancelling && progress && phase === 'extracting';
-  const inPersistPhase = !cancelling && progress && phase === 'persist';
   const progressCurrent = progress?.current ?? 0;
   const progressTotal = progress?.total ?? 0;
   const label = cancelling
     ? 'Cancelling...'
     : inConsolidationPhase
       ? 'Finalizing...'
-      : inExtractPhase
-      ? `Extracting memories... (${progressCurrent}/${progressTotal})`
-      : inPersistPhase
-      ? `Persisting memories... (${progressCurrent}/${progressTotal})`
       : progress
-      ? `Memorizing... (${progressCurrent}/${progressTotal})`
+      ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';
   const pct = progress && progress.total > 0
     ? Math.round((progress.current / progress.total) * 100)
