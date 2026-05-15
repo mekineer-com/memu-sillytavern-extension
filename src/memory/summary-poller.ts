@@ -195,7 +195,19 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
                 summaryTaskId: taskId,
                 summaryTaskStatus: mapped,
                 isReady: false,
-                progress: (resp as any)?.progress ?? undefined,
+                progress: (() => {
+                    const raw = (resp as any)?.progress;
+                    if (!raw || typeof raw !== 'object') return undefined;
+                    const current = Number((raw as any).current);
+                    const total = Number((raw as any).total);
+                    if (!Number.isFinite(current) || !Number.isFinite(total)) return undefined;
+                    const phase = typeof (raw as any).phase === 'string' ? String((raw as any).phase).trim() : '';
+                    return {
+                        current,
+                        total,
+                        ...(phase ? { phase } : {}),
+                    };
+                })(),
                 lastError: mapped === MemuTaskStatus.FAILURE ? (typeof err === 'string' ? err : undefined) : undefined,
                 failureCount: mapped === MemuTaskStatus.FAILURE ? (memuExtras.summary?.failureCount ?? 0) : 0,
             };

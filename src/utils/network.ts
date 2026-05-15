@@ -12,7 +12,11 @@ export type PluginPing = {
 };
 
 export type MemorizeResponse = { taskId: string };
-export type MemorizeTaskStatusResponse = { status: string; error?: string; progress?: { current: number; total: number } };
+export type MemorizeTaskStatusResponse = {
+  status: string;
+  error?: string;
+  progress?: { current: number; total: number; phase?: string };
+};
 export type MemorizeTaskSummaryReadyResponse = { allReady: boolean };
 export type DefaultCategoriesResponse = { categories: any[] };
 export type ConversationRetrieveRequest = {
