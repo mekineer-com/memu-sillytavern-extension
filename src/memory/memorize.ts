@@ -397,11 +397,10 @@ function resolveMessageTsMs(row: any): number | undefined {
     return Math.trunc(parsed);
 }
 
-function buildTurnHistory(chat: any[], endIdx: number, userName: string): Array<Record<string, any>> {
+function buildTurnHistory(chat: any[], endIdx: number): Array<Record<string, any>> {
     if (!Array.isArray(chat) || endIdx < 0) return [];
-    const start = Math.max(0, endIdx - 39);
     const out: Array<Record<string, any>> = [];
-    for (let i = start; i < endIdx && i < chat.length; i++) {
+    for (let i = 0; i < endIdx && i < chat.length; i++) {
         const row: any = chat[i];
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
@@ -573,7 +572,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const userName = String(ctx?.name1 || '').trim();
     const chatName = String(memuExtras.baseInfo.characterName || soulId || '').trim() || 'sillytavern';
     const chatType = 'dm';
-    const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1), userName);
+    const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1));
 
     return {
         createdAt: Date.now(),
