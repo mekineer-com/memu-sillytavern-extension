@@ -182,7 +182,9 @@ export async function memuGenerationInterceptor(
         const applyTurnMaintenance = !_skipTurnMaintenanceOnce;
         _skipTurnMaintenanceOnce = false;
         const prepared = await preparePendingRetrieveTurnForInterceptor(OVERRIDE_SUMMARIZER.get());
-        if (!prepared) return;
+        if (!prepared) {
+            throw new Error('memU retrieve prep failed — turn blocked.');
+        }
         const reply = await dispatchConversationTurn({ debug: true, applyTurnMaintenance });
         const ctx: any = st.getContext();
         if (typeof ctx?.saveReply !== 'function') {
