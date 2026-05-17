@@ -24,6 +24,8 @@ export type ConversationRetrieveRequest = {
   soulId: string;
   conversationId: string;
   userName?: string;
+  chatName?: string;
+  chatType?: string;
   method: 'rag' | 'llm';
   query?: string;
   queries?: Array<Record<string, any> | string>;
@@ -55,6 +57,8 @@ export type ConversationTurnRequest = {
   soulId: string;
   conversationId: string;
   userName?: string;
+  chatName?: string;
+  chatType?: string;
   message: string;
   history?: Array<Record<string, any>>;
   applyTurnMaintenance?: boolean;
