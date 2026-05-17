@@ -27,6 +27,15 @@ type PendingRetrieveTurn = {
     preparedPayload: Record<string, any> | null;
 };
 
+type PromptInspectorApiResult = {
+    status?: string;
+    prompt?: string;
+};
+
+type PromptInspectorApi = {
+    inspectPayloadJson?: (payloadJson: string) => Promise<PromptInspectorApiResult | null | undefined>;
+};
+
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
 let _pendingRetrieveAbort: AbortController | null = null;
 let _pendingRetrieveAbortReason: string | null = null;
@@ -430,6 +439,60 @@ function _chatContentText(raw: any): string {
     return '';
 }
 
+async function inspectPreparedTurnPayload(preparedPayload: Record<string, any>): Promise<string | null> {
+    const api = (globalThis as any).memuPromptInspector as PromptInspectorApi | undefined;
+    if (!api || typeof api.inspectPayloadJson !== 'function') return null;
+    const payloadJson = JSON.stringify(preparedPayload, null, 2);
+    const result = await api.inspectPayloadJson(payloadJson);
+    if (!result || typeof result !== 'object') return null;
+    const status = String(result.status || '').trim().toLowerCase();
+    if (status === 'cancelled') {
+        throw new Error('Prompt Inspector cancelled generation — message not sent.');
+    }
+    if (status !== 'saved') return null;
+    const prompt = String(result.prompt ?? '');
+    return prompt.trim() ? prompt : null;
+}
+
+function applyPromptOverridePayload(
+    basePayload: Record<string, any>,
+    promptOverrideRaw: string,
+): Record<string, any> {
+    const trimmed = promptOverrideRaw.trim();
+    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        throw new Error('PI prompt must be JSON — message not sent.');
+    }
+    let parsed: any;
+    let parseErr: string | null = null;
+    for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
+        try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
+    }
+    if (parseErr !== null) {
+        throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
+    }
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Error('PI prompt must be a JSON object or message array — message not sent.');
+    }
+    const out: Record<string, any> = { ...basePayload };
+    if (Array.isArray(parsed)) {
+        // PI native format: [{role:'system',content:'...'},{role:'user',content:'...'}]
+        const sys = parsed.find((m: any) => m?.role === 'system');
+        const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
+        if (!usr) throw new Error('PI message array has no user message — message not sent.');
+        out.system_prompt = sys ? String(sys.content || '') : '';
+        out.user_prompt = String(usr.content || '');
+        return out;
+    }
+    const parsedObj = parsed as Record<string, any>;
+    if (Object.prototype.hasOwnProperty.call(parsedObj, 'system_prompt')) {
+        out.system_prompt = String(parsedObj.system_prompt || '');
+    }
+    if (Object.prototype.hasOwnProperty.call(parsedObj, 'user_prompt')) {
+        out.user_prompt = String(parsedObj.user_prompt || '');
+    }
+    return out;
+}
+
 
 export function resetRetrievePipelineState(): void {
     if (_pendingRetrieveAbort) {
@@ -746,47 +809,15 @@ export async function dispatchConversationTurn(
 
     const turnCtx: any = st.getContext();
     const turnSoulCard = resolveSoulCard(turnCtx);
-    const promptOverrideRaw = readInspectPromptTextarea();
     const preparedPayload = turn.preparedPayload;
     if (!preparedPayload || typeof preparedPayload !== 'object') {
         throw new Error('memU prepared payload is missing — retrieve must complete before turn.');
     }
     let promptOverridePayload: Record<string, any> = { ...preparedPayload };
+    const bridgeOverrideRaw = await inspectPreparedTurnPayload(preparedPayload);
+    const promptOverrideRaw = bridgeOverrideRaw ?? readInspectPromptTextarea();
     if (promptOverrideRaw) {
-        const trimmed = promptOverrideRaw.trim();
-        if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
-            throw new Error('PI prompt must be JSON — message not sent.');
-        }
-        let parsed: any;
-        let parseErr: string | null = null;
-        for (const candidate of [trimmed, trimmed.replace(/,(\s*[}\]])/g, '$1')]) {
-            try { parsed = JSON.parse(candidate); parseErr = null; break; } catch (e: any) { parseErr = e?.message || String(e); }
-        }
-        if (parseErr !== null) {
-            throw new Error(`PI prompt invalid JSON — message not sent. Fix and retry. (${parseErr})`);
-        }
-        if (!parsed || typeof parsed !== 'object') {
-            throw new Error('PI prompt must be a JSON object or message array — message not sent.');
-        }
-        if (Array.isArray(parsed)) {
-            // PI native format: [{role:'system',content:'...'},{role:'user',content:'...'}]
-            const sys = parsed.find((m: any) => m?.role === 'system');
-            const usr = [...parsed].reverse().find((m: any) => m?.role === 'user');
-            if (!usr) throw new Error('PI message array has no user message — message not sent.');
-            promptOverridePayload = {
-                ...promptOverridePayload,
-                system_prompt: sys ? String(sys.content || '') : '',
-                user_prompt: String(usr.content || ''),
-            };
-        } else {
-            const parsedObj = parsed as Record<string, any>;
-            if (Object.prototype.hasOwnProperty.call(parsedObj, 'system_prompt')) {
-                promptOverridePayload.system_prompt = String(parsedObj.system_prompt || '');
-            }
-            if (Object.prototype.hasOwnProperty.call(parsedObj, 'user_prompt')) {
-                promptOverridePayload.user_prompt = String(parsedObj.user_prompt || '');
-            }
-        }
+        promptOverridePayload = applyPromptOverridePayload(promptOverridePayload, promptOverrideRaw);
     }
     if (!String(promptOverridePayload.user_prompt || '').trim()) {
         throw new Error('memU prepared payload has empty user_prompt — message not sent.');
