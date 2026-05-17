@@ -3,10 +3,8 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import {
     onChatChanged,
-    onChatCompletionPromptReady,
-    onGenerateAfterCombinePrompts,
-    onGenerateAfterData,
     onGenerationStopped,
+    memuGenerationInterceptor,
     onMessageEdited,
     onMessageReceived,
     onMessageSwiped,
@@ -19,6 +17,8 @@ import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
 
+(globalThis as any).memuGenerationInterceptor = memuGenerationInterceptor;
+
 function installHooksWithRetry(): void {
     const w = window as any;
     if (w.__memuHooksInstalled) return;
@@ -28,12 +28,6 @@ function installHooksWithRetry(): void {
         // Some ST builds initialize eventSource late; retry briefly instead of failing forever.
         if (!st?.eventSource?.on) return false;
         try {
-            st.eventSource.on(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
-            st.eventSource.makeFirst(st.event_types.CHAT_COMPLETION_PROMPT_READY, onChatCompletionPromptReady);
-            st.eventSource.on(st.event_types.GENERATE_AFTER_COMBINE_PROMPTS, onGenerateAfterCombinePrompts);
-            st.eventSource.makeFirst(st.event_types.GENERATE_AFTER_COMBINE_PROMPTS, onGenerateAfterCombinePrompts);
-            st.eventSource.on(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
-            st.eventSource.makeLast(st.event_types.GENERATE_AFTER_DATA, onGenerateAfterData);
             st.eventSource.on(st.event_types.GENERATION_STOPPED, onGenerationStopped);
             st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);
             st.eventSource.on(st.event_types.MESSAGE_SENT, onUserMessageSent);

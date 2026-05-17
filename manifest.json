@@ -3,6 +3,7 @@
     "loading_order": 1,
     "requires": [],
     "optional": [],
+    "generate_interceptor": "memuGenerationInterceptor",
     "js": "dist/index.js",
     "css": "",
     "author": "MemU",

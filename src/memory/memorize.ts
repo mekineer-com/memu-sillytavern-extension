@@ -696,10 +696,15 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     }
 }
 
+export async function preparePendingRetrieveTurnForInterceptor(replaceSystem: boolean = true): Promise<boolean> {
+    const probeEventData: any = {};
+    await addPendingRetrieveToPrompt(probeEventData, replaceSystem);
+    return _pendingRetrieveTurn != null;
+}
+
 export async function dispatchConversationTurn(
-    generateData: any,
     opts: { debug?: boolean; applyTurnMaintenance?: boolean } = {},
-): Promise<void> {
+): Promise<string> {
     const turn = _pendingRetrieveTurn;
     if (!turn) {
         throw new Error('memU pending retrieve is missing — retrieve must complete before turn.');
@@ -803,7 +808,6 @@ export async function dispatchConversationTurn(
     if (!reply) {
         throw new Error("conversationTurn returned empty response");
     }
-    (generateData as any).__memu_direct_reply = reply;
 
     const prev2 = getInspectData();
     const turnUpdate: InspectData = {
@@ -836,6 +840,7 @@ export async function dispatchConversationTurn(
     // never fires retrieveMemories. Sync lorebooks after every turn so
     // category summaries stay visible in the World Info panel.
     void syncLorebooksNow("after-turn");
+    return reply;
 }
 
 // --- World Info sync (view memU memories inside ST) ---

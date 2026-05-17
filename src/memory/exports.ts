@@ -1,9 +1,9 @@
 import { OVERRIDE_SUMMARIZER, memuExtras, st } from "utils/context-extra";
 import {
-    addPendingRetrieveToPrompt,
     cancelPendingRetrieveRequest,
     getChatIdSafe,
     dispatchConversationTurn,
+    preparePendingRetrieveTurnForInterceptor,
     dropPendingTurnIfStopped,
     resetRetrievePipelineState,
 } from "./memorize";
@@ -12,7 +12,6 @@ import { initChatExtraInfo } from "./utils";
 import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/network";
 import { info } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
-import { main_api } from "@silly-tavern/script.js";
 
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
@@ -162,23 +161,18 @@ export function onGenerationStopped(): void {
     cancelPendingRetrieveRequest('Retrieve cancelled by stop button');
 }
 
-export async function onChatCompletionPromptReady(eventData: any): Promise<void> {
-    if (eventData?.dryRun) return;
-    if (!Array.isArray(eventData?.chat)) return;
-    await waitForPendingSwipeUndo();
-    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
+function _skipInterceptorType(type: string): boolean {
+    return type === 'quiet' || type === 'impersonate';
 }
 
-export async function onGenerateAfterCombinePrompts(eventData: any): Promise<void> {
-    if (eventData?.dryRun) return;
-    if (main_api === 'openai') return;
-    if (typeof eventData?.prompt !== 'string') return;
-    await waitForPendingSwipeUndo();
-    await addPendingRetrieveToPrompt(eventData, OVERRIDE_SUMMARIZER.get());
-}
-
-export async function onGenerateAfterData(generateData: any, dryRun?: boolean): Promise<void> {
-    if (dryRun) return;
+export async function memuGenerationInterceptor(
+    _chat: any[],
+    _contextSize: number,
+    abort: (immediately?: boolean) => void,
+    type: string,
+): Promise<void> {
+    if (_skipInterceptorType(String(type || '').trim())) return;
+    abort(true);
     await waitForPendingSwipeUndo();
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         _skipTurnMaintenanceOnce = false;
@@ -187,7 +181,15 @@ export async function onGenerateAfterData(generateData: any, dryRun?: boolean): 
     try {
         const applyTurnMaintenance = !_skipTurnMaintenanceOnce;
         _skipTurnMaintenanceOnce = false;
-        await dispatchConversationTurn(generateData, { debug: true, applyTurnMaintenance });
+        const prepared = await preparePendingRetrieveTurnForInterceptor(OVERRIDE_SUMMARIZER.get());
+        if (!prepared) return;
+        const reply = await dispatchConversationTurn({ debug: true, applyTurnMaintenance });
+        const ctx: any = st.getContext();
+        if (typeof ctx?.saveReply !== 'function') {
+            throw new Error('SillyTavern context.saveReply is unavailable');
+        }
+        await ctx.saveReply({ type, getMessage: reply });
+        await st.saveChat();
     } catch (e: any) {
         _skipTurnMaintenanceOnce = false;
         const msg = e instanceof Error ? e.message : String(e);
