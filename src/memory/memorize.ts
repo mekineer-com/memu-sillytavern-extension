@@ -39,7 +39,7 @@ type PromptInspectorApi = {
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
 let _pendingRetrieveAbort: AbortController | null = null;
 let _pendingRetrieveAbortReason: string | null = null;
-const RETRIEVE_REQUEST_TIMEOUT_MS = 30_000;
+const RETRIEVE_REQUEST_TIMEOUT_MS = 90_000;
 
 function isAbortError(err: any): boolean {
     if (!err) return false;
