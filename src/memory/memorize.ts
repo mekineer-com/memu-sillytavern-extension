@@ -12,7 +12,6 @@ import {
     stashInspectData,
     InspectData,
     seedInspectPromptTextarea,
-    readInspectPromptTextarea,
 } from "ui/inspect-panel";
 
 type PendingRetrieveTurn = {
@@ -441,14 +440,22 @@ function _chatContentText(raw: any): string {
 
 async function inspectPreparedTurnPayload(preparedPayload: Record<string, any>): Promise<string | null> {
     const api = (globalThis as any).memuPromptInspector as PromptInspectorApi | undefined;
-    if (!api || typeof api.inspectPayloadJson !== 'function') return null;
+    if (!api || typeof api.inspectPayloadJson !== 'function') {
+        throw new Error('Prompt Inspector API unavailable — turn blocked.');
+    }
     const payloadJson = JSON.stringify(preparedPayload, null, 2);
     const result = await api.inspectPayloadJson(payloadJson);
-    if (!result || typeof result !== 'object') return null;
+    if (!result || typeof result !== 'object') {
+        throw new Error('Prompt Inspector returned invalid result — turn blocked.');
+    }
     const status = String(result.status || '').trim().toLowerCase();
     if (status === 'cancelled') {
         throw new Error('Prompt Inspector cancelled generation — message not sent.');
     }
+    if (status === 'disabled') {
+        throw new Error('Prompt Inspector is disabled — turn blocked.');
+    }
+    if (status === 'discarded') return null;
     if (status !== 'saved') return null;
     const prompt = String(result.prompt ?? '');
     return prompt.trim() ? prompt : null;
@@ -814,8 +821,7 @@ export async function dispatchConversationTurn(
         throw new Error('memU prepared payload is missing — retrieve must complete before turn.');
     }
     let promptOverridePayload: Record<string, any> = { ...preparedPayload };
-    const bridgeOverrideRaw = await inspectPreparedTurnPayload(preparedPayload);
-    const promptOverrideRaw = bridgeOverrideRaw ?? readInspectPromptTextarea();
+    const promptOverrideRaw = await inspectPreparedTurnPayload(preparedPayload);
     if (promptOverrideRaw) {
         promptOverridePayload = applyPromptOverridePayload(promptOverridePayload, promptOverrideRaw);
     }
