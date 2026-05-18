@@ -28,7 +28,6 @@ export type ConversationRetrieveRequest = {
   chatType?: string;
   method: 'rag' | 'llm';
   query?: string;
-  queries?: Array<Record<string, any> | string>;
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
   soul_card?: string;
@@ -62,7 +61,6 @@ export type ConversationTurnRequest = {
   message: string;
   history?: Array<Record<string, any>>;
   applyTurnMaintenance?: boolean;
-  dryRun?: boolean;
   debug?: boolean;
   soul_card?: string;
   promptOverridePayload?: Record<string, any>;

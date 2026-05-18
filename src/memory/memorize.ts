@@ -195,7 +195,7 @@ export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
     await initChatExtraInfo(st.getContext());
     const info = memuExtras.baseInfo;
     if (!info) return;
-    const prefix = `memU - ${String(info.characterName || info.agentName || '').trim()} - `;
+    const prefix = `memU - ${String(info.characterName || '').trim()} - `;
     if (prefix === 'memU -  - ') return;
     try {
         const csrfResp = await fetch('/csrf-token');
@@ -1031,7 +1031,7 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
 
     const ctx: any = st.getContext();
     const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
-    const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || baseInfo?.agentName || 'Character'));
+    const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || 'Character'));
 
     for (const cat of categories) {
         const catName = sanitizeWorldInfoName(String((cat as any)?.name || 'category'));
@@ -1084,22 +1084,7 @@ function addSummary(memuSummary: string, eventData: any): void {
             role: 'system',
             content: memuSummary,
         });
-        return;
     }
-    if (typeof eventData?.prompt === 'string') {
-        const cleaned = stripLegacySummaryBlock(eventData.prompt);
-        if (cleaned.includes(memuSummary)) {
-            eventData.prompt = cleaned;
-            return;
-        }
-        eventData.prompt = `${memuSummary}\n\n${cleaned}`;
-    }
-}
-
-function stripLegacySummaryBlock(prompt: string): string {
-    const text = String(prompt || '');
-    if (!text.includes('[Summary:') || !text.includes('[Prior context]')) return text;
-    return text.replace(/\[Summary:\s*\[Prior context][\s\S]*?(?=\n\*{3}\n|$)/g, '').trim();
 }
 
 function parseSummary(categories: CategoryResponse[]): string {

@@ -1,5 +1,4 @@
 import { LOCAL_USER_ID, memuExtras, st } from "utils/context-extra";
-import { estimateTokenUsage } from "utils/utils";
 
 
 async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, delayMs: number = 120): Promise<any | null> {
@@ -67,37 +66,4 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
         };
         await st.saveChat();
     }
-}
-
-
-export async function sumTokens(from: number): Promise<number> {
-	const chat = st.getContext().chat;
-    // We call summarization on message-received / generation-ended events, so the last message is complete.
-	if (chat == null || chat.length <= from) {
-		return 0;
-	}
-	let sum = 0;
-	for (let i = from; i < chat.length; i++) {
-		const message = chat[i];
-		const text = message.mes;
-		if (text == null || typeof text !== 'string') {
-			continue;
-		}
-		const usage = await computeTokenUsage(text);
-		sum += usage;
-	}
-	return sum;
-}
-
-async function computeTokenUsage(text: string): Promise<number> {
-    const ctx = st.getContext();
-    if (typeof ctx.getTokenCountAsync === "function") {
-        const n = await ctx.getTokenCountAsync(text as unknown as string);
-        if (typeof n === "number" && !Number.isNaN(n)) return n;
-    }
-    if (typeof ctx.getTokenCount === "function") {
-        const n = ctx.getTokenCount(text as unknown as string);
-        if (typeof n === "number" && !Number.isNaN(n)) return n;
-    }
-    return estimateTokenUsage(text);
 }

@@ -120,13 +120,3 @@ export interface ConversationMessage {
   // Optional: message timestamp in epoch milliseconds (UTC). Prefer this for deterministic splits.
   ts_ms?: number;
 }
-
-export interface STEventData {
-  chat: STEventDataMsg[];
-  dryRun: boolean;
-}
-
-export interface STEventDataMsg {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}

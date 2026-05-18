@@ -118,9 +118,13 @@ export default function App() {
   const prevDefaultIsHordeRef = useRef<boolean>(false);
 
   useEffect(() => {
-    st.eventSource.on(st.event_types.CHAT_CHANGED, () => {
+    const onChatChanged = () => {
       setMemoryText(memuExtras.retrieve?.liveRetrieve?.summary ?? memuExtras.retrieve?.nowRetrieve?.summary ?? '');
-    });
+    };
+    st.eventSource.on(st.event_types.CHAT_CHANGED, onChatChanged);
+    return () => {
+      try { st.eventSource?.removeListener?.(st.event_types.CHAT_CHANGED, onChatChanged); } catch { }
+    };
   }, []);
 
   useEffect(() => {
@@ -629,7 +633,7 @@ export default function App() {
     try {
       const ctx: any = st.getContext() as any;
       const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
-      const raw = String(character?.name || memuExtras.baseInfo?.characterName || memuExtras.baseInfo?.agentName || '').trim();
+      const raw = String(character?.name || memuExtras.baseInfo?.characterName || '').trim();
       if (!raw) return 'memU - ';
       return `memU - ${sanitizeLorebookName(raw)} - `;
     } catch {

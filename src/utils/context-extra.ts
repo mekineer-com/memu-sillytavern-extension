@@ -1,12 +1,11 @@
 import { event_types, eventSource, getMaxContextSize, saveChat } from "@silly-tavern/script.js";
 import { debounce_timeout } from "@silly-tavern/scripts/constants.js";
-import { Message, MessageCollection, promptManager } from "@silly-tavern/scripts/openai.js";
 import { getContext } from "@silly-tavern/scripts/st-context.js";
 import { ToolManager } from '@silly-tavern/scripts/tool-calling.js';
 import { debounce } from "@silly-tavern/scripts/utils.js";
 import { appendFileContent } from '@silly-tavern/scripts/chats.js';
 import { getRegexedString, regex_placement } from '@silly-tavern/scripts/extensions/regex/engine.js';
-import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_SUMMARY_TURN, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
+import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -23,18 +22,12 @@ export const st = {
     event_types: event_types,
     eventSource: eventSource,
 
-    promptManager: promptManager,
     toolManager: ToolManager,
 
     getRegexedString: getRegexedString,
     regex_placement: regex_placement,
     appendFileContent: appendFileContent,
 }
-
-export {
-    Message,
-    MessageCollection
-};
 
 export const SHOW_ADVANCED_MAPPING = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING),
@@ -124,16 +117,6 @@ export const IMPORT_LOREBOOKS = {
 export const MENTAL_HEALTH_ADDON = {
     get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, false),
     set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, value),
-}
-
-export const AUTO_SUMMARY_BY_CONTEXT_SIZE = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE) !== 'false',
-    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_AUTO_SUMMARY_BY_CONTEXT_SIZE, value.toString()),
-}
-
-export const SUMMARY_TURN = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SUMMARY_TURN),
-    set: (value: number) => localStorage.setItem(MEMU_LOCAL_STORAGE_SUMMARY_TURN, value.toString()),
 }
 
 export const memuExtras = new Proxy<MemuExtras>(originExtras, {
