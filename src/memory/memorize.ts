@@ -443,7 +443,7 @@ function _chatContentText(raw: any): string {
 async function inspectPreparedTurnPayload(preparedPayload: Record<string, any>): Promise<string | null> {
     const api = (globalThis as any).memuPromptInspector as PromptInspectorApi | undefined;
     if (!api || typeof api.inspectPayloadJson !== 'function') {
-        throw new Error('Prompt Inspector API unavailable — turn blocked.');
+        return null;
     }
     const payloadJson = JSON.stringify(preparedPayload, null, 2);
     const result = await api.inspectPayloadJson(payloadJson);
@@ -455,7 +455,7 @@ async function inspectPreparedTurnPayload(preparedPayload: Record<string, any>):
         throw new Error('Prompt Inspector cancelled generation — message not sent.');
     }
     if (status === 'disabled') {
-        throw new Error('Prompt Inspector is disabled — turn blocked.');
+        return null;
     }
     if (status === 'discarded') return null;
     if (status !== 'saved') return null;
