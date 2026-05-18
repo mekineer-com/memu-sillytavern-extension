@@ -232,7 +232,10 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
             memuExtras.baseInfo.userId,
             memuExtras.baseInfo.characterId,
         );
-        const categories = Array.isArray((response as any)?.categories) ? (response as any).categories : [];
+        if (!response || typeof response !== 'object' || !Array.isArray((response as any).categories)) {
+            throw new Error('retrieveDefaultCategories returned malformed payload: categories[] missing');
+        }
+        const categories = (response as any).categories as any[];
         const memuSummaryText = parseSummary(categories);
 
         // Put memU's retrieved summary into SillyTavern's built-in "Summarize/Memory" slot.
@@ -570,7 +573,10 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const soulId = String(memuExtras.baseInfo.characterId || '').trim();
     if (!conversationId || !userId || !soulId) return null;
     const userName = String(ctx?.name1 || '').trim();
-    const chatName = String(memuExtras.baseInfo.characterName || soulId || '').trim() || 'sillytavern';
+    const chatName = String(memuExtras.baseInfo.characterName || soulId || '').trim();
+    if (!chatName) {
+        throw new Error('memu extension could not resolve chatName from characterName/soulId');
+    }
     const chatType = 'dm';
     const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1));
 
@@ -686,6 +692,10 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
         ? (resp as any).turn_user_prompt.trim() : '';
     const hasPriorPayload = (resp as any)?.prior_context != null && String((resp as any).prior_context).trim() !== '';
+    if (!turnSystemPrompt) {
+        _pendingRetrieveTurn = null;
+        throw new Error('conversationRetrieve missing turn_system_prompt — turn blocked.');
+    }
     if (!turnUserPrompt) {
         _pendingRetrieveTurn = null;
         throw new Error('conversationRetrieve missing turn_user_prompt — turn blocked.');
