@@ -59,10 +59,10 @@ async function maybeClearStaleLocalState(): Promise<void> {
 
     let changed = false;
 
-    let ping: any = null;
-    try {
-        ping = await getPluginPing();
-    } catch { }
+    const ping = await getPluginPing();
+    if (ping?.ok !== true) {
+        throw new Error(`memu plugin ping failed: ${String((ping as any)?.error || 'unknown error')}`);
+    }
 
     const pingSession = (ping?.serverInstanceId) as (string | undefined);
     const pingEphemeral = !!ping?.ephemeralDb;
@@ -83,11 +83,9 @@ async function maybeClearStaleLocalState(): Promise<void> {
 
     // If scoped storage is missing/empty but we still have a local cursor, clear once so digest restarts at 0.
     if (!cursorCleared && hasCursor && userId && soulId) {
-        let probe: any = null;
-        try {
-            probe = await scopeStorageProbe(userId, soulId);
-        } catch {
-            probe = null;
+        const probe = await scopeStorageProbe(userId, soulId);
+        if (probe?.ok !== true) {
+            throw new Error(`memu scopeStorageProbe failed: ${String((probe as any)?.reason || 'unknown error')}`);
         }
         const missingOrEmpty = probe?.ok === true && probe?.missingOrEmpty === true;
         if (missingOrEmpty) {
