@@ -185,10 +185,12 @@ export async function memuGenerationInterceptor(
         }
         const reply = await dispatchConversationTurn({ debug: true, applyTurnMaintenance });
         const ctx: any = st.getContext();
-        if (typeof ctx?.saveReply !== 'function') {
+        if (reply && typeof ctx?.saveReply !== 'function') {
             throw new Error('SillyTavern context.saveReply is unavailable');
         }
-        await ctx.saveReply({ type, getMessage: reply });
+        if (reply) {
+            await ctx.saveReply({ type, getMessage: reply });
+        }
         await st.saveChat();
     } catch (e: any) {
         _skipTurnMaintenanceOnce = false;

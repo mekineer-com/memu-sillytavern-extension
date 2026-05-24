@@ -869,9 +869,44 @@ export async function dispatchConversationTurn(
         promptOverridePayload,
     });
 
+    const responseTarget = String((resp as any)?.response_target ?? '').trim().toLowerCase();
+    const shouldRespond = typeof (resp as any)?.should_respond === 'boolean'
+        ? Boolean((resp as any).should_respond)
+        : undefined;
     const reply = String(resp?.response ?? '').trim();
     if (!reply) {
-        throw new Error("conversationTurn returned empty response");
+        const explicitListen = responseTarget === 'listen' || shouldRespond === false;
+        if (!explicitListen) {
+            throw new Error("conversationTurn returned empty response");
+        }
+        const prevListen = getInspectData();
+        const listenUpdate: InspectData = {
+            ...(prevListen || { timestamp: Date.now() }),
+            timestamp: Date.now(),
+            turnStatus: 'ok',
+            apimwStatus: typeof resp?.apimw === 'string' ? resp.apimw : undefined,
+            turnMs: typeof (resp as any)?.turn_ms === 'number' ? (resp as any).turn_ms : undefined,
+            replyCh: 0,
+        };
+        if (includeDebug) {
+            const finalTurnPayload = (resp as any)?.final_turn_payload;
+            const finalTurnPrompt = finalTurnPayload && typeof finalTurnPayload === 'object'
+                ? JSON.stringify(finalTurnPayload, null, 2)
+                : undefined;
+            listenUpdate.query = turn.queryText;
+            listenUpdate.userId = turn.userId;
+            listenUpdate.soulId = turn.soulId;
+            listenUpdate.method = 'turn';
+            listenUpdate.conversationId = turn.conversationId;
+            listenUpdate.turnContract = resp?.turn_contract;
+            listenUpdate.turnPrompt = finalTurnPrompt;
+            listenUpdate.turnSystemPrompt = typeof finalTurnPayload?.system_prompt === 'string'
+                ? finalTurnPayload.system_prompt
+                : undefined;
+        }
+        stashInspectData(listenUpdate);
+        void syncLorebooksNow("after-turn");
+        return '';
     }
 
     const prev2 = getInspectData();

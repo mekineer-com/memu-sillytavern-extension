@@ -72,6 +72,8 @@ export type ConversationTurnRequest = {
 export type ConversationTurnResponse = {
   ok: boolean;
   response?: string;
+  should_respond?: boolean;
+  response_target?: 'respond' | 'listen' | 'private' | string;
   conversation_id?: string;
   apimw?: string;
   state?: any;
