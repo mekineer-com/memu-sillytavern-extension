@@ -94,15 +94,6 @@ async function tick(): Promise<void> {
                     const [from, to] = summary.summaryRange;
                     const failCount = summary.failureCount ?? 0;
                     const err = summary.lastError;
-                    const nonRetryable = typeof err === 'string' && err.startsWith('NON_RETRYABLE:');
-                    if (nonRetryable) {
-                        onceError(
-                            `poller-non-retryable:${String(summary.summaryTaskId ?? 'none')}`,
-                            `digest failed with non-retryable invariant (taskId=${String(summary.summaryTaskId ?? 'none')})`,
-                            err,
-                        );
-                        break;
-                    }
 
                     // If we never got a taskId (request failed before a task was created),
                     // don't keep this FAILED state around forever. After a couple failures,
