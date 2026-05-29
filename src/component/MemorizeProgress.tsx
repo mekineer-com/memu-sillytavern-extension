@@ -68,7 +68,7 @@ export default function MemorizeProgress(): JSX.Element | null {
   const progressCurrent = progress?.current ?? 0;
   const progressTotal = progress?.total ?? 0;
   const phase = String(progress?.phase || '').trim().toLowerCase();
-  const inConsolidationPhase = !cancelling && phase === 'consolidation';
+  const inConsolidationPhase = !cancelling && (phase === 'consolidation' || phase === 'consolidating');
   const label = cancelling
     ? 'Cancelling...'
     : inConsolidationPhase
