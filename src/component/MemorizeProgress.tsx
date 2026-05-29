@@ -70,6 +70,7 @@ export default function MemorizeProgress(): JSX.Element | null {
   const progressTotal = progress?.total ?? 0;
   const phase = String(progress?.phase || '').trim().toLowerCase();
   const retryCount = Math.max(0, Number(summary.failureCount ?? 0));
+  const retriesUsed = retryCount > 1 ? 1 : 0;
   const retrying = !cancelling && active && retryCount > 0 && !progress;
   const failedErrorRaw = String(summary.lastError || '').trim();
   const failedError = failedErrorRaw.length > 110
@@ -79,11 +80,11 @@ export default function MemorizeProgress(): JSX.Element | null {
   const label = cancelling
     ? 'Cancelling...'
     : failed
-      ? `Memorize failed after ${retryCount} retries.${failedError ? ` ${failedError}` : ''}`
+      ? `Memorize failed after ${retriesUsed} retry.${failedError ? ` ${failedError}` : ''}`
     : inConsolidationPhase
       ? 'Finalizing...'
       : retrying
-      ? `Retrying memorize (${retryCount}/2)...`
+      ? `Retrying memorize (${retryCount}/1)...`
       : progress
       ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';

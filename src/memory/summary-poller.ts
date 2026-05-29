@@ -7,7 +7,6 @@ import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
 const ACTIVE_PROGRESS_INTERVAL_MS = 3_000;
-const MAX_SUMMARY_FAILURE_RETRIES = 2;
 const MAX_RETRIEVE_FAILURE_RETRIES = 2;
 
 let pollerTimer: ReturnType<typeof setTimeout> | undefined;
@@ -96,9 +95,9 @@ async function tick(): Promise<void> {
                     const err = summary.lastError;
 
                     // If we never got a taskId (request failed before a task was created),
-                    // don't keep this FAILED state around forever. After a couple failures,
+                    // don't keep this FAILED state around forever. After one retry failure,
                     // clear it so the next user turn can attempt again.
-                    if (!summary.summaryTaskId && failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
+                    if (!summary.summaryTaskId && failCount > 1) {
                         onceWarn(
                             `poller-stale-taskid:${from}:${to}`,
                             `digest state cleared (no taskId, range=${from}-${to})`,
@@ -107,7 +106,7 @@ async function tick(): Promise<void> {
                         await st.saveChat();
                         break;
                     }
-                    if (failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
+                    if (failCount > 1) {
                         onceError(
                             `poller-digest-failed:${from}:${to}`,
                             `digest failed repeatedly (range=${from}-${to}, failures=${failCount})`,
@@ -118,7 +117,7 @@ async function tick(): Promise<void> {
                     memuExtras.summary = {
                         ...summary,
                         summaryTaskStatus: MemuTaskStatus.PROCESSING,
-                        failureCount: failCount + 1,
+                        failureCount: failCount,
                     };
                     await st.saveChat();
                     void doSummary(from, to, { force: summary.force === true, tail: summary.tail === true });
