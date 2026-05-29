@@ -21,7 +21,6 @@ import {
   getPluginConfig,
   listRelationships,
   getProfileModels,
-  pingPlugin,
   serverStart,
   serverStatus,
   serverStop,
@@ -137,11 +136,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const ok = await pingPlugin();
-        setPluginOk(ok);
-        if (!ok) return;
-
+        // Plugin reachability should not depend on mcp-memu-server health.
         const cfg = await getPluginConfig();
+        setPluginOk(true);
         setPluginConfigState(cfg);
 
         try {
