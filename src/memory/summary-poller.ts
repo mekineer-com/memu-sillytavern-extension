@@ -17,6 +17,13 @@ export function setIsTerminated(value: boolean): void {
     isTerminated = value;
 }
 
+function isSummaryPollingActive(summary: { summaryTaskStatus?: MemuTaskStatus; isReady?: boolean } | undefined): boolean {
+    if (!summary) return false;
+    const status = summary.summaryTaskStatus;
+    if (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING) return true;
+    return status === MemuTaskStatus.SUCCESS && summary.isReady !== true;
+}
+
 export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): void {
     if (pollerTimer || isTerminated) {
         return;
@@ -25,8 +32,7 @@ export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): v
         if (isTerminated) return;
         await tick();
         if (isTerminated) return;
-        const status = memuExtras.summary?.summaryTaskStatus;
-        const nextMs = (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING)
+        const nextMs = isSummaryPollingActive(memuExtras.summary)
             ? ACTIVE_PROGRESS_INTERVAL_MS
             : intervalMs;
         pollerTimer = setTimeout(() => { void loop(); }, nextMs);
@@ -106,32 +112,6 @@ async function tick(): Promise<void> {
                         await st.saveChat();
                         break;
                     }
-                    // Some local backends may complete and drop tasks quickly.
-                    // If status probing returns 'Unknown taskId', assume digest is done and try retrieve once.
-                    if (err === 'Unknown taskId') {
-                        onceWarn(
-                            `poller-unknown-taskid:${String(summary.summaryTaskId ?? 'none')}`,
-                            `taskId not found; trying retrieve (taskId=${String(summary.summaryTaskId ?? 'none')})`,
-                        );
-                        try {
-                            memuExtras.summary = {
-                                ...summary,
-                                summaryTaskStatus: MemuTaskStatus.SUCCESS,
-                                isReady: true,
-                                lastError: undefined,
-                            };
-                            await st.saveChat();
-                            await retrieveMemories(memuExtras.summary);
-                        } catch (e) {
-                            onceError(
-                                `poller-retrieve-after-unknown:${String(summary.summaryTaskId ?? 'none')}`,
-                                `retrieve after unknown taskId failed (taskId=${String(summary.summaryTaskId ?? 'none')})`,
-                                e,
-                            );
-                        }
-                        break;
-                    }
-
                     if (failCount >= MAX_SUMMARY_FAILURE_RETRIES) {
                         onceError(
                             `poller-digest-failed:${from}:${to}`,

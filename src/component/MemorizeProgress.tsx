@@ -54,8 +54,10 @@ export default function MemorizeProgress(): JSX.Element | null {
   const summary = memuExtras.summary;
   const status = summary?.summaryTaskStatus;
   const progress = summary?.progress;
+  const active = status === MemuTaskStatus.PENDING
+    || status === MemuTaskStatus.PROCESSING
+    || (status === MemuTaskStatus.SUCCESS && summary?.isReady !== true);
   useEffect(() => {
-    const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
     if (!active) {
       setCancelling(false);
       setSawNumericProgress(false);
@@ -64,14 +66,17 @@ export default function MemorizeProgress(): JSX.Element | null {
     if (progress && progress.total > 0) {
       setSawNumericProgress(true);
     }
-  }, [status, progress?.current, progress?.total]);
+  }, [status, summary?.isReady, progress?.current, progress?.total]);
   if (!summary) return null;
 
-  if (status !== MemuTaskStatus.PENDING && status !== MemuTaskStatus.PROCESSING) {
+  if (!active) {
     return null;
   }
 
-  const inConsolidationPhase = !cancelling && !progress && sawNumericProgress;
+  const inConsolidationPhase = !cancelling && (
+    (status === MemuTaskStatus.SUCCESS && summary?.isReady !== true)
+    || (!progress && sawNumericProgress)
+  );
   const progressCurrent = progress?.current ?? 0;
   const progressTotal = progress?.total ?? 0;
   const label = cancelling
