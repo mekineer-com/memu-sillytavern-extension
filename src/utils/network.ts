@@ -17,7 +17,6 @@ export type MemorizeTaskStatusResponse = {
   error?: string;
   progress?: { current: number; total: number; phase?: string };
 };
-export type MemorizeTaskSummaryReadyResponse = { allReady: boolean };
 export type DefaultCategoriesResponse = { categories: any[] };
 export type ConversationRetrieveRequest = {
   userId: string;
@@ -160,10 +159,6 @@ export async function getProfileModels(
 
 export async function getTaskStatus(taskId: string): Promise<MemorizeTaskStatusResponse> {
   return request<MemorizeTaskStatusResponse>('/getTaskStatus', { taskId });
-}
-
-export async function getTaskSummaryReady(taskId: string): Promise<MemorizeTaskSummaryReadyResponse> {
-  return request<MemorizeTaskSummaryReadyResponse>('/getTaskSummaryReady', { taskId });
 }
 
 export async function cancelMemorize(userId: string, soulId: string): Promise<{ ok: boolean }> {

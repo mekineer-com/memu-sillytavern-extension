@@ -83,9 +83,7 @@ function installChatOptionResetCursor(): void {
         const summary: any = (st.getContext() as any)?.chatMetadata?.memuExtras?.summary;
         if (!summary) return false;
         const status = summary.summaryTaskStatus;
-        return status === MemuTaskStatus.PENDING
-            || status === MemuTaskStatus.PROCESSING
-            || (status === MemuTaskStatus.SUCCESS && summary.isReady !== true);
+        return status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
     }
 
     function applyDisabledState(): void {

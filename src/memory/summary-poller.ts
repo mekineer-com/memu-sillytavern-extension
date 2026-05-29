@@ -1,6 +1,6 @@
 import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
-import { getTaskStatus, getTaskSummaryReady } from 'utils/network';
+import { getTaskStatus } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
 import { doSummary, retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
@@ -17,11 +17,10 @@ export function setIsTerminated(value: boolean): void {
     isTerminated = value;
 }
 
-function isSummaryPollingActive(summary: { summaryTaskStatus?: MemuTaskStatus; isReady?: boolean } | undefined): boolean {
+function isSummaryPollingActive(summary: { summaryTaskStatus?: MemuTaskStatus } | undefined): boolean {
     if (!summary) return false;
     const status = summary.summaryTaskStatus;
-    if (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING) return true;
-    return status === MemuTaskStatus.SUCCESS && summary.isReady !== true;
+    return status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
 }
 
 export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): void {
@@ -77,10 +76,6 @@ async function tick(): Promise<void> {
                     const lastFail = memuExtras.retrieve?.lastFailure;
                     if (lastFail?.summaryTaskId === (summary.summaryTaskId ?? 'undefined')
                         && (lastFail?.failureCount ?? 0) >= MAX_RETRIEVE_FAILURE_RETRIES) {
-                        break;
-                    }
-                    if (summary.isReady !== true) {
-                        updateTaskSummaryStatus(summary.summaryTaskId);
                         break;
                     }
                     await retrieveMemories(summary);
@@ -139,23 +134,6 @@ async function tick(): Promise<void> {
     }
 }
 
-function updateTaskSummaryStatus(taskId?: string | null): void {
-    if (!taskId) {
-        onceError("poller-taskid-null", "taskId null");
-        return;
-    }
-    getTaskSummaryReady(taskId)
-        .then(async (resp) => {
-            if (memuExtras.summary) {
-                memuExtras.summary.isReady = resp.allReady === true;
-                await st.saveChat();
-            }
-        })
-        .catch((err) => {
-            onceError("poller-task-ready-failed", "task ready failed", err);
-        });
-}
-
 function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null): void {
     if (!taskId) {
         onceError("poller-fire-taskid-null", "taskId null");
@@ -185,7 +163,6 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
                 summaryRange: range,
                 summaryTaskId: taskId,
                 summaryTaskStatus: mapped,
-                isReady: false,
                 progress: (() => {
                     const raw = (resp as any)?.progress;
                     if (!raw || typeof raw !== 'object') return undefined;

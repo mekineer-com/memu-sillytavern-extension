@@ -84,8 +84,6 @@ export interface MemuSummary {
   summaryRange: [number, number];
   summaryTaskId?: string;
   summaryTaskStatus: MemuTaskStatus;
-  // the summary content in retrieve task is ready
-  isReady?: boolean;
   force?: boolean;
 
   // Batch progress (from server polling)
