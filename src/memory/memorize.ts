@@ -130,7 +130,7 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
                 summaryTaskStatus: MemuTaskStatus.PENDING,
                 force: opts.force === true,
                 tail: opts.tail === true,
-                failureCount: 0,
+                failureCount: memuExtras.summary?.failureCount ?? 0,
                 lastError: undefined,
             };
             await st.saveChat();

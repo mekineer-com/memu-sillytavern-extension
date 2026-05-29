@@ -83,7 +83,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     : inConsolidationPhase
       ? 'Finalizing...'
       : retrying
-      ? `Retrying memorize (${retryCount}/3)...`
+      ? `Retrying memorize (${retryCount}/2)...`
       : progress
       ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';
