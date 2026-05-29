@@ -12,6 +12,7 @@ import {
     onUserMessageSent,
 } from 'memory/exports';
 import { st, pruneStalePerSoulEntries } from './utils/context-extra';
+import { MemuTaskStatus } from './utils/types';
 import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from './utils/consts';
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
@@ -74,6 +75,40 @@ let mounted = false;
 
 function installChatOptionResetCursor(): void {
     const OPTION_ID = 'option_memu_memorize_from_beginning';
+    const DISABLED_OPACITY = '0.5';
+    let actionEl: HTMLAnchorElement | null = null;
+    let disabledPollTimer: number | null = null;
+
+    function isMemorizeActive(): boolean {
+        const summary: any = (st.getContext() as any)?.chatMetadata?.memuExtras?.summary;
+        if (!summary) return false;
+        const status = summary.summaryTaskStatus;
+        return status === MemuTaskStatus.PENDING
+            || status === MemuTaskStatus.PROCESSING
+            || (status === MemuTaskStatus.SUCCESS && summary.isReady !== true);
+    }
+
+    function applyDisabledState(): void {
+        if (!actionEl) return;
+        const disabled = isMemorizeActive();
+        actionEl.style.pointerEvents = disabled ? 'none' : '';
+        actionEl.style.opacity = disabled ? DISABLED_OPACITY : '';
+        actionEl.style.cursor = disabled ? 'not-allowed' : '';
+        if (disabled) {
+            actionEl.setAttribute('aria-disabled', 'true');
+            actionEl.title = 'memU is already memorizing this chat';
+        } else {
+            actionEl.removeAttribute('aria-disabled');
+            actionEl.title = '';
+        }
+    }
+
+    function ensureDisabledPoll(): void {
+        if (disabledPollTimer !== null) return;
+        disabledPollTimer = window.setInterval(() => {
+            applyDisabledState();
+        }, 500);
+    }
 
     async function resetCursor(): Promise<void> {
         try {
@@ -112,7 +147,12 @@ function installChatOptionResetCursor(): void {
     function tryInstall(): boolean {
         const options = document.querySelector('#options .options-content') as HTMLElement | null;
         if (!options) return false;
-        if (document.getElementById(OPTION_ID)) return true;
+        const existing = document.getElementById(OPTION_ID) as HTMLAnchorElement | null;
+        if (existing) {
+            actionEl = existing;
+            applyDisabledState();
+            return true;
+        }
 
         const anchor = document.createElement('a');
         anchor.id = OPTION_ID;
@@ -125,6 +165,7 @@ function installChatOptionResetCursor(): void {
 
         anchor.addEventListener('click', async (ev) => {
             ev.preventDefault();
+            if (isMemorizeActive()) return;
             const { st } = await import('./utils/context-extra');
             const ctx: any = st.getContext() as any;
             if (!ctx?.characterId && !ctx?.groupId) return;
@@ -142,13 +183,18 @@ function installChatOptionResetCursor(): void {
         const after = document.getElementById('option_select_chat');
         if (after && after.parentElement === options) {
             options.insertBefore(anchor, after.nextSibling);
+            actionEl = anchor;
+            applyDisabledState();
             return true;
         }
 
         options.appendChild(anchor);
+        actionEl = anchor;
+        applyDisabledState();
         return true;
     }
 
+    ensureDisabledPoll();
     if (tryInstall()) return;
 
     // options menu is present late in some ST builds; retry briefly.
