@@ -7,7 +7,7 @@ import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
 const ACTIVE_PROGRESS_INTERVAL_MS = 3_000;
-const MAX_SUMMARY_FAILURE_RETRIES = 2;
+const MAX_SUMMARY_FAILURE_RETRIES = 3;
 const MAX_RETRIEVE_FAILURE_RETRIES = 2;
 
 let pollerTimer: ReturnType<typeof setTimeout> | undefined;
@@ -117,6 +117,7 @@ async function tick(): Promise<void> {
 
                     memuExtras.summary = {
                         ...summary,
+                        summaryTaskStatus: MemuTaskStatus.PROCESSING,
                         failureCount: failCount + 1,
                     };
                     await st.saveChat();

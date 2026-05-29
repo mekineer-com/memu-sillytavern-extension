@@ -54,6 +54,7 @@ export default function MemorizeProgress(): JSX.Element | null {
   const status = summary?.summaryTaskStatus;
   const progress = summary?.progress;
   const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
+  const failed = status === MemuTaskStatus.FAILURE;
   useEffect(() => {
     if (!active) {
       setCancelling(false);
@@ -61,18 +62,28 @@ export default function MemorizeProgress(): JSX.Element | null {
   }, [active]);
   if (!summary) return null;
 
-  if (!active) {
+  if (!active && !failed) {
     return null;
   }
 
   const progressCurrent = progress?.current ?? 0;
   const progressTotal = progress?.total ?? 0;
   const phase = String(progress?.phase || '').trim().toLowerCase();
+  const retryCount = Math.max(0, Number(summary.failureCount ?? 0));
+  const retrying = !cancelling && active && retryCount > 0 && !progress;
+  const failedErrorRaw = String(summary.lastError || '').trim();
+  const failedError = failedErrorRaw.length > 110
+    ? `${failedErrorRaw.slice(0, 110)}...`
+    : failedErrorRaw;
   const inConsolidationPhase = !cancelling && (phase === 'consolidation' || phase === 'consolidating');
   const label = cancelling
     ? 'Cancelling...'
+    : failed
+      ? `Memorize failed after ${retryCount} retries.${failedError ? ` ${failedError}` : ''}`
     : inConsolidationPhase
       ? 'Finalizing...'
+      : retrying
+      ? `Retrying memorize (${retryCount}/3)...`
       : progress
       ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';
@@ -99,9 +110,22 @@ export default function MemorizeProgress(): JSX.Element | null {
         </div>
       )}
       {!cancelling && (
-        <button type="button" style={cancelBtn} onClick={() => void handleCancel()}>
-          Cancel
-        </button>
+        failed ? (
+          <button
+            type="button"
+            style={cancelBtn}
+            onClick={() => {
+              memuExtras.summary = undefined;
+              void st.saveChat();
+            }}
+          >
+            Dismiss
+          </button>
+        ) : (
+          <button type="button" style={cancelBtn} onClick={() => void handleCancel()}>
+            Cancel
+          </button>
+        )
       )}
     </div>,
     document.body,
