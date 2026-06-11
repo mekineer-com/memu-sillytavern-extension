@@ -6,7 +6,6 @@ const ROUTER_BASE_URL = '/api/plugins/memu';
 
 export type PluginPing = {
   ok: boolean;
-  module?: string;
   serverInstanceId?: string;
   ephemeralDb?: boolean;
 };
@@ -106,15 +105,6 @@ export type RelationshipRecord = {
 
 export async function getPluginPing(): Promise<PluginPing> {
   return request<PluginPing>('/ping', undefined, 'GET');
-}
-
-export async function pingPlugin(): Promise<boolean> {
-  try {
-    const resp = await getPluginPing();
-    return !!resp?.ok;
-  } catch {
-    return false;
-  }
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {

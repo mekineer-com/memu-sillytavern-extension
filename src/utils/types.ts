@@ -8,7 +8,6 @@ export enum MemuTaskStatus {
 // --- memu local configuration (stored server-side in the plugin) ---
 
 export type MemuStep =
-  | 'all'
   | 'preprocess'
   | 'memory_extract'
   | 'category_update'
@@ -84,6 +83,7 @@ export interface MemuSummary {
   summaryTaskId?: string;
   summaryTaskStatus: MemuTaskStatus;
   force?: boolean;
+  tail?: boolean;
 
   // Batch progress (from server polling)
   progress?: { current: number; total: number; phase?: string };
