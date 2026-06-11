@@ -59,14 +59,9 @@ export type ConversationTurnRequest = {
   chatType?: string;
   message: string;
   history?: Array<Record<string, any>>;
-  applyTurnMaintenance?: boolean;
   debug?: boolean;
   soul_card?: string;
   promptOverridePayload?: Record<string, any>;
-  temperature?: number;
-  maxTokens?: number;
-  timeZone?: string;
-  timeZoneOffsetMin?: number;
 };
 export type ConversationTurnResponse = {
   ok: boolean;
@@ -202,9 +197,6 @@ export async function memorizeConversation(
     // KISS: soul scope key is the character name.
     soulId: soul,
     soulName: soul,
-    chatFileName: conversationData.chatFileName,
-    timeZone: conversationData.timeZone,
-    timeZoneOffsetMin: conversationData.timeZoneOffsetMin,
   });
 }
 

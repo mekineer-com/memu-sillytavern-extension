@@ -391,7 +391,7 @@ export default function App() {
     prevDefaultIsHordeRef.current = defaultIsHorde;
     if (!prev || defaultIsHorde) return;
 
-    const advancedSteps: MemuStep[] = ['preprocess', 'memory_extract', 'category_update', 'reflection', 'ranking'];
+    const advancedSteps: MemuStep[] = ['preprocess', 'memory_extract', 'category_update', 'reflection'];
     const stepMap = (pluginConfig as any)?.stepProfileId;
     const hasExplicitOverrides = !!(
       stepMap &&
@@ -528,7 +528,6 @@ export default function App() {
     { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
     { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
     { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
-    { step: 'ranking', label: 'Ranking', hint: 'Rerank candidates' },
     { step: 'consolidation', label: 'Consolidation', hint: 'Weekly reflection — edges, intentions, diary' },
   ];
 

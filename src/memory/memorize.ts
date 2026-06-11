@@ -3,8 +3,6 @@ import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/con
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
-import { getChatCompletionPreset } from "@silly-tavern/scripts/openai.js";
-import { main_api } from "@silly-tavern/script.js";
 import { initChatExtraInfo } from "./utils";
 import { warn, error as logError, onceWarn } from "utils/log";
 import {
@@ -73,20 +71,6 @@ export function getChatIdSafe(): string {
     }
 }
 
-// The actual SillyTavern chat *file name* (used for file-based storage).
-// This is intentionally separate from getChatIdSafe(), which prefers integrity UUIDs.
-export function getChatFileNameRaw(): string {
-    try {
-        const ctx: any = st.getContext() as any;
-        const raw = (typeof ctx?.getCurrentChatId === 'function')
-            ? ctx.getCurrentChatId()
-            : (ctx?.chatId ?? ctx?.chat_id);
-        const s = (typeof raw === 'string') ? raw.trim() : '';
-        return s;
-    } catch {
-        return '';
-    }
-}
 
 export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
     await initChatExtraInfo(st.getContext());
@@ -94,14 +78,6 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
         warn("memorize skipped: no baseInfo in chat metadata");
         return;
     }
-
-    // Timezone hint for sleep-based daily resource splitting server-side.
-    // Prefer IANA name; keep offset as fallback.
-    let timeZone: string | undefined;
-    try {
-        timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch { }
-    const timeZoneOffsetMin = new Date().getTimezoneOffset();
 
     try {
         const conversationId = getChatIdSafe();
@@ -112,9 +88,6 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
                 characterId: memuExtras.baseInfo.characterId,
                 characterName: memuExtras.baseInfo.characterName,
                 conversationId: conversationId || undefined,
-                chatFileName: getChatFileNameRaw(),
-                timeZone,
-                timeZoneOffsetMin,
             }, opts);
         // Local mode usually returns a task id and completes asynchronously.
         // Keep it pending so the poller drives retrieve/lorebook sync after success.
@@ -797,7 +770,7 @@ export async function preparePendingRetrieveTurnForInterceptor(replaceSystem: bo
 }
 
 export async function dispatchConversationTurn(
-    opts: { debug?: boolean; applyTurnMaintenance?: boolean } = {},
+    opts: { debug?: boolean } = {},
 ): Promise<string> {
     const turn = _pendingRetrieveTurn;
     if (!turn) {
@@ -806,7 +779,6 @@ export async function dispatchConversationTurn(
     _pendingRetrieveTurn = null;
 
     const includeDebug = opts.debug === true;
-    const applyTurnMaintenance = opts.applyTurnMaintenance !== false;
     if (includeDebug) {
         const prev = getInspectData();
         stashInspectData({
@@ -836,19 +808,6 @@ export async function dispatchConversationTurn(
         throw new Error('memU prepared payload has empty user_prompt — message not sent.');
     }
 
-    const stGenParams: Record<string, number> = {};
-    if (main_api === 'openai') {
-        const preset = getChatCompletionPreset();
-        if (typeof preset?.temperature === 'number') stGenParams.temperature = preset.temperature;
-        if (typeof preset?.openai_max_tokens === 'number') stGenParams.maxTokens = preset.openai_max_tokens;
-    }
-
-    let turnTimeZone: string | undefined;
-    try {
-        turnTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    } catch { }
-    const turnTimeZoneOffsetMin = new Date().getTimezoneOffset();
-
     const resp = await conversationTurn({
         userId: turn.userId,
         soulId: turn.soulId,
@@ -858,12 +817,8 @@ export async function dispatchConversationTurn(
         chatType: turn.chatType,
         message: turn.queryText,
         history: turn.history,
-        applyTurnMaintenance,
         debug: includeDebug,
         soul_card: turnSoulCard,
-        timeZone: turnTimeZone,
-        timeZoneOffsetMin: turnTimeZoneOffsetMin,
-        ...stGenParams,
         promptOverridePayload,
     });
 

@@ -13,7 +13,6 @@ export type MemuStep =
   | 'memory_extract'
   | 'category_update'
   | 'reflection'
-  | 'ranking'
   | 'consolidation'
   | 'embeddings';
 
@@ -103,12 +102,6 @@ export interface ConversationData {
   characterId: string;
   // Stable per-chat identity for backend dedupe/cursor continuity.
   conversationId?: string;
-  // Optional: the SillyTavern chat file name (used as a stable pointer on the server).
-  chatFileName?: string;
-  // Optional: IANA timezone name of the client (used for sleep-based daily resource splits).
-  timeZone?: string;
-  // Optional: numeric offset fallback (minutes, same sign as Date.getTimezoneOffset()).
-  timeZoneOffsetMin?: number;
 }
 
 export interface ConversationMessage {

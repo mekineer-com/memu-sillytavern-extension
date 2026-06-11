@@ -15,7 +15,6 @@ import { getInspectData, stashInspectData } from "ui/inspect-panel";
 
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
-let _skipTurnMaintenanceOnce = false;
 let _pendingSwipeUndo: Promise<void> | null = null;
 let _lastChatLength = 0;
 let _lastTailIsUser = false;
@@ -136,14 +135,12 @@ export function onMessageDeleted(): void {
     const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
     const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
     if (deletedLatestAssistant && conversationId && userId && soulId) {
-        _skipTurnMaintenanceOnce = true;
         _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
     }
     refreshChatSnapshot();
 }
 
 export function onMessageSwiped(_msgIdAny: any): void {
-    _skipTurnMaintenanceOnce = true;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const userId = String(ctx.name1 || '');
@@ -173,17 +170,14 @@ export async function memuGenerationInterceptor(
     abort(true);
     await waitForPendingSwipeUndo();
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
-        _skipTurnMaintenanceOnce = false;
         return;
     }
     try {
-        const applyTurnMaintenance = !_skipTurnMaintenanceOnce;
-        _skipTurnMaintenanceOnce = false;
         const prepared = await preparePendingRetrieveTurnForInterceptor(OVERRIDE_SUMMARIZER.get());
         if (!prepared) {
             throw new Error('memU retrieve prep failed — turn blocked.');
         }
-        const reply = await dispatchConversationTurn({ debug: true, applyTurnMaintenance });
+        const reply = await dispatchConversationTurn({ debug: true });
         const ctx: any = st.getContext();
         if (reply && typeof ctx?.saveReply !== 'function') {
             throw new Error('SillyTavern context.saveReply is unavailable');
@@ -193,7 +187,6 @@ export async function memuGenerationInterceptor(
         }
         await st.saveChat();
     } catch (e: any) {
-        _skipTurnMaintenanceOnce = false;
         const msg = e instanceof Error ? e.message : String(e);
         const prev = getInspectData();
         stashInspectData({
