@@ -104,7 +104,7 @@ export default function App() {
   const [currentCharacter, setCurrentCharacter] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
-  const [summaryTick, setSummaryTick] = useState(0);
+  const [memorizeRunning, setMemorizeRunning] = useState<boolean>(false);
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
   const [relationshipsStatus, setRelationshipsStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle');
   const [relationshipsMessage, setRelationshipsMessage] = useState<string>('');
@@ -134,7 +134,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setSummaryTick(t => t + 1), 2000);
+    const id = setInterval(() => {
+      const status = memuExtras.summary?.summaryTaskStatus;
+      setMemorizeRunning(status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING);
+    }, 2000);
     return () => clearInterval(id);
   }, []);
 
@@ -1083,7 +1086,7 @@ export default function App() {
                   type="button"
                   className="menu_button"
                   onClick={() => void handleMemorizeNow()}
-                  disabled={memorizeNowBusy || !currentCharacter || (summaryTick >= 0 && (memuExtras.summary?.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary?.summaryTaskStatus === MemuTaskStatus.PROCESSING))}
+                  disabled={memorizeNowBusy || !currentCharacter || memorizeRunning}
                 >
                   {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
                 </button>
