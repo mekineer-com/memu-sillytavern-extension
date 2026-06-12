@@ -2,7 +2,7 @@ import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
-import { doSummary, retrieveMemories } from './memorize';
+import { doSummary, getChatIdSafe, retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
@@ -120,7 +120,7 @@ async function tick(): Promise<void> {
                         failureCount: failCount,
                     };
                     await st.saveChat();
-                    void doSummary(from, to, { force: summary.force === true, tail: summary.tail === true });
+                    void doSummary(from, to, { force: summary.force === true, tail: summary.tail === true, retry: true });
                 } else {
                 }
                 break;
@@ -140,8 +140,18 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
         return;
     }
 
+    const chatIdAtFire = getChatIdSafe();
+
     getTaskStatus(taskId)
         .then(async (resp) => {
+            if (getChatIdSafe() !== chatIdAtFire) {
+                onceWarn(
+                    `poller-stale-chat:${chatIdAtFire}:${taskId}`,
+                    `task status response dropped (chat changed while in-flight, taskId=${taskId})`,
+                );
+                return;
+            }
+            const currentSummary = memuExtras.summary;
             const err = (resp as any)?.error;
             const raw = String(resp?.status ?? '').toUpperCase();
             let mapped: MemuTaskStatus;
@@ -160,6 +170,7 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
             }
             // update summary value, do not do other logic
             memuExtras.summary = {
+                ...currentSummary,
                 summaryRange: range,
                 summaryTaskId: taskId,
                 summaryTaskStatus: mapped,
@@ -177,7 +188,7 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
                     };
                 })(),
                 lastError: mapped === MemuTaskStatus.FAILURE ? (typeof err === 'string' ? err : undefined) : undefined,
-                failureCount: mapped === MemuTaskStatus.FAILURE ? (memuExtras.summary?.failureCount ?? 0) + 1 : 0,
+                failureCount: mapped === MemuTaskStatus.FAILURE ? (currentSummary?.failureCount ?? 0) + 1 : 0,
             };
             await st.saveChat();
         })

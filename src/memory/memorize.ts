@@ -72,11 +72,18 @@ export function getChatIdSafe(): string {
 }
 
 
-export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
+export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean; retry?: boolean } = {}): Promise<void> {
     await initChatExtraInfo(st.getContext());
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
         return;
+    }
+    if (!opts.retry) {
+        const status = memuExtras.summary?.summaryTaskStatus;
+        if (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING) {
+            warn("memorize already running — ignored");
+            return;
+        }
     }
 
     try {

@@ -28,7 +28,7 @@ import {
   updateRelationship,
   RelationshipRecord,
 } from 'utils/network';
-import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep } from 'utils/types';
+import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
 
 const buttonStyle: CSSProperties = {
@@ -104,6 +104,7 @@ export default function App() {
   const [currentCharacter, setCurrentCharacter] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
+  const [summaryTick, setSummaryTick] = useState(0);
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
   const [relationshipsStatus, setRelationshipsStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle');
   const [relationshipsMessage, setRelationshipsMessage] = useState<string>('');
@@ -130,6 +131,11 @@ export default function App() {
     const h = () => void serverStatus().then(setServerCtl).catch(() => {});
     window.addEventListener('memu:server-ready', h);
     return () => window.removeEventListener('memu:server-ready', h);
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setSummaryTick(t => t + 1), 2000);
+    return () => clearInterval(id);
   }, []);
 
   // init
@@ -1077,7 +1083,7 @@ export default function App() {
                   type="button"
                   className="menu_button"
                   onClick={() => void handleMemorizeNow()}
-                  disabled={memorizeNowBusy || !currentCharacter}
+                  disabled={memorizeNowBusy || !currentCharacter || (summaryTick >= 0 && (memuExtras.summary?.summaryTaskStatus === MemuTaskStatus.PENDING || memuExtras.summary?.summaryTaskStatus === MemuTaskStatus.PROCESSING))}
                 >
                   {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
                 </button>
