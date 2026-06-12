@@ -4,7 +4,7 @@ import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveD
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { initChatExtraInfo } from "./utils";
-import { warn, error as logError, onceWarn } from "utils/log";
+import { warn, error as logError, onceWarn, onceError } from "utils/log";
 import {
     getInspectData,
     stashInspectData,
@@ -162,7 +162,31 @@ export async function syncLorebooksNow(reason: string = "manual"): Promise<void>
             await syncCategoriesToWorldInfo(memuExtras.baseInfo, categories);
         }
     } catch (e) {
-        onceWarn(`lorebooks-sync-failed:${reason}`, `lorebooks sync failed (${reason})`);
+        onceError(`lorebooks-sync-failed:${reason}`, `lorebooks sync failed (${reason})`, e);
+    }
+}
+
+// Delete every lorebook whose name starts with prefix, optionally keeping names in keepSet.
+async function deleteLorebooksByPrefix(prefix: string, keepSet?: Set<string>): Promise<void> {
+    const csrfResp = await fetch('/csrf-token');
+    const csrfJson = await csrfResp.json().catch(() => ({} as any));
+    const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
+    const listResp = await fetch('/api/worldinfo/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
+        body: JSON.stringify({}),
+    });
+    const list = await listResp.json().catch(() => []);
+    const all = Array.isArray(list) ? list : [];
+    const targets = all
+        .map((x: any) => String(x?.file_id || x?.name || '').trim())
+        .filter((n: string) => !!n && n.startsWith(prefix) && !(keepSet?.has(n)));
+    for (const name of targets) {
+        await fetch('/api/worldinfo/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
+            body: JSON.stringify({ name }),
+        });
     }
 }
 
@@ -173,33 +197,15 @@ export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
     await initChatExtraInfo(st.getContext());
     const info = memuExtras.baseInfo;
     if (!info) return;
-    const prefix = `memU - ${String(info.characterName || '').trim()} - `;
+    const sanitizedName = sanitizeWorldInfoName(String(info.characterName || '').trim());
+    const prefix = `memU - ${sanitizedName} - `;
     if (prefix === 'memU -  - ') return;
     try {
-        const csrfResp = await fetch('/csrf-token');
-        const csrfJson = await csrfResp.json().catch(() => ({} as any));
-        const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
-        const listResp = await fetch('/api/worldinfo/list', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
-            body: JSON.stringify({}),
-        });
-        const list = await listResp.json().catch(() => []);
-        const all = Array.isArray(list) ? list : [];
-        const targets = all
-            .map((x: any) => String(x?.file_id || x?.name || '').trim())
-            .filter((n: string) => !!n && n.startsWith(prefix));
-        for (const name of targets) {
-            await fetch('/api/worldinfo/delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
-                body: JSON.stringify({ name }),
-            });
-        }
+        await deleteLorebooksByPrefix(prefix);
         await updateWorldInfoList();
         (st as any)?.eventSource?.emit?.((st as any)?.event_types?.SETTINGS_UPDATED);
     } catch (e) {
-        onceWarn('lorebooks-delete-failed', 'lorebooks delete failed');
+        onceError('lorebooks-delete-failed', 'lorebooks delete failed', e);
     }
 }
 
@@ -995,29 +1001,7 @@ function buildWorldInfoFileData(bookName: string, categoryName: string, content:
 }
 
 async function upsertWorldInfoLorebook(name: string, data: any): Promise<void> {
-    // Prefer ST helper so its in-memory cache updates immediately.
-    try {
-        if (typeof (saveWorldInfo as any) === 'function') {
-            await (saveWorldInfo as any)(name, data, true);
-            return;
-        }
-    } catch {
-        // fall through to direct write
-    }
-
-    // Fallback: direct write (updates disk, but ST prompt cache may not refresh until reload).
-    const csrf = await fetch('/csrf-token');
-    const csrfJson = await csrf.json().catch(() => ({} as any));
-    const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
-    const resp = await fetch('/api/worldinfo/edit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
-        body: JSON.stringify({ name, data }),
-    });
-    if (!resp.ok) {
-        const txt = await resp.text().catch(() => '');
-        throw new Error(`worldinfo/edit failed (${resp.status}): ${txt}`);
-    }
+    await saveWorldInfo(name, data, true);
 }
 
 async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name: string; summary: string }>): Promise<void> {
@@ -1027,7 +1011,9 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     const ctx: any = st.getContext();
     const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
     const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || 'Character'));
+    const prefix = `memU - ${characterName} - `;
 
+    const written = new Set<string>();
     for (const cat of categories) {
         const catName = sanitizeWorldInfoName(String((cat as any)?.name || 'category'));
         const bookName = sanitizeWorldInfoName(`memU - ${characterName} - ${catName}`);
@@ -1045,8 +1031,12 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
         const finalContent = filterCategoryForCharacter(catName, cleaned, characterName, baseInfo?.userName);
 
         await upsertWorldInfoLorebook(bookName, buildWorldInfoFileData(bookName, catName, finalContent));
+        written.add(bookName);
     }
 
+    // Prune stale books: any memU book for this character that wasn't written this run
+    // (renamed/deleted category, or category that became empty) must be removed.
+    await deleteLorebooksByPrefix(prefix, written);
 
     // ST UI doesn't always refresh the World Info lists immediately when aux books change.
     // Force a lightweight refresh so the lorebooks appear without a full page reload.
