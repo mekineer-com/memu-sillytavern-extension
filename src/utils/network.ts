@@ -178,7 +178,7 @@ export async function memorizeConversation(
   opts: { force?: boolean; tail?: boolean } = {},
 ): Promise<MemorizeResponse> {
   const soul = conversationData.characterName;
-  const qs = opts.force ? '?force=true' : opts.tail ? '?tail=true' : '';
+  const qs = opts.force ? '?rebuild=true' : opts.tail ? '?tail=true' : '';
   return request<MemorizeResponse>(`/memorizeConversation${qs}`, {
     conversation: conversationData.messages,
     userId: conversationData.userId,
