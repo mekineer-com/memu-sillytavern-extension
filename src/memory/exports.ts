@@ -160,6 +160,29 @@ function _skipInterceptorType(type: string): boolean {
     return type === 'quiet' || type === 'impersonate';
 }
 
+function stampLatestSoulMessageGenerationMetadata(ctx: any, metadata: any): void {
+    if (!metadata || typeof metadata !== 'object') return;
+    const api = typeof metadata.api === 'string' ? metadata.api.trim() : '';
+    const model = typeof metadata.model === 'string' ? metadata.model.trim() : '';
+    if (!api && !model) return;
+
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    const message = chat[chat.length - 1];
+    if (!message || message.is_user) return;
+
+    message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
+    if (api) message.extra.api = api;
+    if (model) message.extra.model = model;
+
+    const swipeId = typeof message.swipe_id === 'number' ? message.swipe_id : 0;
+    const swipeInfo = Array.isArray(message.swipe_info) ? message.swipe_info[swipeId] : null;
+    if (swipeInfo && typeof swipeInfo === 'object') {
+        swipeInfo.extra = swipeInfo.extra && typeof swipeInfo.extra === 'object' ? swipeInfo.extra : {};
+        if (api) swipeInfo.extra.api = api;
+        if (model) swipeInfo.extra.model = model;
+    }
+}
+
 export async function memuGenerationInterceptor(
     _chat: any[],
     _contextSize: number,
@@ -177,13 +200,15 @@ export async function memuGenerationInterceptor(
         if (!prepared) {
             throw new Error('memU retrieve prep failed — turn blocked.');
         }
-        const reply = await dispatchConversationTurn({ debug: true });
+        const turnResult = await dispatchConversationTurn({ debug: true });
+        const reply = turnResult.reply;
         const ctx: any = st.getContext();
         if (reply && typeof ctx?.saveReply !== 'function') {
             throw new Error('SillyTavern context.saveReply is unavailable');
         }
         if (reply) {
             await ctx.saveReply({ type, getMessage: reply });
+            stampLatestSoulMessageGenerationMetadata(ctx, turnResult.generationMetadata);
         }
         await st.saveChat();
     } catch (e: any) {

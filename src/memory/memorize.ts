@@ -33,6 +33,14 @@ type PromptInspectorApi = {
     inspectPayloadJson?: (payloadJson: string) => Promise<PromptInspectorApiResult | null | undefined>;
 };
 
+export type ConversationTurnDispatchResult = {
+    reply: string;
+    generationMetadata?: {
+        api?: string;
+        model?: string;
+    };
+};
+
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
 let _pendingRetrieveAbort: AbortController | null = null;
 let _pendingRetrieveAbortReason: string | null = null;
@@ -784,7 +792,7 @@ export async function preparePendingRetrieveTurnForInterceptor(replaceSystem: bo
 
 export async function dispatchConversationTurn(
     opts: { debug?: boolean } = {},
-): Promise<string> {
+): Promise<ConversationTurnDispatchResult> {
     const turn = _pendingRetrieveTurn;
     if (!turn) {
         throw new Error('memU pending retrieve is missing — retrieve must complete before turn.');
@@ -872,7 +880,7 @@ export async function dispatchConversationTurn(
         }
         stashInspectData(listenUpdate);
         void syncLorebooksNow("after-turn");
-        return '';
+        return { reply: '' };
     }
 
     const prev2 = getInspectData();
@@ -906,7 +914,13 @@ export async function dispatchConversationTurn(
     // never fires retrieveMemories. Sync lorebooks after every turn so
     // category summaries stay visible in the World Info panel.
     void syncLorebooksNow("after-turn");
-    return reply;
+    const generationMetadata = (resp as any)?.generation_metadata;
+    return {
+        reply,
+        generationMetadata: generationMetadata && typeof generationMetadata === 'object'
+            ? generationMetadata
+            : undefined,
+    };
 }
 
 // --- World Info sync (view memU memories inside ST) ---

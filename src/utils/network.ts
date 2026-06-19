@@ -65,6 +65,10 @@ export type ConversationTurnRequest = {
 export type ConversationTurnResponse = {
   ok: boolean;
   response?: string;
+  generation_metadata?: {
+    api?: string;
+    model?: string;
+  };
   should_respond?: boolean;
   response_target?: 'respond' | 'listen' | 'private' | string;
   conversation_id?: string;
