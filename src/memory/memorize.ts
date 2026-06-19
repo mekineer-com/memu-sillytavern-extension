@@ -18,6 +18,8 @@ type PendingRetrieveTurn = {
     userId: string;
     soulId: string;
     queryText: string;
+    queryTsMs?: number;
+    querySourceId: string;
     history: Array<Record<string, any>>;
     chatName: string;
     chatType: string;
@@ -571,6 +573,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     }
     const chatType = 'dm';
     const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1));
+    const queryRow = queryIdx >= 0 ? chat[queryIdx] : undefined;
 
     return {
         createdAt: Date.now(),
@@ -579,6 +582,8 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
         soulId,
         userName,
         queryText,
+        queryTsMs: resolveMessageTsMs(queryRow),
+        querySourceId: String(queryIdx),
         history,
         chatName,
         chatType,
@@ -837,6 +842,8 @@ export async function dispatchConversationTurn(
         chatName: turn.chatName,
         chatType: turn.chatType,
         message: turn.queryText,
+        messageTsMs: turn.queryTsMs,
+        messageSourceId: turn.querySourceId,
         history: turn.history,
         debug: includeDebug,
         soul_card: turnSoulCard,

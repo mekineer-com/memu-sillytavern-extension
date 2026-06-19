@@ -57,6 +57,8 @@ export type ConversationTurnRequest = {
   chatName?: string;
   chatType?: string;
   message: string;
+  messageTsMs?: number;
+  messageSourceId?: string;
   history?: Array<Record<string, any>>;
   debug?: boolean;
   soul_card?: string;
