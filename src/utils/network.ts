@@ -24,7 +24,7 @@ export type ConversationRetrieveRequest = {
   userName?: string;
   chatName?: string;
   chatType?: string;
-  method: 'rag' | 'llm';
+  method: 'rag';
   query?: string;
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
