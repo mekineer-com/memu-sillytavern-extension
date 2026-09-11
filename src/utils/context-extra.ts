@@ -5,7 +5,7 @@ import { ToolManager } from '@silly-tavern/scripts/tool-calling.js';
 import { debounce } from "@silly-tavern/scripts/utils.js";
 import { appendFileContent } from '@silly-tavern/scripts/chats.js';
 import { getRegexedString, regex_placement } from '@silly-tavern/scripts/extensions/regex/engine.js';
-import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_LOCAL_USER_ID, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
+import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -32,11 +32,6 @@ export const st = {
 export const SHOW_ADVANCED_MAPPING = {
     get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING),
     set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, value.toString()),
-}
-
-export const LOCAL_USER_ID = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_LOCAL_USER_ID),
-    set: (value: string) => localStorage.setItem(MEMU_LOCAL_STORAGE_LOCAL_USER_ID, value),
 }
 
 // Per-soul prefs: stored as a JSON map { "<characterName>": boolean, ... }

@@ -128,7 +128,7 @@ export function onMessageEdited(_msgIdAny: any): void {
 export function onMessageDeleted(): void {
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
-    const userId = String(ctx.name1 || '');
+    const userId = String(memuExtras.baseInfo?.userId || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     const nowLength = chat.length;
@@ -143,7 +143,7 @@ export function onMessageDeleted(): void {
 export function onMessageSwiped(_msgIdAny: any): void {
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
-    const userId = String(ctx.name1 || '');
+    const userId = String(memuExtras.baseInfo?.userId || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     if (conversationId && userId && soulId) {
         _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
@@ -242,5 +242,5 @@ export function onChatChanged(): void {
         await maybeClearStaleLocalState();
         refreshChatSnapshot();
     }
-    void init();
+    void init().catch((error) => window.alert(`memU: ${error instanceof Error ? error.message : String(error)}`));
 }

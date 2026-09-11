@@ -113,6 +113,14 @@ export async function getPluginPing(): Promise<PluginPing> {
   return request<PluginPing>('/ping', undefined, 'GET');
 }
 
+export async function getOwner(): Promise<{ user_id: string | null }> {
+  return request<{ user_id: string | null }>('/owner', undefined, 'GET');
+}
+
+export async function createOwner(userId: string): Promise<{ user_id: string }> {
+  return request<{ user_id: string }>('/owner', { user_id: userId });
+}
+
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return request<MemuPluginConfigV1>('/config', undefined, 'GET');
 }

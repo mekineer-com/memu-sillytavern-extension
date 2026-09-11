@@ -1,4 +1,5 @@
-import { LOCAL_USER_ID, memuExtras, st } from "utils/context-extra";
+import { memuExtras, st } from "utils/context-extra";
+import { createOwner, getOwner } from "utils/network";
 
 
 async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, delayMs: number = 120): Promise<any | null> {
@@ -15,29 +16,22 @@ async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, del
 }
 
 
-function getStableLocalUserId(fallback: string | undefined): string {
-    try {
-        const existing = LOCAL_USER_ID.get();
-        const seed = (fallback || '').trim();
-        if (existing && existing.trim()) {
-            const current = existing.trim();
-            // If the only difference is casing, keep it aligned with the visible ST username.
-            if (seed && current.toLowerCase() === seed.toLowerCase() && current !== seed) {
-                LOCAL_USER_ID.set(seed);
-                return seed;
-            }
-            return current;
-        }
-        if (seed) {
-            LOCAL_USER_ID.set(seed);
-            return seed;
-        }
-        const id = (globalThis.crypto && 'randomUUID' in globalThis.crypto) ? (globalThis.crypto as any).randomUUID() : `memu_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        LOCAL_USER_ID.set(id);
-        return id;
-    } catch {
-        return (fallback || '').trim() || `memu_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+let canonicalOwnerId = '';
+
+async function resolveOwner(defaultName: string | undefined): Promise<string> {
+    if (canonicalOwnerId) return canonicalOwnerId;
+    const existing = await getOwner();
+    if (existing.user_id) {
+        canonicalOwnerId = existing.user_id;
+        return canonicalOwnerId;
     }
+    const entered = window.prompt('What is your name?', String(defaultName || '').trim());
+    const userId = String(entered || '').trim();
+    if (!userId || !window.confirm(`Use "${userId}" as your OpenAlma name? It cannot be changed yet.`)) {
+        throw new Error('OpenAlma owner setup was cancelled');
+    }
+    canonicalOwnerId = (await createOwner(userId)).user_id;
+    return canonicalOwnerId;
 }
 
 export async function initChatExtraInfo(ctx: any): Promise<void> {
@@ -53,11 +47,11 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
     const desiredCharacterId = desiredCharacterName;
 
     const existing = memuExtras.baseInfo;
-    const userId = (existing?.userId && String(existing.userId).trim()) ? String(existing.userId).trim() : getStableLocalUserId(ctx?.name1);
+    const userId = await resolveOwner(ctx?.name1);
     const userName = (ctx?.name1 != null) ? String(ctx.name1) : (existing?.userName ?? '');
 
     // Update if missing or stale (chat switching can fire before ctx.characterId updates).
-    if (!existing || existing.characterId !== desiredCharacterId || existing.characterName !== desiredCharacterName || existing.userName !== userName) {
+    if (!existing || existing.userId !== userId || existing.characterId !== desiredCharacterId || existing.characterName !== desiredCharacterName || existing.userName !== userName) {
         memuExtras.baseInfo = {
             characterId: desiredCharacterId,
             characterName: desiredCharacterName,
