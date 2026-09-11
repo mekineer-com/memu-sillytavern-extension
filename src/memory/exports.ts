@@ -38,6 +38,16 @@ async function waitForPendingSwipeUndo(): Promise<void> {
     }
 }
 
+function queueConversationUndo(ctx: any, conversationId: string, soulId: string): void {
+    _pendingSwipeUndo = (async () => {
+        await initChatExtraInfo(ctx);
+        const userId = String(memuExtras.baseInfo?.userId || '');
+        if (conversationId && userId && soulId) {
+            await conversationTurnUndo(conversationId, userId, soulId);
+        }
+    })();
+}
+
 /**
  * Reset stale local cursor state on chat-open in two deterministic cases:
  * 1) backend restarted with ephemeral DB (in-memory reset),
@@ -128,14 +138,13 @@ export function onMessageEdited(_msgIdAny: any): void {
 export function onMessageDeleted(): void {
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
-    const userId = String(memuExtras.baseInfo?.userId || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     const nowLength = chat.length;
     const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
     const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
-    if (deletedLatestAssistant && conversationId && userId && soulId) {
-        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
+    if (deletedLatestAssistant && conversationId && soulId) {
+        queueConversationUndo(ctx, conversationId, soulId);
     }
     refreshChatSnapshot();
 }
@@ -143,10 +152,9 @@ export function onMessageDeleted(): void {
 export function onMessageSwiped(_msgIdAny: any): void {
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
-    const userId = String(memuExtras.baseInfo?.userId || '');
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
-    if (conversationId && userId && soulId) {
-        _pendingSwipeUndo = conversationTurnUndo(conversationId, userId, soulId);
+    if (conversationId && soulId) {
+        queueConversationUndo(ctx, conversationId, soulId);
     }
     refreshChatSnapshot();
 }
