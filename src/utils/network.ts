@@ -121,6 +121,14 @@ export async function createOwner(userId: string): Promise<{ user_id: string }> 
   return request<{ user_id: string }>('/owner', { user_id: userId });
 }
 
+export async function getSouls(): Promise<{ souls: string[] }> {
+  return request<{ souls: string[] }>('/souls', undefined, 'GET');
+}
+
+export async function createSoul(soulId: string): Promise<{ soul_id: string }> {
+  return request<{ soul_id: string }>('/souls', { soul_id: soulId, use_existing: false });
+}
+
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return request<MemuPluginConfigV1>('/config', undefined, 'GET');
 }

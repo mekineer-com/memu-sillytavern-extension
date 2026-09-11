@@ -1,5 +1,5 @@
 import { memuExtras, st } from "utils/context-extra";
-import { createOwner, getOwner } from "utils/network";
+import { createOwner, createSoul, getOwner, getSouls } from "utils/network";
 
 
 async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, delayMs: number = 120): Promise<any | null> {
@@ -18,19 +18,41 @@ async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, del
 
 let canonicalOwnerId = '';
 
-async function resolveOwner(defaultName: string | undefined): Promise<string> {
+function askSoulName(proposedSoul: string): string {
+    const entered = window.prompt('What will your first Soul be called?', proposedSoul);
+    const soulId = String(entered || '').trim();
+    if (!soulId) throw new Error('OpenAlma Soul setup was cancelled');
+    return soulId;
+}
+
+async function resolveOwner(defaultName: string | undefined, proposedSoul: string): Promise<string> {
     if (canonicalOwnerId) return canonicalOwnerId;
     const existing = await getOwner();
+    const souls = await getSouls();
     if (existing.user_id) {
+        if (souls.souls.length === 0) {
+            const soulId = askSoulName(proposedSoul);
+            if (!window.confirm(`Use "${soulId}" as your first OpenAlma Soul?`)) {
+                throw new Error('OpenAlma Soul setup was cancelled');
+            }
+            await createSoul(soulId);
+        }
         canonicalOwnerId = existing.user_id;
         return canonicalOwnerId;
     }
     const entered = window.prompt('What is your name?', String(defaultName || '').trim());
     const userId = String(entered || '').trim();
-    if (!userId || !window.confirm(`Use "${userId}" as your OpenAlma name? It cannot be changed yet.`)) {
+    if (!userId) throw new Error('OpenAlma owner setup was cancelled');
+    const soulId = souls.souls.length === 0 ? askSoulName(proposedSoul) : '';
+    const confirmation = soulId
+        ? `Use "${userId}" as your OpenAlma name and "${soulId}" as your first Soul? Neither can be changed yet.`
+        : `Use "${userId}" as your OpenAlma name? It cannot be changed yet.`;
+    if (!window.confirm(confirmation)) {
         throw new Error('OpenAlma owner setup was cancelled');
     }
-    canonicalOwnerId = (await createOwner(userId)).user_id;
+    const ownerId = (await createOwner(userId)).user_id;
+    if (soulId) await createSoul(soulId);
+    canonicalOwnerId = ownerId;
     return canonicalOwnerId;
 }
 
@@ -47,7 +69,7 @@ export async function initChatExtraInfo(ctx: any): Promise<void> {
     const desiredCharacterId = desiredCharacterName;
 
     const existing = memuExtras.baseInfo;
-    const userId = await resolveOwner(ctx?.name1);
+    const userId = await resolveOwner(ctx?.name1, desiredCharacterName);
     const userName = (ctx?.name1 != null) ? String(ctx.name1) : (existing?.userName ?? '');
 
     // Update if missing or stale (chat switching can fire before ctx.characterId updates).
