@@ -21,6 +21,10 @@ License: see LICENSE (upstream license applies).
 
 ### MemU Extension for SillyTavern
 
+On first OpenAlma use, the entered Soul name is authoritative. The extension
+selects an exact-name SillyTavern character or creates and selects a new minimal
+character, then explicitly creates that Soul through the server.
+
 **Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
 
 A seamless, powerful memory plugin powered by MemU!

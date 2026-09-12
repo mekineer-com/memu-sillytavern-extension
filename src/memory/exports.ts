@@ -149,11 +149,18 @@ export function onMessageDeleted(): void {
     refreshChatSnapshot();
 }
 
-export function onMessageSwiped(_msgIdAny: any): void {
+export function onMessageSwiped(msgIdAny: any): void {
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
-    if (conversationId && soulId) {
+    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+    const messageId = Number(msgIdAny);
+    const message = chat[messageId];
+    const isSyntheticRegeneration = messageId === chat.length - 1
+        && message && !message.is_user
+        && Array.isArray(message.swipes)
+        && message.swipe_id === message.swipes.length;
+    if (isSyntheticRegeneration && conversationId && soulId) {
         queueConversationUndo(ctx, conversationId, soulId);
     }
     refreshChatSnapshot();
