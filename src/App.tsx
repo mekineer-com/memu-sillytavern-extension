@@ -20,7 +20,6 @@ import {
   getConnectionProfiles,
   getPluginConfig,
   listRelationships,
-  getProfileModels,
   serverStart,
   serverStatus,
   serverStop,
@@ -82,7 +81,6 @@ const RELATIONSHIP_SUGGESTIONS = [
 ];
 
 export default function App() {
-  const EMBED_CUSTOM = '__custom__';
   const [pluginOk, setPluginOk] = useState<boolean | null>(null);
   const [pluginConfig, setPluginConfigState] = useState<MemuPluginConfigV1 | null>(null);
   const [profiles, setProfiles] = useState<ConnectionProfileSummary[]>([]);
@@ -92,11 +90,6 @@ export default function App() {
   const [serverCtlBusy, setServerCtlBusy] = useState<'idle' | 'working' | 'error'>('idle');
 
   const [showAdvancedMapping, setShowAdvancedMapping] = useState<boolean>(false);
-
-  const [embedModels, setEmbedModels] = useState<string[]>([]);
-  const [embedModelsStatus, setEmbedModelsStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [embedModelsMessage, setEmbedModelsMessage] = useState<string>('');
-  const [embedCustomMode, setEmbedCustomMode] = useState<boolean>(false);
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
   const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
@@ -306,15 +299,6 @@ export default function App() {
       const base = prev ?? defaultCfg();
       const next: any = { ...base, ...patch };
 
-      // embedding model: dropdown overrides manual
-      const selected = typeof next.embeddingModelSelected === 'string' ? next.embeddingModelSelected.trim() : '';
-      const manual = typeof next.embeddingModelManual === 'string' ? next.embeddingModelManual.trim() : '';
-      if (selected) next.embeddingModelSelected = selected;
-      else delete next.embeddingModelSelected;
-
-      if (manual) next.embeddingModelManual = manual;
-      else delete next.embeddingModelManual;
-
       next.version = 4;
       next.updatedAt = new Date().toISOString();
       return next;
@@ -350,12 +334,6 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [pluginConfig, pluginOk]);
-
-  const embedProfileId = useMemo(() => {
-    const cfg = pluginConfig;
-    const sid = (cfg?.stepProfileId?.embeddings || cfg?.defaultProfileId || '').trim();
-    return sid;
-  }, [pluginConfig?.defaultProfileId, pluginConfig?.stepProfileId?.embeddings]);
 
   const defaultAlias = useMemo(
     () => profiles.find((p) => String(p.id || '').trim() === 'default'),
@@ -420,79 +398,6 @@ export default function App() {
       // ignore
     }
   }, [defaultIsHorde, pluginConfig?.stepProfileId]);
-
-  useEffect(() => {
-    const selected = String(pluginConfig?.embeddingModelSelected || '').trim();
-    const manual = String(pluginConfig?.embeddingModelManual || '').trim();
-    if (selected) {
-      setEmbedCustomMode(false);
-      return;
-    }
-    if (manual) {
-      setEmbedCustomMode(true);
-    }
-  }, [pluginConfig?.embeddingModelSelected, pluginConfig?.embeddingModelManual]);
-
-  const embedModelPickerValue = useMemo(() => {
-    const selected = String(pluginConfig?.embeddingModelSelected || '').trim();
-    if (selected) return selected;
-    const manual = String(pluginConfig?.embeddingModelManual || '').trim();
-    if (embedCustomMode || manual) return EMBED_CUSTOM;
-    return '';
-  }, [pluginConfig?.embeddingModelSelected, pluginConfig?.embeddingModelManual, embedCustomMode]);
-
-  function onEmbeddingModelChange(v: string): void {
-    if (!v) {
-      setEmbedCustomMode(false);
-      updatePluginConfig({
-        embeddingModelSelected: undefined,
-        embeddingModelManual: undefined,
-      } as any);
-      return;
-    }
-    if (v === EMBED_CUSTOM) {
-      setEmbedCustomMode(true);
-      updatePluginConfig({
-        embeddingModelSelected: undefined,
-      } as any);
-      return;
-    }
-    setEmbedCustomMode(false);
-    updatePluginConfig({
-      embeddingModelSelected: v,
-      embeddingModelManual: undefined,
-    } as any);
-  }
-
-  async function loadEmbeddingModels(force: boolean = false) {
-    try {
-      if (!pluginOk) return;
-      if (!embedProfileId) {
-        setEmbedModels([]);
-        setEmbedModelsStatus('idle');
-        return;
-      }
-      setEmbedModelsStatus('loading');
-      setEmbedModelsMessage('');
-      const resp = await getProfileModels(embedProfileId, { kind: 'embedding', force });
-      if (resp?.ok && Array.isArray(resp.models)) {
-        setEmbedModels(resp.models);
-        setEmbedModelsStatus('idle');
-      } else {
-        setEmbedModels([]);
-        setEmbedModelsStatus('error');
-        setEmbedModelsMessage(resp?.message || 'Failed to load models');
-      }
-    } catch (e: any) {
-      setEmbedModels([]);
-      setEmbedModelsStatus('error');
-      setEmbedModelsMessage(e?.message || 'Failed to load models');
-    }
-  }
-
-  useEffect(() => {
-    void loadEmbeddingModels(false);
-  }, [pluginOk, embedProfileId]);
 
   function renderProfilePicker(
     value: string | undefined,
@@ -889,59 +794,6 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label>Embedding provider profile</label>
-                  {renderProfilePicker(
-                    pluginConfig?.stepProfileId?.embeddings,
-                    (v) => updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), embeddings: v || undefined } as any }),
-                    { allowModelDefault: true },
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label>Embedding model</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <select
-                      className="text_pole"
-                      style={{ flex: 1 }}
-                      value={embedModelPickerValue}
-                      onChange={(e) => onEmbeddingModelChange(e.target.value)}
-                      disabled={embedModelsStatus === 'loading'}
-                    >
-                      <option value="">provider default model</option>
-                      <option value={EMBED_CUSTOM}>custom</option>
-                      {embedModels.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="menu_button"
-                      style={{ ...buttonStyle, width: 34 } as any}
-                      onClick={() => void loadEmbeddingModels(true)}
-                      disabled={embedModelsStatus === 'loading'}
-                      title="Refresh embedding model list"
-                    >
-                      <i className="fa-solid fa-rotate-right" />
-                    </button>
-                  </div>
-
-                  {embedModelsStatus === 'error' && <small style={{ opacity: 0.8 }}>{embedModelsMessage}</small>}
-
-                  {embedCustomMode && (
-                    <input
-                      type="text"
-                      className="text_pole"
-                      value={pluginConfig?.embeddingModelManual ?? ''}
-                      onChange={(e) => {
-                        setEmbedCustomMode(true);
-                        updatePluginConfig({ embeddingModelManual: e.target.value || undefined });
-                      }}
-                      placeholder="text-embedding-3-small"
-                    />
-                  )}
-                </div>
               </div>
             )}
 
