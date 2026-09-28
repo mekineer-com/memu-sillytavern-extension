@@ -339,19 +339,6 @@ function formatMemoryCacheForPrompt(raw: any): string {
     return lines.map((line) => `- ${line}`).join('\n');
 }
 
-function formatIntentionsForPrompt(raw: any): string {
-    if (!Array.isArray(raw) || raw.length === 0) return '';
-    const lines: string[] = [];
-    for (const row of raw) {
-        if (!row || typeof row !== 'object') continue;
-        const id = String((row as any).id ?? '').trim();
-        const text = String((row as any).text ?? '').trim();
-        if (!id || !text) continue;
-        lines.push(`- ${id}: ${text}`);
-    }
-    return lines.join('\n');
-}
-
 function resolveSoulCard(ctx: any): string {
     const char = ctx?.characters?.[ctx?.characterId];
     if (!char) return '';
@@ -678,8 +665,14 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const priorContextSummary = parsedPrior.summary;
     const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
     const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active) ? (resp as any).intentions_active : [];
+    const intentions = intentionItemsRaw
+        .map((row: any) => ({
+            id: String(row?.id ?? '').trim(),
+            text: String(row?.text ?? '').trim(),
+        }))
+        .filter((row: any) => row.id && row.text);
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
-    const intentionSummary = formatIntentionsForPrompt((resp as any)?.intentions_active);
+    const intentionSummary = intentions.map((row: any) => `- ${row.id}: ${row.text}`).join('\n');
     const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
         ? (resp as any).turn_system_prompt.trim() : '';
     const turnUserPrompt = typeof (resp as any)?.turn_user_prompt === 'string'
@@ -723,12 +716,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             .map((v: any) => String(v ?? '').trim())
             .filter(Boolean)
             .slice(0, 7),
-        intentions: intentionItemsRaw
-            .map((row: any) => ({
-                id: String(row?.id ?? '').trim(),
-                text: String(row?.text ?? '').trim(),
-            }))
-            .filter((row: any) => row.id && row.text),
+        intentions,
         userId: turn.userId,
         soulId: turn.soulId,
         categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
