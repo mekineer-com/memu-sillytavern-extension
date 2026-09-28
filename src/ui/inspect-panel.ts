@@ -11,7 +11,7 @@ export type InspectData = {
     query?: string;
     priorContext?: string;
     memoryCache?: string[];
-    intentions?: Array<{ text: string; priority?: number; active?: boolean; ephemeral?: boolean }>;
+    intentions?: Array<{ id: string; text: string }>;
     status?: 'pending' | 'ok' | 'error';
     error?: string;
     userId?: string;

@@ -340,18 +340,14 @@ function formatMemoryCacheForPrompt(raw: any): string {
 }
 
 function formatIntentionsForPrompt(raw: any): string {
-    if (!raw || typeof raw !== 'object') return '';
-    const items = Array.isArray((raw as any).items) ? (raw as any).items : [];
-    if (items.length === 0) return '';
+    if (!Array.isArray(raw) || raw.length === 0) return '';
     const lines: string[] = [];
-    for (const row of items) {
+    for (const row of raw) {
         if (!row || typeof row !== 'object') continue;
-        if ((row as any).active === false) continue;
+        const id = String((row as any).id ?? '').trim();
         const text = String((row as any).text ?? '').trim();
-        if (!text) continue;
-        const priority = Number((row as any).priority);
-        const p = Number.isFinite(priority) ? ` (p=${priority.toFixed(1)})` : '';
-        lines.push(`- ${text}${p}`);
+        if (!id || !text) continue;
+        lines.push(`- ${id}: ${text}`);
     }
     return lines.join('\n');
 }
@@ -681,7 +677,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
     const priorContextSummary = parsedPrior.summary;
     const memoryCacheRaw = Array.isArray((resp as any)?.memory_cache) ? (resp as any).memory_cache : [];
-    const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active?.items) ? (resp as any).intentions_active.items : [];
+    const intentionItemsRaw = Array.isArray((resp as any)?.intentions_active) ? (resp as any).intentions_active : [];
     const memoryCacheSummary = formatMemoryCacheForPrompt(memoryCacheRaw);
     const intentionSummary = formatIntentionsForPrompt((resp as any)?.intentions_active);
     const turnSystemPrompt = typeof (resp as any)?.turn_system_prompt === 'string'
@@ -703,9 +699,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
         memory_cache: memoryCacheRaw
             .map((v: any) => String(v ?? '').trim())
             .filter(Boolean),
-        intentions_active: ((resp as any)?.intentions_active && typeof (resp as any).intentions_active === 'object')
-            ? (resp as any).intentions_active
-            : { items: [] },
         retrieve_rag: (result && typeof result === 'object')
             ? result
             : { categories: [], items: [], resources: [] },
@@ -732,12 +725,10 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             .slice(0, 7),
         intentions: intentionItemsRaw
             .map((row: any) => ({
+                id: String(row?.id ?? '').trim(),
                 text: String(row?.text ?? '').trim(),
-                priority: Number(row?.priority),
-                active: row?.active !== false,
-                ephemeral: row?.ephemeral === true,
             }))
-            .filter((row: any) => row.text),
+            .filter((row: any) => row.id && row.text),
         userId: turn.userId,
         soulId: turn.soulId,
         categories: Array.isArray(result?.categories) ? result.categories.map((c: any) => ({
