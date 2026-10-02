@@ -95,7 +95,7 @@ export default function NarrativeSuggestion() {
   const statusIcon =
     status === 'pending' ? <i className="fa-solid fa-spinner fa-spin" style={{ color: 'var(--SmartThemeEmColor)' }} /> :
     status === 'ok'      ? <i className="fa-solid fa-check"   style={{ color: '#4caf50' }} /> :
-    status === 'err'     ? <i className="fa-solid fa-xmark"   style={{ color: '#e53935' }} /> :
+    status === 'err'     ? <span style={{ color: '#e53935' }}>!</span> :
     null;
 
   const rowStyle: CSSProperties = { display: 'flex', gap: 6, alignItems: 'center' };
@@ -121,9 +121,8 @@ export default function NarrativeSuggestion() {
         >
           Send
         </button>
-        <span style={{ width: 18, display: 'flex', alignItems: 'center' }}>{statusIcon}</span>
+        <span title={status === 'err' ? error : undefined} aria-label={status === 'err' ? error : undefined} style={{ width: 18, display: 'flex', alignItems: 'center' }}>{statusIcon}</span>
       </div>
-      {status === 'err' && <small role="alert">{error}</small>}
       {overrideActive && (
         <small style={{ opacity: 0.85, color: 'var(--SmartThemeWarnColor, #e6a817)' }}>
           Manual override active — soul can't update narrative_self until card matches last written value
