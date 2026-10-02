@@ -644,6 +644,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             query: turn.queryText,
             status: 'error',
             error: err instanceof Error ? err.message : String(err),
+            errorCode: err?.code,
             userId: turn.userId,
             soulId: turn.soulId,
             method: 'rag',

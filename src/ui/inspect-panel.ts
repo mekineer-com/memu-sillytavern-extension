@@ -14,6 +14,7 @@ export type InspectData = {
     intentions?: Array<{ id: string; text: string }>;
     status?: 'pending' | 'ok' | 'error';
     error?: string;
+    errorCode?: string;
     userId?: string;
     soulId?: string;
     categories?: Array<{ name: string; score: number; summary?: string }>;

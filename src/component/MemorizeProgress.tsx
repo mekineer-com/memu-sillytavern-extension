@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { memuExtras, st } from 'utils/context-extra';
 import { cancelMemorize } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
+import { getInspectData } from 'ui/inspect-panel';
 
 const containerStyle: CSSProperties = {
   position: 'fixed',
@@ -60,6 +61,13 @@ export default function MemorizeProgress(): JSX.Element | null {
       setCancelling(false);
     }
   }, [active]);
+  const inspect = getInspectData();
+  if (inspect?.errorCode === 'soul_paused'
+    && inspect.userId === memuExtras.baseInfo?.userId
+    && inspect.soulId === memuExtras.baseInfo?.characterId) {
+    const reason = inspect.turnError || inspect.error || 'Paused. Retry in OpenAlma launcher.';
+    return createPortal(<div style={containerStyle}>Paused <span title={reason} aria-label={reason}>!</span></div>, document.body);
+  }
   if (!summary) return null;
 
   if (!active && !failed) {

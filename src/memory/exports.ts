@@ -234,6 +234,9 @@ export async function memuGenerationInterceptor(
             timestamp: Date.now(),
             turnStatus: 'error',
             turnError: msg,
+            errorCode: e?.code,
+            userId: memuExtras.baseInfo?.userId,
+            soulId: memuExtras.baseInfo?.characterId,
         });
         throw e;
     }

@@ -278,6 +278,11 @@ async function request<T>(
     } catch {
       errText = String(resp.body);
     }
+    let detail: any;
+    try { detail = JSON.parse(errText)?.error; } catch { /* Non-JSON errors retain the existing message. */ }
+    if (resp.status === 409 && detail?.code === 'soul_paused') {
+      throw Object.assign(new Error(detail.message), { code: detail.code });
+    }
     throw new Error(`Failed to request: ${resp.status}, ${errText}`);
   }
 
