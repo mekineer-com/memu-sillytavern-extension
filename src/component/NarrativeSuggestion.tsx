@@ -53,6 +53,7 @@ type Status = 'idle' | 'pending' | 'ok' | 'err';
 export default function NarrativeSuggestion() {
   const [text, setText] = useState('');
   const [status, setStatus] = useState<Status>('idle');
+  const [error, setError] = useState('');
   const [lastSent, setLastSent] = useState<string>(() => localStorage.getItem(LS_LAST_SENT) ?? '');
   const coolingDown = isCoolingDown();
 
@@ -66,11 +67,13 @@ export default function NarrativeSuggestion() {
     const userId = memuExtras.baseInfo?.userId ?? '';
     const soulId = characterName;
     if (!userId || !soulId) {
+      setError('Select a soul before sending a suggestion.');
       setStatus('err');
       return;
     }
 
     setStatus('pending');
+    setError('');
     try {
       const result = await sendNarrativeSuggestion(userId, soulId, suggestion);
       localStorage.setItem(LS_LAST_SENT, suggestion);
@@ -83,7 +86,8 @@ export default function NarrativeSuggestion() {
       }
 
       setStatus('ok');
-    } catch {
+    } catch (error) {
+      setError(String(error));
       setStatus('err');
     }
   }
@@ -119,6 +123,7 @@ export default function NarrativeSuggestion() {
         </button>
         <span style={{ width: 18, display: 'flex', alignItems: 'center' }}>{statusIcon}</span>
       </div>
+      {status === 'err' && <small role="alert">{error}</small>}
       {overrideActive && (
         <small style={{ opacity: 0.85, color: 'var(--SmartThemeWarnColor, #e6a817)' }}>
           Manual override active — soul can't update narrative_self until card matches last written value
