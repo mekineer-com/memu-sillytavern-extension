@@ -66,7 +66,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     && inspect.userId === memuExtras.baseInfo?.userId
     && inspect.soulId === memuExtras.baseInfo?.characterId) {
     const reason = inspect.turnError || inspect.error || 'Paused. Retry in OpenAlma launcher.';
-    return createPortal(<div style={containerStyle}>Paused <span title={reason} aria-label={reason}>!</span></div>, document.body);
+    return createPortal(<div style={containerStyle}>Last send blocked <span title={`Last request: ${reason}`} aria-label={`Last request: ${reason}`}>!</span></div>, document.body);
   }
   if (!summary) return null;
 
