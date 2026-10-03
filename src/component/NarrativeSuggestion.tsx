@@ -16,12 +16,17 @@ function isCoolingDown(): boolean {
   return Date.now() < until;
 }
 
-async function writeDescriptionToCard(characterName: string, narrativeSelf: string): Promise<void> {
+async function writeDescriptionToCard(characterName: string, narrativeSelf: string, displayedAvatar: string, displayedDescription: string): Promise<void> {
   const ctx = st.getContext() as any;
   const character = ctx?.characters?.[ctx?.characterId];
   if (!character?.avatar) throw new Error('No active character');
 
   const csrfToken = await getCsrfTokenCached();
+  const current = st.getContext() as any;
+  const currentCharacter = current?.characters?.[current?.characterId];
+  if (currentCharacter?.avatar !== displayedAvatar || String(currentCharacter?.description ?? '') !== displayedDescription) {
+    throw new Error('Character description changed while the suggestion was being considered; the card was not overwritten.');
+  }
   const resp = await fetch('/api/characters/edit-attribute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
@@ -74,6 +79,10 @@ export default function NarrativeSuggestion() {
 
     setStatus('pending');
     setError('');
+    const ctx = st.getContext() as any;
+    const character = ctx?.characters?.[ctx?.characterId];
+    const displayedAvatar = String(character?.avatar ?? '');
+    const displayedDescription = String(character?.description ?? '');
     try {
       const result = await sendNarrativeSuggestion(userId, soulId, suggestion);
       localStorage.setItem(LS_LAST_SENT, suggestion);
@@ -82,7 +91,7 @@ export default function NarrativeSuggestion() {
       setText('');
 
       if (result.narrative_self) {
-        await writeDescriptionToCard(soulId, result.narrative_self);
+        await writeDescriptionToCard(soulId, result.narrative_self, displayedAvatar, displayedDescription);
       }
 
       setStatus('ok');
