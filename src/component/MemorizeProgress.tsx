@@ -45,6 +45,7 @@ const cancelBtn: CSSProperties = {
 export default function MemorizeProgress(): JSX.Element | null {
   const [tick, setTick] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelUnavailable, setCancelUnavailable] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
@@ -59,6 +60,7 @@ export default function MemorizeProgress(): JSX.Element | null {
   useEffect(() => {
     if (!active) {
       setCancelling(false);
+      setCancelUnavailable(false);
     }
   }, [active]);
   const inspect = getInspectData();
@@ -105,7 +107,12 @@ export default function MemorizeProgress(): JSX.Element | null {
     setCancelling(true);
     const info = memuExtras.baseInfo;
     if (!info) return;
-    await cancelMemorize(info.userId, info.characterId);
+    const result = await cancelMemorize(info.userId, info.characterId);
+    if (!result.ok) {
+      setCancelling(false);
+      setCancelUnavailable(true);
+      return;
+    }
     memuExtras.summary = undefined;
     await st.saveChat();
   }
@@ -131,7 +138,9 @@ export default function MemorizeProgress(): JSX.Element | null {
             Dismiss
           </button>
         ) : (
-          <button type="button" style={cancelBtn} onClick={() => void handleCancel()}>
+          <button type="button" style={cancelBtn} disabled={cancelUnavailable}
+            title={cancelUnavailable ? 'Cannot cancel this run. It will finish normally.' : undefined}
+            onClick={() => void handleCancel()}>
             Cancel
           </button>
         )

@@ -16,5 +16,27 @@ vm.runInNewContext(babel.transformSync(code, {
 }).code, context);
 (async () => {
   await assert.rejects(context.request('/conversationTurn', {}), error => error.code === 'soul_paused' && error.message === message);
+  const component = fs.readFileSync(`${__dirname}/../src/component/MemorizeProgress.tsx`, 'utf8');
+  const summary = { summaryTaskStatus: 'PROCESSING' };
+  const cancel = {
+    cancelling: false, memuExtras: { baseInfo: { userId: 'fictional-owner', characterId: 'fictional-soul' }, summary },
+    cancelMemorize: async () => ({ ok: false }),
+    setCancelling(value) { this.cancelling = value; },
+    setCancelUnavailable(value) { this.unavailable = value; },
+    st: { saveChat: async () => assert.fail('Refused cancel must not save or hide progress') },
+  };
+  cancel.setCancelling = cancel.setCancelling.bind(cancel);
+  cancel.setCancelUnavailable = cancel.setCancelUnavailable.bind(cancel);
+  vm.runInNewContext(component.slice(component.indexOf('async function handleCancel()'), component.indexOf('\n  return createPortal(')), cancel);
+  await cancel.handleCancel();
+  assert.equal(cancel.memuExtras.summary, summary);
+  assert.equal(cancel.cancelling, false);
+  assert.equal(cancel.unavailable, true);
+  let saved = false;
+  cancel.cancelMemorize = async () => ({ ok: true });
+  cancel.st.saveChat = async () => { saved = true; };
+  await cancel.handleCancel();
+  assert.equal(cancel.memuExtras.summary, undefined);
+  assert.equal(saved, true);
   console.log('Paused send remains an error with launcher-directed text.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
