@@ -42,10 +42,15 @@ const cancelBtn: CSSProperties = {
   opacity: 0.7,
 };
 
+function currentTaskKey(): string {
+  const info = memuExtras.baseInfo;
+  return JSON.stringify([info?.userId, info?.characterId, memuExtras.summary?.summaryTaskId]);
+}
+
 export default function MemorizeProgress(): JSX.Element | null {
   const [tick, setTick] = useState(0);
   const [cancelling, setCancelling] = useState(false);
-  const [cancelUnavailable, setCancelUnavailable] = useState(false);
+  const [refusedTask, setRefusedTask] = useState<string | null>(null);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
@@ -53,16 +58,16 @@ export default function MemorizeProgress(): JSX.Element | null {
 
   void tick;
   const summary = memuExtras.summary;
+  const taskKey = currentTaskKey();
+  const cancelUnavailable = refusedTask === taskKey;
   const status = summary?.summaryTaskStatus;
   const progress = summary?.progress;
   const active = status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING;
   const failed = status === MemuTaskStatus.FAILURE;
   useEffect(() => {
-    if (!active) {
-      setCancelling(false);
-      setCancelUnavailable(false);
-    }
-  }, [active]);
+    setCancelling(false);
+    if (!active) setRefusedTask(null);
+  }, [active, taskKey]);
   const inspect = getInspectData();
   if (inspect?.errorCode === 'soul_paused'
     && inspect.userId === memuExtras.baseInfo?.userId
@@ -107,10 +112,12 @@ export default function MemorizeProgress(): JSX.Element | null {
     setCancelling(true);
     const info = memuExtras.baseInfo;
     if (!info) return;
+    const requestedTask = currentTaskKey();
     const result = await cancelMemorize(info.userId, info.characterId);
+    if (requestedTask !== currentTaskKey()) return;
     if (!result.ok) {
       setCancelling(false);
-      setCancelUnavailable(true);
+      setRefusedTask(requestedTask);
       return;
     }
     memuExtras.summary = undefined;

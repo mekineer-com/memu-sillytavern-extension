@@ -17,21 +17,42 @@ vm.runInNewContext(babel.transformSync(code, {
 (async () => {
   await assert.rejects(context.request('/conversationTurn', {}), error => error.code === 'soul_paused' && error.message === message);
   const component = fs.readFileSync(`${__dirname}/../src/component/MemorizeProgress.tsx`, 'utf8');
-  const summary = { summaryTaskStatus: 'PROCESSING' };
+  const summary = { summaryTaskStatus: 'PROCESSING', summaryTaskId: 'task-a' };
   const cancel = {
     cancelling: false, memuExtras: { baseInfo: { userId: 'fictional-owner', characterId: 'fictional-soul' }, summary },
     cancelMemorize: async () => ({ ok: false }),
     setCancelling(value) { this.cancelling = value; },
-    setCancelUnavailable(value) { this.unavailable = value; },
+    setRefusedTask(value) { this.refusedTask = value; },
     st: { saveChat: async () => assert.fail('Refused cancel must not save or hide progress') },
   };
   cancel.setCancelling = cancel.setCancelling.bind(cancel);
-  cancel.setCancelUnavailable = cancel.setCancelUnavailable.bind(cancel);
+  cancel.setRefusedTask = cancel.setRefusedTask.bind(cancel);
+  const taskKeyFunction = component.slice(component.indexOf('function currentTaskKey()'), component.indexOf('export default function'));
+  vm.runInNewContext(babel.transformSync(taskKeyFunction, {
+    filename: 'task.ts', configFile: false, babelrc: false, presets: ['@babel/preset-typescript'],
+  }).code, cancel);
   vm.runInNewContext(component.slice(component.indexOf('async function handleCancel()'), component.indexOf('\n  return createPortal(')), cancel);
   await cancel.handleCancel();
   assert.equal(cancel.memuExtras.summary, summary);
   assert.equal(cancel.cancelling, false);
-  assert.equal(cancel.unavailable, true);
+  assert.equal(cancel.refusedTask, cancel.currentTaskKey());
+  const other = { summaryTaskStatus: 'PROCESSING', summaryTaskId: 'task-b' };
+  cancel.memuExtras.summary = other;
+  assert.notEqual(cancel.refusedTask, cancel.currentTaskKey());
+  let resolveCancel;
+  cancel.cancelMemorize = () => new Promise(resolve => { resolveCancel = resolve; });
+  for (const ok of [false, true]) {
+    cancel.cancelling = false;
+    cancel.memuExtras.summary = summary;
+    const pending = cancel.handleCancel();
+    cancel.memuExtras.summary = other;
+    resolveCancel({ ok });
+    await pending;
+    assert.equal(cancel.memuExtras.summary, other);
+    assert.notEqual(cancel.refusedTask, cancel.currentTaskKey());
+  }
+  cancel.cancelling = false;
+  cancel.memuExtras.summary = summary;
   let saved = false;
   cancel.cancelMemorize = async () => ({ ok: true });
   cancel.st.saveChat = async () => { saved = true; };
