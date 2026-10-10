@@ -406,18 +406,21 @@ function resolveMessageTsMs(row: any): number | undefined {
     return Math.trunc(parsed);
 }
 
-export function messageRole(row: any, ownerName: string): 'user' | 'soul' | 'unknown' {
-    return row?.is_user ? (row.name === ownerName ? 'user' : 'unknown') : 'soul';
+export function messageRole(row: any, ownerName: string, soulName: string = memuExtras.baseInfo?.characterName): 'user' | 'soul' | 'unknown' {
+    if (row?.is_user) return row.name === ownerName ? 'user' : 'unknown';
+    return row?.extra?.type !== 'narrator' && row?.name === soulName ? 'soul' : 'unknown';
 }
 
-function buildTurnHistory(chat: any[], endIdx: number): Array<Record<string, any>> {
+function buildTurnHistory(chat: any[], endIdx: number, ownerName: string = memuExtras.baseInfo.userName,
+    soulName: string = memuExtras.baseInfo.characterName): Array<Record<string, any>> {
     if (!Array.isArray(chat) || endIdx < 0) return [];
     const out: Array<Record<string, any>> = [];
     for (let i = 0; i < endIdx && i < chat.length; i++) {
         const row: any = chat[i];
+        if (row?.is_system) continue;
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
-        const role = messageRole(row, memuExtras.baseInfo.userName);
+        const role = messageRole(row, ownerName, soulName);
         const item: Record<string, any> = {
             role,
             content,

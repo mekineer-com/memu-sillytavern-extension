@@ -296,7 +296,8 @@ function loadModule(file, imports, extra = {}) {
   assert.equal(producer.messageRole({ is_user: true, name: 'TestOwner' }, 'OtherOwner'), 'unknown');
   names.OtherSoul = 'OtherOwner';
   ctx.name1 = 'UnrelatedActivePersona';
-  ctx.chat = [{ is_user: true, name: 'OtherOwner', mes: 'Owner row' }, { is_user: true, name: 'Renamed', mes: 'Latest human row' }];
+  ctx.chat = [{ is_user: true, name: 'OtherOwner', mes: 'Owner row' }, { is_user: true, name: 'Renamed', mes: 'Latest human row' },
+    { is_user: true, name: 'Renamed', mes: 'Hidden latest row', is_system: true }];
   const query = await producer.query();
   assert.equal(query.userName, 'Renamed'); assert.equal(query.queryText, 'Latest human row');
   assert.equal(query.history[0].role, 'user');
