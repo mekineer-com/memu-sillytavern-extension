@@ -17,6 +17,8 @@ export type MemuStep =
 
 export interface MemuPluginConfigV1 {
   version: 4;
+  useServerSettings?: boolean;
+  useClaudeCode?: boolean;
   defaultProfileId?: string;
   stepProfileId?: Partial<Record<MemuStep, string>>;
 

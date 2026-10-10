@@ -57,7 +57,7 @@ const sectionTitleStyle: CSSProperties = {
 };
 
 function defaultCfg(): MemuPluginConfigV1 {
-  return { version: 4, updatedAt: new Date().toISOString() };
+  return { version: 4, useServerSettings: true, useClaudeCode: false, updatedAt: new Date().toISOString() };
 }
 
 type RelationshipEditorState = {
@@ -738,6 +738,52 @@ export default function App() {
               <div style={sectionStyle}>
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
+                <style>{`
+                  .memu-runtime-info { position: relative; }
+                  .memu-runtime-info [role="tooltip"] {
+                    display: none; position: absolute; z-index: 1; top: 100%; right: 0;
+                    width: min(280px, 70vw); padding: 8px; border-radius: 6px;
+                    background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #fff);
+                  }
+                  .memu-runtime-info:hover [role="tooltip"],
+                  .memu-runtime-info:focus-within [role="tooltip"] { display: block; }
+                `}</style>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label className="checkbox_label expander" htmlFor="use_server_settings">
+                    <input
+                      id="use_server_settings"
+                      type="checkbox"
+                      className="checkbox"
+                      checked={pluginConfig?.useServerSettings !== false}
+                      onChange={(e) => updatePluginConfig({ useServerSettings: e.target.checked })}
+                      aria-controls="memu-runtime-overrides"
+                      aria-expanded={pluginConfig?.useServerSettings === false}
+                    />
+                    <span>Use server settings</span>
+                  </label>
+                  <span className="memu-runtime-info">
+                    <button type="button" className="menu_button" aria-label="Scheduled agentic turn settings" aria-describedby="memu-agentic-settings-info">
+                      <i className="fa-solid fa-info-circle" aria-hidden="true" />
+                    </button>
+                    <span id="memu-agentic-settings-info" role="tooltip">
+                      The Soul's scheduled agentic turns use mcp-memu-server/config.json.
+                    </span>
+                  </span>
+                </div>
+
+                {pluginConfig?.useServerSettings === false && (
+                  <div id="memu-runtime-overrides" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <label className="checkbox_label expander" htmlFor="use_claude_code">
+                      <input
+                        id="use_claude_code"
+                        type="checkbox"
+                        className="checkbox"
+                        checked={pluginConfig?.useClaudeCode === true}
+                        onChange={(e) => updatePluginConfig({ useClaudeCode: e.target.checked })}
+                      />
+                      <span>Use Claude Code</span>
+                    </label>
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {renderProfilePicker(
                     pluginConfig?.defaultProfileId,
@@ -794,6 +840,8 @@ export default function App() {
                   </div>
                 )}
 
+                  </div>
+                )}
               </div>
             )}
 
