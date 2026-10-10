@@ -1,7 +1,8 @@
 import { CategoryResponse } from "memu-js";
 import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
-import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
-import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
+import { captureRuntimeSettings, conversationRetrieve, conversationTurn, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
+import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
+import { postJsonWithCsrf } from "utils/csrf";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
 import { currentScope, initChatExtraInfo, isMemuActive } from "./utils";
 import { warn, error as logError, onceWarn, onceError } from "utils/log";
@@ -26,6 +27,7 @@ type PendingRetrieveTurn = {
     chatName: string;
     chatType: string;
     preparedPayload: Record<string, any> | null;
+    savedSource: SavedSource;
 };
 
 type PromptInspectorApiResult = {
@@ -43,7 +45,74 @@ export type ConversationTurnDispatchResult = {
         api?: string;
         model?: string;
     };
+    savedSource?: SavedSource;
 };
+
+export type SavedSource = {
+    scope: string;
+    selector: { file_name: string; avatar_url: string };
+    data: Omit<ConversationData, 'messages' | 'source_message_count'>;
+};
+
+let savedSourceChain: Promise<void> = Promise.resolve();
+
+export function bindSavedSource(ctx: any = st.getContext()): SavedSource {
+    const scope = currentScope(ctx);
+    const character = ctx.characters?.[ctx.characterId];
+    const info = memuExtras.baseInfo;
+    if (ctx.groupId || !ctx.chatId || !character?.avatar || !info) {
+        throw new Error('Saved chat selector or memU scope is missing');
+    }
+    const source = {
+        scope,
+        selector: { file_name: ctx.chatId, avatar_url: character.avatar },
+        data: {
+            ...info,
+            conversationId: getChatIdSafe(),
+            chatName: info.characterName,
+            runtimeSettings: captureRuntimeSettings(),
+        },
+    };
+    return source;
+}
+
+export function publishSavedSource(source: SavedSource, intent: MemorizeIntent,
+    opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
+    opts = { ...opts };
+    const operation = savedSourceChain.then(async () => {
+        const saved = await postJsonWithCsrf('/api/chats/get', source.selector);
+        if (!Array.isArray(saved) || saved.length === 0) {
+            throw new Error('Saved chat is missing or unreadable');
+        }
+        const hasHeader = saved[0] && Object.hasOwn(saved[0], 'chat_metadata');
+        if (hasHeader && saved[0].chat_metadata?.main_chat) return;
+        const rows = hasHeader ? saved.slice(1) : saved;
+        if (rows.some(row => !row || typeof row.mes !== 'string')) {
+            throw new Error('Saved chat contains unreadable message rows');
+        }
+        const response = await memorizeConversation({
+            ...source.data,
+            messages: buildTurnHistory(rows, rows.length, source.data.userName, source.data.characterName),
+            source_message_count: rows.length,
+        }, { ...opts, intent });
+        if (response.status !== 'accepted' && response.status !== 'started') return;
+        if (!response.taskId) throw new Error('Accepted Memorize response missing taskId');
+        if (currentScope() !== source.scope) return;
+        memuExtras.summary = {
+            summaryRange: [0, rows.length - 1],
+            summaryTaskId: response.taskId,
+            summaryTaskStatus: MemuTaskStatus.PENDING,
+            force: opts.force === true,
+            tail: opts.tail === true,
+            failureCount: 0,
+        };
+        await st.saveChat();
+        if (currentScope() === source.scope) await syncLorebooksNow('after-memorize-local-pending');
+    });
+    // A refused capture must not poison later saved publications.
+    savedSourceChain = operation.catch(() => {});
+    return operation;
+}
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;
 let _pendingRetrieveAbort: AbortController | null = null;
@@ -84,61 +153,23 @@ export function getChatIdSafe(): string {
 }
 
 
-export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean; retry?: boolean } = {}): Promise<void> {
-    if (!(await isMemuActive())) return;
+export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
     const scope = currentScope();
+    if (!(await isMemuActive()) || currentScope() !== scope) return;
     await initChatExtraInfo(st.getContext());
     if (currentScope() !== scope) return;
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
         return;
     }
-    if (!opts.retry) {
-        const status = memuExtras.summary?.summaryTaskStatus;
-        if (status === MemuTaskStatus.PENDING || status === MemuTaskStatus.PROCESSING) {
-            warn("memorize already running — ignored");
-            return;
-        }
-    }
-
     try {
-        const conversationId = getChatIdSafe();
-        const messages = await prepareConversationData(from, to);
-        if (!(await isMemuActive()) || currentScope() !== scope) return;
-        const response = await memorizeConversation({
-                messages,
-                userId: memuExtras.baseInfo.userId,
-                userName: memuExtras.baseInfo.userName,
-                characterId: memuExtras.baseInfo.characterId,
-                characterName: memuExtras.baseInfo.characterName,
-                conversationId: conversationId || undefined,
-            }, opts);
+        const source = bindSavedSource();
         if (currentScope() !== scope) return;
-        // Local mode usually returns a task id and completes asynchronously.
-        // Keep it pending so the poller drives retrieve/lorebook sync after success.
-        {
-            const localTaskId = (typeof (response as any)?.taskId === 'string' && (response as any).taskId.trim())
-                ? (response as any).taskId.trim()
-                : '';
-            if (!localTaskId) throw new Error('memorizeConversation response missing taskId');
-
-            memuExtras.summary = {
-                summaryRange: [from, to],
-                summaryTaskId: localTaskId,
-                summaryTaskStatus: MemuTaskStatus.PENDING,
-                force: opts.force === true,
-                tail: opts.tail === true,
-                failureCount: memuExtras.summary?.failureCount ?? 0,
-                lastError: undefined,
-            };
-            await st.saveChat();
-
-            // One-shot: if categories already exist, ensure lorebooks can appear quickly.
-            await syncLorebooksNow("after-memorize-local-pending");
-            return;
-        }
+        await publishSavedSource(source, 'manual', opts);
     } catch (error) {
         if (currentScope() !== scope) return;
+        logError(`memorize failed (range=${from}-${to})`, error);
+        if ([MemuTaskStatus.PENDING, MemuTaskStatus.PROCESSING].includes(memuExtras.summary?.summaryTaskStatus)) return;
         const prevRange = memuExtras.summary?.summaryRange ?? [-1, -1];
         memuExtras.summary = {
             // IMPORTANT: don't advance the cursor on failure.
@@ -152,20 +183,15 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
             lastFailureAt: Date.now(),
         };
         await st.saveChat();
-        logError(`memorize failed (range=${from}-${to})`, error);
     }
 }
 
 export async function memorizeNow(): Promise<void> {
-    if (!(await isMemuActive())) return;
     const scope = currentScope();
+    if (!(await isMemuActive()) || currentScope() !== scope) return;
     await initChatExtraInfo(st.getContext());
     if (currentScope() !== scope) return;
     const chat = st.getContext().chat;
-    if (!Array.isArray(chat) || chat.length === 0) {
-        warn("memorize now skipped: empty chat");
-        return;
-    }
     await doSummary(0, chat.length - 1, { tail: true });
 }
 
@@ -412,20 +438,21 @@ export function messageRole(row: any, ownerName: string, soulName: string = memu
 }
 
 function buildTurnHistory(chat: any[], endIdx: number, ownerName: string = memuExtras.baseInfo.userName,
-    soulName: string = memuExtras.baseInfo.characterName): Array<Record<string, any>> {
+    soulName: string = memuExtras.baseInfo.characterName): ConversationMessage[] {
     if (!Array.isArray(chat) || endIdx < 0) return [];
-    const out: Array<Record<string, any>> = [];
+    const out: ConversationMessage[] = [];
     for (let i = 0; i < endIdx && i < chat.length; i++) {
         const row: any = chat[i];
         if (row?.is_system) continue;
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
         const role = messageRole(row, ownerName, soulName);
-        const item: Record<string, any> = {
+        const item: ConversationMessage = {
             role,
             content,
             name: String(row?.name || ''),
             source_message_id: String(i),
+            source_conversation_index: i,
         };
         const tsMs = resolveMessageTsMs(row);
         if (tsMs !== undefined) item.ts_ms = tsMs;
@@ -558,8 +585,8 @@ export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
 }
 
 async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | null> {
-    if (!(await isMemuActive())) return;
     const scope = currentScope();
+    if (!(await isMemuActive()) || currentScope() !== scope) return null;
     await initChatExtraInfo(st.getContext());
     if (currentScope() !== scope) return;
     if (!memuExtras.baseInfo) return null;
@@ -591,6 +618,8 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const chatType = 'dm';
     const history = buildTurnHistory(chat, queryIdx >= 0 ? queryIdx : (chat.length - 1));
     const queryRow = queryIdx >= 0 ? chat[queryIdx] : undefined;
+    const savedSource = bindSavedSource(ctx);
+    if (currentScope() !== scope) return null;
 
     return {
         createdAt: Date.now(),
@@ -606,6 +635,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
         chatName,
         chatType,
         preparedPayload: null,
+        savedSource,
     };
 }
 
@@ -909,7 +939,7 @@ export async function dispatchConversationTurn(
         }
         stashInspectData(listenUpdate);
         void syncLorebooksNow("after-turn");
-        return { reply: '' };
+        return { reply: '', savedSource: turn.savedSource };
     }
 
     const prev2 = getInspectData();
@@ -939,13 +969,12 @@ export async function dispatchConversationTurn(
     }
     stashInspectData(turnUpdate);
 
-    // Server-side memorize bypasses the extension digest path, so the poller
-    // never fires retrieveMemories. Sync lorebooks after every turn so
-    // category summaries stay visible in the World Info panel.
+    // Coalesced work has no local task; keep existing lorebooks visible on turns.
     void syncLorebooksNow("after-turn");
     const generationMetadata = (resp as any)?.generation_metadata;
     return {
         reply,
+        savedSource: turn.savedSource,
         generationMetadata: generationMetadata && typeof generationMetadata === 'object'
             ? generationMetadata
             : undefined,
@@ -1182,48 +1211,4 @@ function parseRetrieveResult(result: any): string {
     if (resourceLines.length > 0) blocks.push(`[Resources]\n${resourceLines.join('\n\n')}`);
 
     return blocks.join('\n\n\n').trim();
-}
-
-
-async function prepareConversationData(from: number, to: number): Promise<ConversationMessage[]> {
-    const chat = st.getContext().chat;
-    const chatInfo = memuExtras.baseInfo;
-    if (!chatInfo) {
-        throw new Error('memu-ext: chatInfo not found');
-    }
-
-    const canUseTools = st.toolManager.isToolCallingSupported();
-    const coreChat = chat.slice(from, to + 1).filter(x => !x.is_system || (canUseTools && Array.isArray(x.extra?.tool_invocations)));
-
-    // IMPORTANT: preserve message order (Promise resolution order can differ)
-    const messages = await Promise.all(coreChat.map(async (chatItem, index) => {
-        let message = chatItem.mes;
-        const regexType = chatItem.is_user ? st.regex_placement.USER_INPUT : st.regex_placement.AI_OUTPUT;
-        const options = { isPrompt: true, depth: (coreChat.length - index - 1) };
-
-        let regexedMessage = st.getRegexedString(message, regexType, options);
-        regexedMessage = await st.appendFileContent(chatItem, regexedMessage);
-
-        if (chatItem?.extra?.append_title && chatItem?.extra?.title) {
-            regexedMessage = `${regexedMessage}\n\n${chatItem.extra.title}`;
-        }
-
-        return {
-            role: messageRole(chatItem, chatInfo.userName),
-            name: chatItem.name,
-            content: regexedMessage,
-            // Preserve timestamp if available (ST chat.jsonl uses ISO send_date).
-            ts_ms: (() => {
-                const raw: any = (chatItem as any).send_date ?? (chatItem as any).sendDate;
-                if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
-                if (typeof raw === 'string') {
-                    const ms = Date.parse(raw);
-                    return Number.isFinite(ms) ? ms : undefined;
-                }
-                return undefined;
-            })(),
-        } as ConversationMessage;
-    }));
-
-    return messages;
 }

@@ -2,7 +2,7 @@ import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
-import { doSummary, retrieveMemories } from './memorize';
+import { retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
 import { currentScope, isMemuActive } from './utils';
 
@@ -89,44 +89,6 @@ async function tick(): Promise<void> {
                         `retrieve after digest failed (taskId=${String(summary.summaryTaskId ?? 'none')})`,
                         error,
                     );
-                }
-                break;
-            }
-            case MemuTaskStatus.FAILURE: {
-                // Controlled retry (avoids infinite loops when the backend is misconfigured).
-                if (summary.summaryRange && summary.summaryRange.length === 2) {
-                    const [from, to] = summary.summaryRange;
-                    const failCount = summary.failureCount ?? 0;
-                    const err = summary.lastError;
-
-                    // If we never got a taskId (request failed before a task was created),
-                    // don't keep this FAILED state around forever. After one retry failure,
-                    // clear it so the next user turn can attempt again.
-                    if (!summary.summaryTaskId && failCount > 1) {
-                        onceWarn(
-                            `poller-stale-taskid:${from}:${to}`,
-                            `digest state cleared (no taskId, range=${from}-${to})`,
-                        );
-                        memuExtras.summary = undefined;
-                        await st.saveChat();
-                        break;
-                    }
-                    if (failCount > 1) {
-                        onceError(
-                            `poller-digest-failed:${from}:${to}`,
-                            `digest failed repeatedly (range=${from}-${to}, failures=${failCount})`,
-                        );
-                        break;
-                    }
-
-                    memuExtras.summary = {
-                        ...summary,
-                        summaryTaskStatus: MemuTaskStatus.PROCESSING,
-                        failureCount: failCount,
-                    };
-                    await st.saveChat();
-                    void doSummary(from, to, { force: summary.force === true, tail: summary.tail === true, retry: true });
-                } else {
                 }
                 break;
             }

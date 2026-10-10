@@ -104,6 +104,9 @@ export interface ConversationData {
   characterId: string;
   // Stable per-chat identity for backend dedupe/cursor continuity.
   conversationId?: string;
+  chatName: string;
+  source_message_count: number;
+  runtimeSettings: MemuPluginConfigV1;
 }
 
 export interface ConversationMessage {
@@ -112,4 +115,6 @@ export interface ConversationMessage {
   name?: string;
   // Optional: message timestamp in epoch milliseconds (UTC). Prefer this for deterministic splits.
   ts_ms?: number;
+  source_message_id?: string;
+  source_conversation_index?: number;
 }

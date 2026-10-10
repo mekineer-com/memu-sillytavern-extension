@@ -3,6 +3,7 @@ import { ConnectionProfileSummary, MemuPluginConfigV1 } from 'utils/types';
 import { getCsrfTokenCached } from 'utils/csrf';
 
 const ROUTER_BASE_URL = '/api/plugins/memu';
+let pluginConfig: MemuPluginConfigV1 | undefined;
 
 export type PluginPing = {
   ok: boolean;
@@ -10,7 +11,11 @@ export type PluginPing = {
   ephemeralDb?: boolean;
 };
 
-export type MemorizeResponse = { taskId: string };
+export type MemorizeIntent = 'manual' | 'automatic' | 'publish_only';
+export type MemorizeResponse = {
+  status: 'accepted' | 'started' | 'waiting_for_import' | 'deferred' | 'nothing_to_memorize' | 'published' | 'coalesced';
+  taskId?: string;
+};
 export type MemorizeTaskStatusResponse = {
   status: string;
   error?: string;
@@ -134,7 +139,13 @@ export async function getSoul(soulId: string): Promise<{ soul_id: string; user_n
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
-  return request<MemuPluginConfigV1>('/config', undefined, 'GET');
+  pluginConfig = await request<MemuPluginConfigV1>('/config', undefined, 'GET');
+  return pluginConfig;
+}
+
+export function captureRuntimeSettings(): MemuPluginConfigV1 {
+  if (!pluginConfig) throw new Error('memU plugin settings are not loaded yet');
+  return { ...pluginConfig, stepProfileId: { ...pluginConfig.stepProfileId } };
 }
 
 export async function serverStatus(): Promise<any> {
@@ -150,7 +161,9 @@ export async function serverStop(): Promise<any> {
 }
 
 export async function setPluginConfig(config: Partial<MemuPluginConfigV1>): Promise<{ ok: boolean; config?: MemuPluginConfigV1 }> {
-  return request<{ ok: boolean; config?: MemuPluginConfigV1 }>('/config', config, 'POST');
+  const response = await request<{ ok: boolean; config?: MemuPluginConfigV1 }>('/config', config, 'POST');
+  if (response.ok && response.config) pluginConfig = response.config;
+  return response;
 }
 
 export async function getConnectionProfiles(): Promise<{ ok: boolean; profiles: ConnectionProfileSummary[]; message?: string }> {
@@ -201,7 +214,7 @@ export async function scopeStorageProbe(userId: string, soulId: string): Promise
 
 export async function memorizeConversation(
   conversationData: ConversationData,
-  opts: { force?: boolean; tail?: boolean } = {},
+  opts: { force?: boolean; tail?: boolean; intent?: MemorizeIntent } = {},
 ): Promise<MemorizeResponse> {
   const soul = conversationData.characterName;
   const qs = opts.force ? '?rebuild=true' : opts.tail ? '?tail=true' : '';
@@ -213,6 +226,10 @@ export async function memorizeConversation(
     // KISS: soul scope key is the character name.
     soulId: soul,
     soulName: soul,
+    chat_name: conversationData.chatName,
+    source_message_count: conversationData.source_message_count,
+    intent: opts.intent ?? 'manual',
+    runtimeSettings: conversationData.runtimeSettings,
   });
 }
 

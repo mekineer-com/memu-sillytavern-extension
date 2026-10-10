@@ -92,9 +92,6 @@ export default function MemorizeProgress(): React.JSX.Element | null {
   const progressCurrent = progress?.current ?? 0;
   const progressTotal = progress?.total ?? 0;
   const phase = String(progress?.phase || '').trim().toLowerCase();
-  const retryCount = Math.max(0, Number(summary.failureCount ?? 0));
-  const retriesUsed = retryCount > 1 ? 1 : 0;
-  const retrying = !cancelling && active && retryCount > 0 && !progress;
   const failedErrorRaw = String(summary.lastError || '').trim();
   const failedError = failedErrorRaw.length > 110
     ? `${failedErrorRaw.slice(0, 110)}...`
@@ -103,11 +100,13 @@ export default function MemorizeProgress(): React.JSX.Element | null {
   const label = cancelling
     ? 'Cancelling...'
     : failed
-      ? `Memorize failed after ${retriesUsed} retry.${failedError ? ` ${failedError}` : ''}`
+      ? `Memorize failed.${failedError ? ` ${failedError}` : ''} Retry in OpenAlma launcher.`
     : inConsolidationPhase
       ? 'Finalizing...'
-      : retrying
-      ? `Retrying memorize (${retryCount}/1)...`
+      : status === MemuTaskStatus.PENDING
+      ? 'Memorize pending...'
+      : phase === 'extracting'
+      ? 'Memorizing saved chat...'
       : progress
       ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';

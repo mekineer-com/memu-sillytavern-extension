@@ -34,6 +34,12 @@ controls stay unchanged. In memU-active main chats, replies use MCP only: a
 server error blocks the reply rather than switching APIs. Continue is temporarily
 unavailable there; it still works normally with memU off.
 
+Memorize reads plain text from the saved main chat, including the newest saved
+reply. Automatic admission runs after saving; the server owns size/sleep gates
+and failure pause. Delete publication updates the saved source without starting
+paid work. Failed work requires explicit Retry in OpenAlma. Use one active browser
+tab per chat; checkpoints and branches never publish to memU.
+
 **Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
 
 A seamless, powerful memory plugin powered by MemU!

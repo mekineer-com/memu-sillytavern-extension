@@ -114,12 +114,12 @@ function loadModule(file, imports, extra = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, sandbox);
   if (file === 'memory/memorize.ts') {
-    vm.runInNewContext('exports.query = resolveRetrieveTurnForPrompt; exports.saved = prepareConversationData;', sandbox);
+    vm.runInNewContext('exports.query = resolveRetrieveTurnForPrompt;', sandbox);
   }
   return sandbox.exports;
 }
 (async () => {
-  let ctx = { characters: [{ name: 'TestSoul', avatar: 'test.png', data: { extensions: { memu: { retained: 7 } } } }], characterId: 0, chatMetadata: {}, getCurrentChatId: () => 'main' };
+  let ctx = { chatId: 'main', characters: [{ name: 'TestSoul', avatar: 'test.png', data: { extensions: { memu: { retained: 7 } } } }], characterId: 0, chatMetadata: {}, getCurrentChatId: () => 'main' };
   const extras = {};
   let saves = 0, reads = 0, creates = 0, alerts = 0, owner = null, nativeCreates = 0;
   const names = { TestSoul: 'TestOwner', OtherSoul: 'OtherOwner' };
@@ -134,6 +134,7 @@ function loadModule(file, imports, extra = {}) {
   } } } };
   const st = { getContext: () => ctx, event_types: { APP_READY: 'ready' }, eventSource: { once: (_, cb) => { ready = cb; } }, saveChat: async () => { saves++; } };
   const network = {
+    captureRuntimeSettings: () => ({ version: 4, useServerSettings: true }),
     getPluginPing: async () => ({ ok: true }),
     scopeStorageProbe: async () => ({ ok: true }),
     getSouls: async () => { reads++; if (failDiscovery) throw Error('discovery refused'); if (pendingDiscovery) return pendingDiscovery; return { souls }; },
@@ -289,7 +290,7 @@ function loadModule(file, imports, extra = {}) {
 
   const producer = loadModule('memory/memorize.ts', {
     'memu-js': {}, 'utils/context-extra': { st, memuExtras: extras, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network,
-    'utils/types': {}, '@silly-tavern/scripts/world-info.js': {}, './utils': utils, 'utils/log': log, 'ui/inspect-panel': {},
+    'utils/types': {}, 'utils/csrf': {}, '@silly-tavern/scripts/world-info.js': {}, './utils': utils, 'utils/log': log, 'ui/inspect-panel': {},
   }, { window: { setTimeout: () => 1, clearTimeout() {} }, AbortController });
   assert.equal(producer.messageRole({ is_user: true, name: 'OtherOwner' }, 'OtherOwner'), 'user');
   assert.equal(producer.messageRole({ is_user: true, name: 'Renamed' }, 'OtherOwner'), 'unknown');
@@ -301,10 +302,6 @@ function loadModule(file, imports, extra = {}) {
   const query = await producer.query();
   assert.equal(query.userName, 'Renamed'); assert.equal(query.queryText, 'Latest human row');
   assert.equal(query.history[0].role, 'user');
-  st.toolManager = { isToolCallingSupported: () => false };
-  st.regex_placement = {}; st.getRegexedString = value => value; st.appendFileContent = async (_, value) => value;
-  const savedRows = await producer.saved(0, 1);
-  assert.equal(savedRows[0].role, 'user'); assert.equal(savedRows[1].role, 'unknown'); assert.equal(savedRows[1].name, 'Renamed');
   assert.equal(await dispatch.runGenerationInterceptors([], 0, 'continue'), true);
   assert.equal(retrieveCalls, 0);
   let resolveRetrieve, signal;

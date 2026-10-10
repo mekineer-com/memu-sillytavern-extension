@@ -6,11 +6,14 @@ import {
     preparePendingRetrieveTurnForInterceptor,
     dropPendingTurnIfStopped,
     resetRetrievePipelineState,
+    bindSavedSource,
+    publishSavedSource,
+    SavedSource,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
 import { appReady, currentScope, initChatExtraInfo, isMemuActive, refreshMemuGate } from "./utils";
 import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/network";
-import { info } from "utils/log";
+import { info, error as logError } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
 
 const staleCursorResetOnceByScope = new Set<string>();
@@ -145,7 +148,9 @@ export async function onMessageEdited(_msgIdAny: any): Promise<void> {
 }
 
 export async function onMessageDeleted(): Promise<void> {
+    const scope = currentScope();
     if (!(await isMemuActive())) return;
+    if (currentScope() !== scope) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
@@ -157,6 +162,16 @@ export async function onMessageDeleted(): Promise<void> {
         queueConversationUndo(ctx, conversationId, soulId);
     }
     refreshChatSnapshot();
+    try {
+        await initChatExtraInfo(ctx);
+        if (currentScope() !== scope) return;
+        const source = bindSavedSource(ctx);
+        if (currentScope() !== scope) return;
+        await publishSavedSource(source, 'publish_only');
+    } catch (error) {
+        logError('Saved chat publication after deletion failed', error);
+        if (currentScope() === scope) window.alert(`memU saved chat publication failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 export async function onMessageSwiped(msgIdAny: any): Promise<void> {
@@ -240,6 +255,7 @@ export async function memuGenerationInterceptor(
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         return;
     }
+    let savedSource: SavedSource | undefined;
     try {
         const prepared = await preparePendingRetrieveTurnForInterceptor(OVERRIDE_SUMMARIZER.get());
         if (currentScope() !== scope) return;
@@ -248,6 +264,7 @@ export async function memuGenerationInterceptor(
         }
         const turnResult = await dispatchConversationTurn({ debug: true });
         if (currentScope() !== scope) return;
+        savedSource = turnResult.savedSource;
         const reply = turnResult.reply;
         const ctx: any = st.getContext();
         if (reply && typeof ctx?.saveReply !== 'function') {
@@ -255,10 +272,13 @@ export async function memuGenerationInterceptor(
         }
         if (reply) {
             await ctx.saveReply({ type, getMessage: reply });
+            if (currentScope() !== scope) return;
             stampLatestSoulMessageGenerationMetadata(ctx, turnResult.generationMetadata);
         }
+        if (currentScope() !== scope) return;
         await st.saveChat();
     } catch (e: any) {
+        if (currentScope() !== scope) return;
         const msg = e instanceof Error ? e.message : String(e);
         const prev = getInspectData();
         stashInspectData({
@@ -271,6 +291,13 @@ export async function memuGenerationInterceptor(
             soulId: memuExtras.baseInfo?.characterId,
         });
         throw e;
+    }
+    if (!savedSource || currentScope() !== scope) return;
+    try {
+        await publishSavedSource(savedSource, 'automatic');
+    } catch (error) {
+        logError('Saved chat Memorize after reply failed', error);
+        if (currentScope() === scope) window.alert(`memU saved chat Memorize failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
