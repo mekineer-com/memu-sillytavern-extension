@@ -119,6 +119,15 @@ function loadModule(file, imports, extra = {}) {
   return sandbox.exports;
 }
 (async () => {
+  const networkSource = fs.readFileSync(path.resolve(__dirname, '../src/utils/network.ts'), 'utf8');
+  const creationSource = networkSource.slice(networkSource.indexOf('export async function createSoul('), networkSource.indexOf('export async function getSoul('));
+  const creation = { exports: {}, request: async (route, payload) => ({ route, payload }) };
+  vm.runInNewContext(ts.transpileModule(creationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, creation);
+  assert.deepEqual(JSON.parse(JSON.stringify(await creation.exports.createSoul('Fable', 'Rowan'))), {
+    route: '/souls', payload: { soul_id: 'Fable', use_existing: false, user_name: 'Rowan' },
+  });
+  const declaration = ts.createSourceFile('creation.ts', creationSource, ts.ScriptTarget.Latest).statements[0];
+  assert.equal(declaration.parameters[1].questionToken, undefined);
   let ctx = { chatId: 'main', characters: [{ name: 'TestSoul', avatar: 'test.png', data: { extensions: { memu: { retained: 7 } } } }], characterId: 0, chatMetadata: {}, getCurrentChatId: () => 'main' };
   const extras = {};
   let saves = 0, reads = 0, creates = 0, alerts = 0, owner = null, nativeCreates = 0;
