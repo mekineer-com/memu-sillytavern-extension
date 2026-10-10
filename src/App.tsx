@@ -16,8 +16,6 @@ import {
 } from 'utils/context-extra';
 import {
   createRelationship,
-  createOwner,
-  getOwner,
   deleteRelationship,
   getConnectionProfiles,
   getPluginConfig,
@@ -32,7 +30,7 @@ import {
 import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
 import { power_user } from '@silly-tavern/scripts/power-user.js';
-import { appReady, assertDistinctNames, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
+import { appReady, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
 import { onChatChanged } from 'memory/exports';
 
 const buttonStyle: CSSProperties = {
@@ -153,9 +151,13 @@ export default function App() {
     const reload = () => { void reloadCharacter(); };
     reload();
     st.eventSource.on(st.event_types.CHAT_CHANGED, reload);
+    const personaEvents = [st.event_types.PERSONA_CREATED, st.event_types.PERSONA_UPDATED, st.event_types.PERSONA_DELETED];
+    const reloadPersonas = () => setPersonas({ ...power_user.personas });
+    for (const event of personaEvents) st.eventSource.on(event, reloadPersonas);
     window.addEventListener('memu:server-ready', reload);
     return () => {
       st.eventSource.removeListener(st.event_types.CHAT_CHANGED, reload);
+      for (const event of personaEvents) st.eventSource.removeListener(event, reloadPersonas);
       window.removeEventListener('memu:server-ready', reload);
     };
   }, []);
@@ -163,7 +165,7 @@ export default function App() {
   async function changeMemu(enabled: boolean): Promise<void> {
     const ctx: any = st.getContext();
     const character = ctx.characters?.[ctx.characterId];
-    if (!character || ctx.chatMetadata?.main_chat || switchBusy || (enabled && !persona)) return;
+    if (!character || ctx.chatMetadata?.main_chat || switchBusy || (enabled && !power_user.personas[persona])) return;
     const scope = currentScope(ctx);
     setSwitchBusy(true);
     setSwitchError('');
@@ -188,25 +190,11 @@ export default function App() {
     }
   }
 
-  async function selectPersona(avatar: string): Promise<void> {
+  function selectPersona(avatar: string): void {
     const ctx: any = st.getContext();
     if (ctx.chatMetadata?.main_chat || ctx.groupId || personaLocked) return;
-    const scope = currentScope();
     setPersona(avatar);
-    if (!avatar) return;
-    setSwitchBusy(true);
-    try {
-      const owner = await getOwner();
-      if (currentScope() !== scope) return;
-      if (!owner.user_id) {
-        assertDistinctNames(personas[avatar], String(ctx.characters?.[ctx.characterId]?.name || ''));
-        await createOwner(personas[avatar]);
-      }
-    } catch (error) {
-      if (currentScope() === scope) { setPersona(''); setSwitchError(String(error)); }
-    } finally {
-      if (currentScope() === scope) setSwitchBusy(false);
-    }
+    setSwitchError('');
   }
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
   const [memorizeRunning, setMemorizeRunning] = useState<boolean>(false);
@@ -978,7 +966,7 @@ export default function App() {
               <h4 style={sectionTitleStyle}>Memory</h4>
               <label className="checkbox_label">
                 <input id="memu_character_enabled" type="checkbox" checked={memuActive && !copiedChat}
-                  disabled={switchBusy || copiedChat || !currentCharacter || (!memuActive && !persona)}
+                  disabled={switchBusy || copiedChat || !currentCharacter || (!memuActive && !personas[persona])}
                   onChange={e => void changeMemu(e.target.checked)} />
                 <span>memU</span>
                 <span className="memu-runtime-info">

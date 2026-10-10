@@ -85,6 +85,26 @@ assert.equal(find(render(), 'memu_soul_persona').props.disabled, true);
 states[0] = false;
 assert(nodes(render()).some(node => node.type === 'style' && node.props.children.includes('.memu-runtime-info')));
 
+const personaCallbacks = new Map();
+let seenPersonas, cleanup;
+const personaEffect = {
+  useEffect: callback => { cleanup = callback(); }, reloadCharacter: async () => {},
+  st: { event_types: { CHAT_CHANGED: 'chat', PERSONA_CREATED: 'created', PERSONA_UPDATED: 'updated', PERSONA_DELETED: 'deleted' },
+    eventSource: { on: (event, callback) => personaCallbacks.set(event, callback), removeListener: event => personaCallbacks.delete(event) } },
+  power_user: { personas: {} }, setPersonas: value => { seenPersonas = value; },
+  window: { addEventListener() {}, removeEventListener() {} },
+};
+const effectStart = source.indexOf('  useEffect(() => {\n    const reload');
+vm.runInNewContext(ts.transpileModule(source.slice(effectStart, source.indexOf('  async function changeMemu(', effectStart)), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText, personaEffect);
+for (const event of ['created', 'updated', 'deleted']) {
+  personaEffect.power_user.personas = event === 'deleted' ? {} : { avatar: event };
+  personaCallbacks.get(event)();
+  assert.deepEqual(JSON.parse(JSON.stringify(seenPersonas)), personaEffect.power_user.personas);
+}
+cleanup(); assert.equal(personaCallbacks.size, 0);
+
 function loadModule(file, imports, extra = {}) {
   const sandbox = { exports: {}, require: name => {
     assert(name in imports, `Unexpected import ${name}`);
@@ -194,17 +214,20 @@ function loadModule(file, imports, extra = {}) {
   ready(); assert.equal(await pendingPersona, 'created.png'); assert.equal(nativeCreates, 1);
   assert.equal(await utils.ensurePersona('TestOwner'), 'owner.png'); assert.equal(nativeCreates, 1);
   ctx.characters[0].name = 'testsoul'; souls = []; utils.refreshMemuGate();
+  let selectedPersona;
   const selection = {
     st, personaLocked: false, personas: { picked: 'TestSoul' }, currentScope: utils.currentScope,
     assertDistinctNames: utils.assertDistinctNames, getOwner: network.getOwner, createOwner: network.createOwner,
-    setPersona() {}, setSwitchBusy() {}, setSwitchError(value) { this.error = value; },
+    setPersona: value => { selectedPersona = value; }, setSwitchBusy() {}, setSwitchError(value) { this.error = value; },
   };
   selection.setSwitchError = selection.setSwitchError.bind(selection);
-  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function selectPersona('), source.indexOf('  const [memorizeNowBusy')), {
+  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  function selectPersona('), source.indexOf('  const [memorizeNowBusy')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, selection);
   await selection.selectPersona('picked');
-  assert.match(selection.error, /must differ/); assert.equal(owner, null);
+  assert.equal(selectedPersona, 'picked'); assert.equal(owner, null);
+  await selection.selectPersona('another');
+  assert.equal(selectedPersona, 'another'); assert.equal(owner, null);
   await assert.rejects(utils.initChatExtraInfo(ctx, 'TestSoul'), /must differ/);
   assert.equal(owner, null); assert.equal(creates, 0);
   ctx.characters[0].name = 'TestSoul'; souls = ['TestSoul']; utils.refreshMemuGate();
@@ -232,7 +255,7 @@ function loadModule(file, imports, extra = {}) {
     setSwitchBusy() {}, setSwitchError: value => { switchError = value; },
     onChatChanged() {}, reloadCharacter: async () => {},
   };
-  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function changeMemu('), source.indexOf('  async function selectPersona(')), {
+  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function changeMemu('), source.indexOf('  function selectPersona(')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, change);
   await change.changeMemu(true);
@@ -240,6 +263,10 @@ function loadModule(file, imports, extra = {}) {
   assert.equal(names.FailedToggleSoul, 'OtherOwner');
   assert.equal(ctx.characters[0].data.extensions.memu.disabled, true);
   assert.equal(await utils.isMemuActive(), false);
+  const previousCreates = creates, previousWrites = cardWrites;
+  change.persona = 'deleted-persona';
+  await change.changeMemu(true);
+  assert.equal(creates, previousCreates); assert.equal(cardWrites, previousWrites);
   updated = ['test.png']; ctx.characters[0].name = 'OtherSoul';
   ctx.characters[0].data.extensions.memu.disabled = false;
   names.OtherSoul = 'OtherOwner'; utils.refreshMemuGate();
