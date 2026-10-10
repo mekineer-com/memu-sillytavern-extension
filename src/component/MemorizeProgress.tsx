@@ -4,6 +4,7 @@ import { memuExtras, st } from 'utils/context-extra';
 import { cancelMemorize } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
 import { getInspectData } from 'ui/inspect-panel';
+import { currentScope, isMemuActive } from 'memory/utils';
 
 const containerStyle: CSSProperties = {
   position: 'fixed',
@@ -44,19 +45,25 @@ const cancelBtn: CSSProperties = {
 
 function currentTaskKey(): string {
   const info = memuExtras.baseInfo;
-  return JSON.stringify([info?.userId, info?.characterId, memuExtras.summary?.summaryTaskId]);
+  return JSON.stringify([currentScope(), info?.userId, info?.characterId, memuExtras.summary?.summaryTaskId]);
 }
 
-export default function MemorizeProgress(): JSX.Element | null {
+export default function MemorizeProgress(): React.JSX.Element | null {
   const [tick, setTick] = useState(0);
   const [cancelling, setCancelling] = useState(false);
   const [refusedTask, setRefusedTask] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 2000);
     return () => clearInterval(id);
   }, []);
 
   void tick;
+  useEffect(() => {
+    let stale = false;
+    void isMemuActive().then(value => { if (!stale) setEnabled(value); }).catch(() => { if (!stale) setEnabled(false); });
+    return () => { stale = true; };
+  }, [tick, currentScope()]);
   const summary = memuExtras.summary;
   const taskKey = currentTaskKey();
   const cancelUnavailable = refusedTask === taskKey;
@@ -69,6 +76,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     if (!active) setRefusedTask(null);
   }, [active, taskKey]);
   const inspect = getInspectData();
+  if (!enabled || (st.getContext() as any).chatMetadata?.main_chat) return null;
   if (inspect?.errorCode === 'soul_paused'
     && inspect.userId === memuExtras.baseInfo?.userId
     && inspect.soulId === memuExtras.baseInfo?.characterId) {
@@ -108,6 +116,7 @@ export default function MemorizeProgress(): JSX.Element | null {
     : 0;
 
   async function handleCancel() {
+    if (!(await isMemuActive())) return;
     if (cancelling) return;
     setCancelling(true);
     const info = memuExtras.baseInfo;
@@ -137,7 +146,8 @@ export default function MemorizeProgress(): JSX.Element | null {
           <button
             type="button"
             style={cancelBtn}
-            onClick={() => {
+            onClick={async () => {
+              if (!(await isMemuActive())) return;
               memuExtras.summary = undefined;
               void st.saveChat();
             }}

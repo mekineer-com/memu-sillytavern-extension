@@ -17,6 +17,7 @@ import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREB
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
+import { currentScope, isMemuActive } from './memory/utils';
 
 (globalThis as any).memuGenerationInterceptor = memuGenerationInterceptor;
 
@@ -110,11 +111,14 @@ function installChatOptionResetCursor(): void {
 
     async function resetCursor(): Promise<void> {
         try {
+            if (!(await isMemuActive())) return;
+            const scope = currentScope();
             const { st } = await import('./utils/context-extra');
             const { initChatExtraInfo } = await import('./memory/utils');
             const { doSummary, deleteMemuLorebooksForCurrentCharacter } = await import('./memory/memorize');
 
             await deleteMemuLorebooksForCurrentCharacter();
+            if (!(await isMemuActive()) || currentScope() !== scope) return;
 
             // Keep baseInfo; wipe progress markers so next digest starts from turn 0.
             const ctx: any = st.getContext() as any;
@@ -163,6 +167,7 @@ function installChatOptionResetCursor(): void {
 
         anchor.addEventListener('click', async (ev) => {
             ev.preventDefault();
+            if (!(await isMemuActive())) return;
             if (isMemorizeActive()) return;
             const { st } = await import('./utils/context-extra');
             const ctx: any = st.getContext() as any;

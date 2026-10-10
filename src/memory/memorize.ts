@@ -3,7 +3,7 @@ import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/con
 import { conversationRetrieve, conversationTurn, memorizeConversation, retrieveDefaultCategories } from "utils/network";
 import { ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
-import { initChatExtraInfo } from "./utils";
+import { currentScope, initChatExtraInfo, isMemuActive } from "./utils";
 import { warn, error as logError, onceWarn, onceError } from "utils/log";
 import {
     getInspectData,
@@ -16,6 +16,8 @@ type PendingRetrieveTurn = {
     createdAt: number;
     conversationId: string;
     userId: string;
+    userName: string;
+    scope: string;
     soulId: string;
     queryText: string;
     queryTsMs?: number;
@@ -83,7 +85,10 @@ export function getChatIdSafe(): string {
 
 
 export async function doSummary(from: number, to: number, opts: { force?: boolean; tail?: boolean; retry?: boolean } = {}): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     if (memuExtras.baseInfo == null) {
         warn("memorize skipped: no baseInfo in chat metadata");
         return;
@@ -98,14 +103,17 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
 
     try {
         const conversationId = getChatIdSafe();
+        const messages = await prepareConversationData(from, to);
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
         const response = await memorizeConversation({
-                messages: await prepareConversationData(from, to),
+                messages,
                 userId: memuExtras.baseInfo.userId,
                 userName: memuExtras.baseInfo.userName,
                 characterId: memuExtras.baseInfo.characterId,
                 characterName: memuExtras.baseInfo.characterName,
                 conversationId: conversationId || undefined,
             }, opts);
+        if (currentScope() !== scope) return;
         // Local mode usually returns a task id and completes asynchronously.
         // Keep it pending so the poller drives retrieve/lorebook sync after success.
         {
@@ -130,6 +138,7 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
             return;
         }
     } catch (error) {
+        if (currentScope() !== scope) return;
         const prevRange = memuExtras.summary?.summaryRange ?? [-1, -1];
         memuExtras.summary = {
             // IMPORTANT: don't advance the cursor on failure.
@@ -148,7 +157,10 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
 }
 
 export async function memorizeNow(): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     const chat = st.getContext().chat;
     if (!Array.isArray(chat) || chat.length === 0) {
         warn("memorize now skipped: empty chat");
@@ -162,11 +174,15 @@ export async function memorizeNow(): Promise<void> {
 // One-shot: (re)create and populate memU World Info lorebooks right now.
 // Useful when lorebooks were deleted, or when digest/retrieve is delayed.
 export async function syncLorebooksNow(reason: string = "manual"): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     if (!IMPORT_LOREBOOKS.get()) return;
     try {
         if (!memuExtras.baseInfo) return;
         const resp = await retrieveDefaultCategories(memuExtras.baseInfo.userId, memuExtras.baseInfo.characterId);
+        if (currentScope() !== scope) return;
         const categories = (resp as any)?.categories ?? [];
         if (Array.isArray(categories) && categories.length) {
             await syncCategoriesToWorldInfo(memuExtras.baseInfo, categories);
@@ -178,9 +194,12 @@ export async function syncLorebooksNow(reason: string = "manual"): Promise<void>
 
 // Delete every lorebook whose name starts with prefix, optionally keeping names in keepSet.
 async function deleteLorebooksByPrefix(prefix: string, keepSet?: Set<string>): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     const csrfResp = await fetch('/csrf-token');
     const csrfJson = await csrfResp.json().catch(() => ({} as any));
     const token = (csrfJson && csrfJson.token) ? String(csrfJson.token) : '';
+    if (currentScope() !== scope) return;
     const listResp = await fetch('/api/worldinfo/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
@@ -192,6 +211,7 @@ async function deleteLorebooksByPrefix(prefix: string, keepSet?: Set<string>): P
         .map((x: any) => String(x?.file_id || x?.name || '').trim())
         .filter((n: string) => !!n && n.startsWith(prefix) && !(keepSet?.has(n)));
     for (const name of targets) {
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
         await fetch('/api/worldinfo/delete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-csrf-token': token },
@@ -204,7 +224,10 @@ async function deleteLorebooksByPrefix(prefix: string, keepSet?: Set<string>): P
 // Called when the user unchecks Import Lorebooks so the ST World Info
 // listing immediately reflects the new state.
 export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     const info = memuExtras.baseInfo;
     if (!info) return;
     const sanitizedName = sanitizeWorldInfoName(String(info.characterName || '').trim());
@@ -220,12 +243,16 @@ export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
 }
 
 export async function retrieveMemories(summary: MemuSummary): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     try {
         const response = await retrieveDefaultCategories(
             memuExtras.baseInfo.userId,
             memuExtras.baseInfo.characterId,
         );
+        if (currentScope() !== scope || memuExtras.summary?.summaryTaskId !== summary.summaryTaskId) return;
         if (!response || typeof response !== 'object' || !Array.isArray((response as any).categories)) {
             throw new Error('retrieveDefaultCategories returned malformed payload: categories[] missing');
         }
@@ -242,6 +269,7 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
             onceWarn("worldinfo-sync-failed", "worldinfo sync failed");
         }
 
+        if (currentScope() !== scope) return;
         const retrieve: any = memuExtras.retrieve ?? {
             history: [],
         };
@@ -262,6 +290,7 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
     } catch (error) {
         // Do not throw: if the backend is misconfigured (e.g., SQLModel list-type error),
         // throwing causes the poller to retry forever and spam logs.
+        if (currentScope() !== scope || memuExtras.summary?.summaryTaskId !== summary.summaryTaskId) return;
         const retrieve: any = memuExtras.retrieve ?? { history: [] };
         const taskId = summary.summaryTaskId ?? 'undefined';
         const prev = retrieve.lastFailure?.summaryTaskId === taskId ? retrieve.lastFailure : null;
@@ -377,6 +406,10 @@ function resolveMessageTsMs(row: any): number | undefined {
     return Math.trunc(parsed);
 }
 
+export function messageRole(row: any, ownerName: string): 'user' | 'soul' | 'unknown' {
+    return row?.is_user ? (row.name === ownerName ? 'user' : 'unknown') : 'soul';
+}
+
 function buildTurnHistory(chat: any[], endIdx: number): Array<Record<string, any>> {
     if (!Array.isArray(chat) || endIdx < 0) return [];
     const out: Array<Record<string, any>> = [];
@@ -384,7 +417,7 @@ function buildTurnHistory(chat: any[], endIdx: number): Array<Record<string, any
         const row: any = chat[i];
         const content = String(row?.mes ?? '').trim();
         if (!content) continue;
-        const role = row?.is_user ? 'user' : 'soul';
+        const role = messageRole(row, memuExtras.baseInfo.userName);
         const item: Record<string, any> = {
             role,
             content,
@@ -481,11 +514,7 @@ function applyPromptOverridePayload(
 
 
 export function resetRetrievePipelineState(): void {
-    if (_pendingRetrieveAbort) {
-        _pendingRetrieveAbortReason = 'Retrieve pipeline reset';
-        _pendingRetrieveAbort.abort(_pendingRetrieveAbortReason);
-        _pendingRetrieveAbort = null;
-    }
+    _pendingRetrieveAbort = null;
     _pendingRetrieveTurn = null;
 }
 
@@ -526,7 +555,10 @@ export function dropPendingTurnIfStopped(stoppedAtMs: number): boolean {
 }
 
 async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | null> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     await initChatExtraInfo(st.getContext());
+    if (currentScope() !== scope) return;
     if (!memuExtras.baseInfo) return null;
 
     const ctx: any = st.getContext();
@@ -535,7 +567,7 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     let queryIdx = -1;
     for (let i = chat.length - 1; i >= 0; i--) {
         const item: any = chat[i];
-        const isUser = item?.is_user === true || (ctx?.name1 != null && String(item?.name || '') === String(ctx.name1));
+        const isUser = item?.is_user === true && !item?.is_system;
         if (!isUser) continue;
         const text = typeof item?.mes === 'string' ? item.mes.trim() : '';
         if (!text) continue;
@@ -549,7 +581,6 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
     const userId = String(memuExtras.baseInfo.userId || '').trim();
     const soulId = String(memuExtras.baseInfo.characterId || '').trim();
     if (!conversationId || !userId || !soulId) return null;
-    const userName = String(ctx?.name1 || '').trim();
     const chatName = String(memuExtras.baseInfo.characterName || soulId || '').trim();
     if (!chatName) {
         throw new Error('memu extension could not resolve chatName from characterName/soulId');
@@ -560,10 +591,11 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
 
     return {
         createdAt: Date.now(),
+        scope,
         conversationId,
         userId,
         soulId,
-        userName,
+        userName: String(queryRow?.name || ''),
         queryText,
         queryTsMs: resolveMessageTsMs(queryRow),
         querySourceId: String(queryIdx),
@@ -575,6 +607,8 @@ async function resolveRetrieveTurnForPrompt(): Promise<PendingRetrieveTurn | nul
 }
 
 export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: boolean = true): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     const turn = await resolveRetrieveTurnForPrompt();
     if (!turn) {
         addSummaryToPrompt(eventData, replaceSystem);
@@ -612,6 +646,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             mentalHealthAddon: MENTAL_HEALTH_ADDON.get(),
         }, { signal: retrieveAbort.signal });
     } catch (err: any) {
+        if (currentScope() !== scope || _pendingRetrieveTurn !== turn) return;
         if (isAbortError(err)) {
             const reasonRaw = (retrieveAbort.signal as any)?.reason;
             const reason = typeof reasonRaw === 'string' && reasonRaw.trim()
@@ -660,6 +695,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             _pendingRetrieveAbortReason = null;
         }
     }
+    if (currentScope() !== scope || _pendingRetrieveTurn !== turn) return;
     const result = (resp as any)?.result ?? null;
     const ragSummary = parseRetrieveResult(result);
     const parsedPrior = parsePriorContext((resp as any)?.prior_context);
@@ -778,8 +814,9 @@ export async function preparePendingRetrieveTurnForInterceptor(replaceSystem: bo
 export async function dispatchConversationTurn(
     opts: { debug?: boolean } = {},
 ): Promise<ConversationTurnDispatchResult> {
+    if (!(await isMemuActive())) throw new Error('memU is off');
     const turn = _pendingRetrieveTurn;
-    if (!turn) {
+    if (!turn || turn.scope !== currentScope()) {
         throw new Error('memU pending retrieve is missing — retrieve must complete before turn.');
     }
     _pendingRetrieveTurn = null;
@@ -813,6 +850,7 @@ export async function dispatchConversationTurn(
     if (!String(promptOverridePayload.user_prompt || '').trim()) {
         throw new Error('memU prepared payload has empty user_prompt — message not sent.');
     }
+    if (!(await isMemuActive()) || currentScope() !== turn.scope) return { reply: '' };
 
     const resp = await conversationTurn({
         userId: turn.userId,
@@ -830,6 +868,7 @@ export async function dispatchConversationTurn(
         promptOverridePayload,
     });
 
+    if (currentScope() !== turn.scope) return { reply: '' };
     const responseTarget = String((resp as any)?.response_target ?? '').trim().toLowerCase();
     const shouldRespond = typeof (resp as any)?.should_respond === 'boolean'
         ? Boolean((resp as any).should_respond)
@@ -1006,6 +1045,8 @@ async function upsertWorldInfoLorebook(name: string, data: any): Promise<void> {
 }
 
 async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name: string; summary: string }>): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     if (!IMPORT_LOREBOOKS.get()) return;
     if (!Array.isArray(categories) || categories.length === 0) return;
 
@@ -1016,6 +1057,7 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
 
     const written = new Set<string>();
     for (const cat of categories) {
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
         const catName = sanitizeWorldInfoName(String((cat as any)?.name || 'category'));
         const bookName = sanitizeWorldInfoName(`memU - ${characterName} - ${catName}`);
 
@@ -1037,6 +1079,7 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
 
     // Prune stale books: any memU book for this character that wasn't written this run
     // (renamed/deleted category, or category that became empty) must be removed.
+    if (!(await isMemuActive()) || currentScope() !== scope) return;
     await deleteLorebooksByPrefix(prefix, written);
 
     // ST UI doesn't always refresh the World Info lists immediately when aux books change.
@@ -1163,9 +1206,7 @@ async function prepareConversationData(from: number, to: number): Promise<Conver
         }
 
         return {
-            role: chatItem.is_user
-                ? (chatItem.name === memuExtras.baseInfo.userName ? 'user' : 'participant')
-                : 'soul',
+            role: messageRole(chatItem, chatInfo.userName),
             name: chatItem.name,
             content: regexedMessage,
             // Preserve timestamp if available (ST chat.jsonl uses ISO send_date).

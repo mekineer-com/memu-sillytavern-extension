@@ -16,6 +16,8 @@ import {
 } from 'utils/context-extra';
 import {
   createRelationship,
+  createOwner,
+  getOwner,
   deleteRelationship,
   getConnectionProfiles,
   getPluginConfig,
@@ -29,6 +31,9 @@ import {
 } from 'utils/network';
 import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
+import { power_user } from '@silly-tavern/scripts/power-user.js';
+import { appReady, assertDistinctNames, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
+import { onChatChanged } from 'memory/exports';
 
 const buttonStyle: CSSProperties = {
   height: '100%',
@@ -96,6 +101,113 @@ export default function App() {
   const [mentalHealthAddon, setMentalHealthAddon] = useState<boolean>(false);
   const [currentCharacter, setCurrentCharacter] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [memuActive, setMemuActive] = useState(false);
+  const [copiedChat, setCopiedChat] = useState(false);
+  const [persona, setPersona] = useState('');
+  const [personaLocked, setPersonaLocked] = useState(false);
+  const [personas, setPersonas] = useState<Record<string, string>>({});
+  const [switchBusy, setSwitchBusy] = useState(true);
+  const [switchError, setSwitchError] = useState('');
+
+  async function reloadCharacter(): Promise<void> {
+    setSwitchBusy(true);
+    setMemuActive(false);
+    setPersona('');
+    setPersonaLocked(false);
+    setSwitchError('');
+    const scope = currentScope();
+    try {
+      await appReady;
+      if (currentScope() !== scope) return;
+      const ctx: any = st.getContext();
+      const copy = !!ctx.chatMetadata?.main_chat;
+      setCopiedChat(copy);
+      setPersonas({ ...power_user.personas });
+      if (copy) {
+        const name = memuExtras.baseInfo?.userName;
+        setPersona(Object.keys(power_user.personas).find(key => power_user.personas[key] === name) || '');
+        setPersonaLocked(!!name);
+        return;
+      }
+      const character = ctx.characters?.[ctx.characterId];
+      if (!character || ctx.groupId) return;
+      const active = await isMemuActive();
+      if (currentScope() !== scope) return;
+      setMemuActive(active);
+      const name = await soulPersonaName(String(character.name || '').trim());
+      if (currentScope() !== scope) return;
+      const avatar = name ? await ensurePersona(name) : '';
+      if (currentScope() !== scope) return;
+      setPersonas({ ...power_user.personas });
+      setPersona(avatar);
+      setPersonaLocked(!!name);
+      setCurrentUserId(String(memuExtras.baseInfo?.userId || ''));
+    } catch (error) {
+      if (currentScope() === scope) setSwitchError(String(error));
+    } finally {
+      if (currentScope() === scope) setSwitchBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    const reload = () => { void reloadCharacter(); };
+    reload();
+    st.eventSource.on(st.event_types.CHAT_CHANGED, reload);
+    window.addEventListener('memu:server-ready', reload);
+    return () => {
+      st.eventSource.removeListener(st.event_types.CHAT_CHANGED, reload);
+      window.removeEventListener('memu:server-ready', reload);
+    };
+  }, []);
+
+  async function changeMemu(enabled: boolean): Promise<void> {
+    const ctx: any = st.getContext();
+    const character = ctx.characters?.[ctx.characterId];
+    if (!character || ctx.chatMetadata?.main_chat || switchBusy || (enabled && !persona)) return;
+    const scope = currentScope(ctx);
+    setSwitchBusy(true);
+    setSwitchError('');
+    try {
+      if (enabled && !personaLocked) {
+        await writeMemuDisabled(character, true);
+        if (currentScope() !== scope) return;
+      }
+      if (enabled) await initChatExtraInfo(ctx, power_user.personas[persona]);
+      if (currentScope() !== scope) return;
+      await writeMemuDisabled(character, !enabled);
+      if (currentScope() !== scope) return;
+      onChatChanged();
+      await reloadCharacter();
+    } catch (error) {
+      if (currentScope() === scope) {
+        await reloadCharacter();
+        if (currentScope() === scope) setSwitchError(String(error));
+      }
+    } finally {
+      if (currentScope() === scope) setSwitchBusy(false);
+    }
+  }
+
+  async function selectPersona(avatar: string): Promise<void> {
+    const ctx: any = st.getContext();
+    if (ctx.chatMetadata?.main_chat || ctx.groupId || personaLocked) return;
+    const scope = currentScope();
+    setPersona(avatar);
+    if (!avatar) return;
+    setSwitchBusy(true);
+    try {
+      const owner = await getOwner();
+      if (currentScope() !== scope) return;
+      if (!owner.user_id) {
+        assertDistinctNames(personas[avatar], String(ctx.characters?.[ctx.characterId]?.name || ''));
+        await createOwner(personas[avatar]);
+      }
+    } catch (error) {
+      if (currentScope() === scope) { setPersona(''); setSwitchError(String(error)); }
+    } finally {
+      if (currentScope() === scope) setSwitchBusy(false);
+    }
+  }
   const [memorizeNowBusy, setMemorizeNowBusy] = useState<boolean>(false);
   const [memorizeRunning, setMemorizeRunning] = useState<boolean>(false);
   const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
@@ -183,7 +295,8 @@ export default function App() {
   }
 
   async function refreshRelationships(): Promise<void> {
-    if (!pluginOk || !currentCharacter || !currentUserId) {
+    const scope = currentScope();
+    if (!pluginOk || !currentCharacter || !currentUserId || !(await isMemuActive())) {
       setRelationships([]);
       setRelationshipsStatus('idle');
       setRelationshipsMessage('');
@@ -193,10 +306,12 @@ export default function App() {
     setRelationshipsMessage('');
     try {
       const resp = await listRelationships(currentUserId, currentCharacter);
+      if (!(await isMemuActive()) || currentScope() !== scope) return;
       const rows = Array.isArray(resp?.relationships) ? resp.relationships : [];
       setRelationships(rows);
       setRelationshipsStatus('idle');
     } catch (e: any) {
+      if (currentScope() !== scope) return;
       setRelationships([]);
       setRelationshipsStatus('error');
       setRelationshipsMessage(e?.message || 'Failed to load relationships');
@@ -205,7 +320,7 @@ export default function App() {
 
   useEffect(() => {
     void refreshRelationships();
-  }, [pluginOk, currentCharacter, currentUserId]);
+  }, [pluginOk, currentCharacter, currentUserId, memuActive]);
 
   // memory ui prefs — per-soul, so re-read whenever the active chat changes.
   useEffect(() => {
@@ -446,11 +561,13 @@ export default function App() {
   ];
 
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
+    if (!memuActive || copiedChat) return;
     setOverrideSummarizer(e.target.checked);
     OVERRIDE_SUMMARIZER.set(e.target.checked);
   }
 
   function handleImportLorebooksChange(e: ChangeEvent<HTMLInputElement>) {
+    if (!memuActive || copiedChat) return;
     const next = e.target.checked;
     setImportLorebooks(next);
     IMPORT_LOREBOOKS.set(next);
@@ -462,6 +579,7 @@ export default function App() {
   }
 
   function handleMentalHealthAddonChange(e: ChangeEvent<HTMLInputElement>) {
+    if (!memuActive || copiedChat) return;
     setMentalHealthAddon(e.target.checked);
     MENTAL_HEALTH_ADDON.set(e.target.checked);
   }
@@ -493,6 +611,8 @@ export default function App() {
   }
 
   async function saveRelationshipEditor(): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     if (!relationshipEditor || !currentCharacter || !currentUserId) return;
     const name = String(relationshipEditor.name || '').trim();
     const relationship = String(relationshipEditor.relationship || '').trim();
@@ -508,6 +628,7 @@ export default function App() {
           relationship,
         });
       }
+      if (currentScope() !== scope) return;
       setRelationshipEditor(null);
       await refreshRelationships();
       setRelationshipsStatus('idle');
@@ -518,12 +639,15 @@ export default function App() {
   }
 
   async function removeRelationship(speakerId: string): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     if (!speakerId || !currentCharacter || !currentUserId) return;
     if (!window.confirm('Remove this relationship?')) return;
     setRelationshipsStatus('saving');
     setRelationshipsMessage('');
     try {
       await deleteRelationship(currentUserId, currentCharacter, speakerId);
+      if (currentScope() !== scope) return;
       await refreshRelationships();
       setRelationshipsStatus('idle');
     } catch (e: any) {
@@ -594,10 +718,13 @@ export default function App() {
   }
 
   async function openMemoryModal(): Promise<void> {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     setShowMemoryModal(true);
     setMemoryText('Loading latest memU lorebooks...');
     try {
       const txt = await loadRecentLorebookMemories();
+      if (currentScope() !== scope) return;
       setMemoryText(txt || 'No content');
     } catch (e: any) {
       setMemoryText(`Failed to load lorebooks: ${e?.message || String(e)}`);
@@ -606,6 +733,16 @@ export default function App() {
 
   return (
     <>
+                <style>{`
+                  .memu-runtime-info { position: relative; }
+                  .memu-runtime-info [role="tooltip"] {
+                    display: none; position: absolute; z-index: 1; top: 100%; right: 0;
+                    width: min(280px, 70vw); padding: 8px; border-radius: 6px;
+                    background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #fff);
+                  }
+                  .memu-runtime-info:hover [role="tooltip"],
+                  .memu-runtime-info:focus-within [role="tooltip"] { display: block; }
+                `}</style>
       <div className="memu-ext-settings" style={{ marginBottom: 16 }}>
         <div className="inline-drawer">
           <div className="inline-drawer-toggle inline-drawer-header">
@@ -738,16 +875,7 @@ export default function App() {
               <div style={sectionStyle}>
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
-                <style>{`
-                  .memu-runtime-info { position: relative; }
-                  .memu-runtime-info [role="tooltip"] {
-                    display: none; position: absolute; z-index: 1; top: 100%; right: 0;
-                    width: min(280px, 70vw); padding: 8px; border-radius: 6px;
-                    background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #fff);
-                  }
-                  .memu-runtime-info:hover [role="tooltip"],
-                  .memu-runtime-info:focus-within [role="tooltip"] { display: block; }
-                `}</style>
+
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <label className="checkbox_label expander" htmlFor="use_server_settings">
                     <input
@@ -848,6 +976,28 @@ export default function App() {
             {/* Memory */}
             <div style={sectionStyle}>
               <h4 style={sectionTitleStyle}>Memory</h4>
+              <label className="checkbox_label">
+                <input id="memu_character_enabled" type="checkbox" checked={memuActive && !copiedChat}
+                  disabled={switchBusy || copiedChat || !currentCharacter || (!memuActive && !persona)}
+                  onChange={e => void changeMemu(e.target.checked)} />
+                <span>memU</span>
+                <span className="memu-runtime-info">
+                  <button type="button" className="menu_button" aria-label="About memU" aria-describedby="memu-switch-info"><i className="fa-solid fa-info-circle" /></button>
+                  <span id="memu-switch-info" role="tooltip">{copiedChat ? 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.' : 'Enable memory for this character. Turning it off keeps the Soul and its memories.'}</span>
+                </span>
+              </label>
+              <label>
+                Persona <span className="memu-runtime-info">
+                  <button type="button" className="menu_button" aria-label="About Soul personas" aria-describedby="memu-persona-info"><i className="fa-solid fa-info-circle" /></button>
+                  <span id="memu-persona-info" role="tooltip">If you switch persona, the Soul will think it's talking to someone else.</span>
+                </span>
+                <select id="memu_soul_persona" className="text_pole" value={persona} disabled={switchBusy || copiedChat || personaLocked || !currentCharacter}
+                  onChange={e => void selectPersona(e.target.value)}>
+                  <option value="">Select a persona</option>
+                  {Object.entries(personas).map(([avatar, name]) => <option key={avatar} value={avatar}>{name}</option>)}
+                </select>
+              </label>
+              {switchError && <small role="alert">{switchError}</small>}
 
               {!currentCharacter && (
                 <div style={{ opacity: 0.7, fontSize: '12px', marginBottom: 6 }}>
@@ -866,7 +1016,7 @@ export default function App() {
                   className="checkbox"
                   checked={overrideSummarizer}
                   onChange={handleOverrideSummarizerChange}
-                  disabled={!currentCharacter}
+                  disabled={!currentCharacter || !memuActive || copiedChat}
                 />
                 <span>Override Summarizer</span>
                 <i
@@ -887,7 +1037,7 @@ export default function App() {
                   className="checkbox"
                   checked={importLorebooks}
                   onChange={handleImportLorebooksChange}
-                  disabled={!currentCharacter}
+                  disabled={!currentCharacter || !memuActive || copiedChat}
                 />
                 <span>Import Lorebooks</span>
                 <i
@@ -908,7 +1058,7 @@ export default function App() {
                   className="checkbox"
                   checked={mentalHealthAddon}
                   onChange={handleMentalHealthAddonChange}
-                  disabled={!currentCharacter}
+                  disabled={!currentCharacter || !memuActive || copiedChat}
                 />
                 <span>Mental Health Addon</span>
                 <i
@@ -925,7 +1075,7 @@ export default function App() {
                     type="button"
                     className="menu_button"
                     onClick={() => openAddRelationshipEditor()}
-                    disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                    disabled={!memuActive || copiedChat || !currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
                     style={{ padding: '4px 8px' } as any}
                   >
                     + Add
@@ -963,7 +1113,7 @@ export default function App() {
                       type="button"
                       className="menu_button"
                       onClick={() => openEditRelationshipEditor(row)}
-                      disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                      disabled={!memuActive || copiedChat || !currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
                       style={{ padding: '2px 8px' } as any}
                     >
                       Edit
@@ -972,7 +1122,7 @@ export default function App() {
                       type="button"
                       className="menu_button"
                       onClick={() => void removeRelationship(row.speaker_id)}
-                      disabled={!currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
+                      disabled={!memuActive || copiedChat || !currentCharacter || !currentUserId || relationshipsStatus === 'saving'}
                       style={{ padding: '2px 8px' } as any}
                     >
                       Delete
@@ -986,7 +1136,7 @@ export default function App() {
                   type="button"
                   className="menu_button"
                   onClick={() => void handleMemorizeNow()}
-                  disabled={memorizeNowBusy || !currentCharacter || memorizeRunning}
+                  disabled={!memuActive || copiedChat || memorizeNowBusy || !currentCharacter || memorizeRunning}
                 >
                   {memorizeNowBusy ? 'Memorizing...' : 'Memorize Now'}
                 </button>
@@ -1000,7 +1150,7 @@ export default function App() {
 
             <div style={sectionStyle}>
               <h4 style={sectionTitleStyle}>Narrative Suggestion</h4>
-              <NarrativeSuggestion />
+              <NarrativeSuggestion enabled={memuActive && !copiedChat} />
             </div>
           </div>
         </div>

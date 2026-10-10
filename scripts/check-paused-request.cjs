@@ -19,6 +19,7 @@ vm.runInNewContext(babel.transformSync(code, {
   const component = fs.readFileSync(`${__dirname}/../src/component/MemorizeProgress.tsx`, 'utf8');
   const summary = { summaryTaskStatus: 'PROCESSING', summaryTaskId: 'task-a' };
   const cancel = {
+    isMemuActive: async () => true, currentScope: () => 'test.png/main',
     cancelling: false, memuExtras: { baseInfo: { userId: 'fictional-owner', characterId: 'fictional-soul' }, summary },
     cancelMemorize: async () => ({ ok: false }),
     setCancelling(value) { this.cancelling = value; },
@@ -45,6 +46,7 @@ vm.runInNewContext(babel.transformSync(code, {
     cancel.cancelling = false;
     cancel.memuExtras.summary = summary;
     const pending = cancel.handleCancel();
+    await new Promise(resolve => setImmediate(resolve));
     cancel.memuExtras.summary = other;
     resolveCancel({ ok });
     await pending;

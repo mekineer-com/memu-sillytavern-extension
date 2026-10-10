@@ -125,8 +125,12 @@ export async function getSouls(): Promise<{ souls: string[] }> {
   return request<{ souls: string[] }>('/souls', undefined, 'GET');
 }
 
-export async function createSoul(soulId: string): Promise<{ soul_id: string }> {
-  return request<{ soul_id: string }>('/souls', { soul_id: soulId, use_existing: false });
+export async function createSoul(soulId: string, userName?: string): Promise<{ soul_id: string; created: boolean }> {
+  return request<{ soul_id: string; created: boolean }>('/souls', { soul_id: soulId, use_existing: false, ...(userName !== undefined ? { user_name: userName } : {}) });
+}
+
+export async function getSoul(soulId: string): Promise<{ soul_id: string; user_name: string }> {
+  return request(`/souls/${encodeURIComponent(soulId)}`, undefined, 'GET');
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {

@@ -2,6 +2,7 @@ import { CSSProperties, useState } from 'react';
 import { sendNarrativeSuggestion } from 'utils/network';
 import { memuExtras, st } from 'utils/context-extra';
 import { getCsrfTokenCached } from 'utils/csrf';
+import { currentScope, isMemuActive } from 'memory/utils';
 
 const LS_LAST_SENT = 'memu-narrative-suggestion-last';
 const LS_COOLDOWN_UNTIL = 'memu-narrative-suggestion-cooldown-until';
@@ -55,7 +56,7 @@ function getOverrideState(characterName: string): boolean {
 
 type Status = 'idle' | 'pending' | 'ok' | 'err';
 
-export default function NarrativeSuggestion() {
+export default function NarrativeSuggestion({ enabled = false }: { enabled?: boolean }) {
   const [text, setText] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
@@ -66,6 +67,8 @@ export default function NarrativeSuggestion() {
   const overrideActive = characterName ? getOverrideState(characterName) : false;
 
   async function handleSend() {
+    if (!(await isMemuActive())) return;
+    const scope = currentScope();
     const suggestion = text.trim();
     if (!suggestion || coolingDown || overrideActive) return;
 
@@ -85,6 +88,7 @@ export default function NarrativeSuggestion() {
     const displayedDescription = String(character?.description ?? '');
     try {
       const result = await sendNarrativeSuggestion(userId, soulId, suggestion);
+      if (currentScope() !== scope) return;
       localStorage.setItem(LS_LAST_SENT, suggestion);
       localStorage.setItem(LS_COOLDOWN_UNTIL, String(Date.now() + COOLDOWN_MS));
       setLastSent(suggestion);
@@ -120,13 +124,13 @@ export default function NarrativeSuggestion() {
           onChange={(e) => { setText(e.target.value); setStatus('idle'); }}
           onKeyDown={(e) => { if (e.key === 'Enter') void handleSend(); }}
           placeholder="e.g. more poetic, shorter replies…"
-          disabled={status === 'pending'}
+          disabled={!enabled || status === 'pending'}
         />
         <button
           type="button"
           className="menu_button"
           onClick={() => void handleSend()}
-          disabled={!text.trim() || coolingDown || overrideActive || status === 'pending'}
+          disabled={!enabled || !text.trim() || coolingDown || overrideActive || status === 'pending'}
         >
           Send
         </button>

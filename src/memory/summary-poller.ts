@@ -2,8 +2,9 @@ import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus } from 'utils/network';
 import { MemuTaskStatus } from 'utils/types';
-import { doSummary, getChatIdSafe, retrieveMemories } from './memorize';
+import { doSummary, retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
+import { currentScope, isMemuActive } from './utils';
 
 const DEFAULT_INTERVAL_MS = MEMU_DEFAULT_TIMEOUT;
 const ACTIVE_PROGRESS_INTERVAL_MS = 3_000;
@@ -11,6 +12,7 @@ const MAX_RETRIEVE_FAILURE_RETRIES = 2;
 
 let pollerTimer: ReturnType<typeof setTimeout> | undefined;
 let isTerminated = false;
+let pollingGeneration = 0;
 
 export function setIsTerminated(value: boolean): void {
     isTerminated = value;
@@ -26,10 +28,11 @@ export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): v
     if (pollerTimer || isTerminated) {
         return;
     }
+    const generation = pollingGeneration;
     const loop = async (): Promise<void> => {
-        if (isTerminated) return;
+        if (isTerminated || generation !== pollingGeneration) return;
         await tick();
-        if (isTerminated) return;
+        if (isTerminated || generation !== pollingGeneration) return;
         const nextMs = isSummaryPollingActive(memuExtras.summary)
             ? ACTIVE_PROGRESS_INTERVAL_MS
             : intervalMs;
@@ -39,6 +42,7 @@ export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): v
 }
 
 export function stopSummaryPolling(): void {
+    pollingGeneration++;
     if (pollerTimer) {
         clearTimeout(pollerTimer);
         pollerTimer = undefined;
@@ -48,6 +52,7 @@ export function stopSummaryPolling(): void {
 
 async function tick(): Promise<void> {
   try {
+        if (!(await isMemuActive())) return;
 
         const summary = memuExtras.summary;
         if (!summary) {
@@ -140,11 +145,11 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
         return;
     }
 
-    const chatIdAtFire = getChatIdSafe();
+    const chatIdAtFire = currentScope();
 
     getTaskStatus(taskId)
         .then(async (resp) => {
-            if (getChatIdSafe() !== chatIdAtFire) {
+            if (!(await isMemuActive()) || currentScope() !== chatIdAtFire || memuExtras.summary?.summaryTaskId !== taskId) {
                 onceWarn(
                     `poller-stale-chat:${chatIdAtFire}:${taskId}`,
                     `task status response dropped (chat changed while in-flight, taskId=${taskId})`,

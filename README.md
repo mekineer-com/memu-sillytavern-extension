@@ -1,6 +1,8 @@
 <div align="center">
 
-When you enter a new chat, memU will start to memorize for the entire chat, so be careful not to enter a huge chat or you will have a large token spend.
+Choose memU per character. Existing Souls default to on; other characters stay
+off until enabled. Turning it off keeps the Soul and its memories. Re-enabling
+can memorize the main chat's added messages, including replies from ST's API.
 
 For any issues or suggestions, please contact mekineer@gmail.com.
 
@@ -22,9 +24,15 @@ License: see LICENSE (upstream license applies).
 
 ### MemU Extension for SillyTavern
 
-On first OpenAlma use, the entered Soul name is authoritative. The extension
-selects an exact-name SillyTavern character or creates and selects a new minimal
-character, then explicitly creates that Soul through the server.
+Enabling memU creates the Soul using the character's name. Choose an ST persona
+first; its name is stored once for that Soul and the picker then locks. Existing
+Souls reuse or create a matching persona. Older dev DBs without a stored name
+are not automatically upgraded.
+
+Branches and checkpoints remain plain ST chats with no memU activity. ST's
+controls stay unchanged. In memU-active main chats, replies use MCP only: a
+server error blocks the reply rather than switching APIs. Continue is temporarily
+unavailable there; it still works normally with memU off.
 
 **Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
 

@@ -8,7 +8,7 @@ import {
     resetRetrievePipelineState,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
-import { initChatExtraInfo } from "./utils";
+import { appReady, currentScope, initChatExtraInfo, isMemuActive, refreshMemuGate } from "./utils";
 import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/network";
 import { info } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
@@ -39,8 +39,11 @@ async function waitForPendingSwipeUndo(): Promise<void> {
 }
 
 function queueConversationUndo(ctx: any, conversationId: string, soulId: string): void {
+    const scope = currentScope(ctx);
     _pendingSwipeUndo = (async () => {
+        if (!(await isMemuActive())) return;
         await initChatExtraInfo(ctx);
+        if (currentScope() !== scope) return;
         const userId = String(memuExtras.baseInfo?.userId || '');
         if (conversationId && userId && soulId) {
             await conversationTurnUndo(conversationId, userId, soulId);
@@ -56,6 +59,7 @@ function queueConversationUndo(ctx: any, conversationId: string, soulId: string)
  * Case (2) is one-shot per chat scope to avoid repeated wipes when backend is still warming up.
  */
 async function maybeClearStaleLocalState(): Promise<void> {
+    const scope = currentScope();
     const chatId = getChatIdSafe();
     const userId = String(memuExtras.baseInfo?.userId || '').trim();
     const soulId = String(memuExtras.baseInfo?.characterId || '').trim();
@@ -69,6 +73,7 @@ async function maybeClearStaleLocalState(): Promise<void> {
     let changed = false;
 
     const ping = await getPluginPing();
+    if (!(await isMemuActive()) || currentScope() !== scope) return;
     if (ping?.ok !== true) {
         throw new Error(`memu plugin ping failed: ${String((ping as any)?.error || 'unknown error')}`);
     }
@@ -93,6 +98,7 @@ async function maybeClearStaleLocalState(): Promise<void> {
     // If scoped storage is missing/empty but we still have a local cursor, clear once so digest restarts at 0.
     if (!cursorCleared && hasCursor && userId && soulId) {
         const probe = await scopeStorageProbe(userId, soulId);
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
         if (probe?.ok !== true) {
             throw new Error(`memu scopeStorageProbe failed: ${String((probe as any)?.reason || 'unknown error')}`);
         }
@@ -123,19 +129,23 @@ async function maybeClearStaleLocalState(): Promise<void> {
     }
 }
 
-export function onMessageReceived(_msgIdAny: any): void {
+export async function onMessageReceived(_msgIdAny: any): Promise<void> {
+    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
-export function onUserMessageSent(_msgIdAny: any): void {
+export async function onUserMessageSent(_msgIdAny: any): Promise<void> {
+    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
-export function onMessageEdited(_msgIdAny: any): void {
+export async function onMessageEdited(_msgIdAny: any): Promise<void> {
+    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
-export function onMessageDeleted(): void {
+export async function onMessageDeleted(): Promise<void> {
+    if (!(await isMemuActive())) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
@@ -149,7 +159,8 @@ export function onMessageDeleted(): void {
     refreshChatSnapshot();
 }
 
-export function onMessageSwiped(msgIdAny: any): void {
+export async function onMessageSwiped(msgIdAny: any): Promise<void> {
+    if (!(await isMemuActive())) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
@@ -166,7 +177,8 @@ export function onMessageSwiped(msgIdAny: any): void {
     refreshChatSnapshot();
 }
 
-export function onGenerationStopped(): void {
+export async function onGenerationStopped(): Promise<void> {
+    if (!(await isMemuActive())) return;
     lastGenerationStoppedAt = Date.now();
     cancelPendingRetrieveRequest('Retrieve cancelled by stop button');
 }
@@ -205,17 +217,37 @@ export async function memuGenerationInterceptor(
     type: string,
 ): Promise<void> {
     if (_skipInterceptorType(String(type || '').trim())) return;
+    const scope = currentScope();
+    try {
+        const active = await isMemuActive();
+        if (currentScope() !== scope) {
+            abort(true);
+            return;
+        }
+        if (!active) return;
+    } catch (error) {
+        abort(true);
+        window.alert(`memU: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+    }
     abort(true);
+    if (type === 'continue') {
+        window.alert('memU does not support Continue. Send a new message instead.');
+        return;
+    }
     await waitForPendingSwipeUndo();
+    if (currentScope() !== scope) return;
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         return;
     }
     try {
         const prepared = await preparePendingRetrieveTurnForInterceptor(OVERRIDE_SUMMARIZER.get());
+        if (currentScope() !== scope) return;
         if (!prepared) {
             throw new Error('memU retrieve prep failed — turn blocked.');
         }
         const turnResult = await dispatchConversationTurn({ debug: true });
+        if (currentScope() !== scope) return;
         const reply = turnResult.reply;
         const ctx: any = st.getContext();
         if (reply && typeof ctx?.saveReply !== 'function') {
@@ -244,7 +276,11 @@ export async function memuGenerationInterceptor(
 
 export function onChatChanged(): void {
     const ctx = st.getContext();
+    const scope = currentScope(ctx);
     resetRetrievePipelineState();
+    stopSummaryPolling();
+    refreshMemuGate();
+    _pendingSwipeUndo = null;
 
     if (ctx.getCurrentChatId() === undefined) {
         stopSummaryPolling();
@@ -253,8 +289,11 @@ export function onChatChanged(): void {
     }
 
     async function init() {
-        setIsTerminated(false);
+        await appReady;
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
         await initChatExtraInfo(ctx);
+        if (!(await isMemuActive()) || currentScope() !== scope) return;
+        setIsTerminated(false);
         window.dispatchEvent(new Event('memu:server-ready'));
         startSummaryPolling();
         await maybeClearStaleLocalState();

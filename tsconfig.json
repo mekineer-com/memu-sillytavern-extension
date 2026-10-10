@@ -6,7 +6,7 @@
     "baseUrl": "./src",
     "paths": {
       "@silly-tavern/*": [
-        "../../../../../*"
+        "../../../../../public/*"
       ]
     },
     "moduleResolution": "node",
@@ -26,5 +26,4 @@
     "dist"
   ]
 }
-
 
