@@ -34,6 +34,9 @@ controls stay unchanged. In memU-active main chats, replies use MCP only: a
 server error blocks the reply rather than switching APIs. Continue is temporarily
 unavailable there; it still works normally with memU off.
 
+Deleting or regenerating a reply only undoes Soul state when that exact reply
+came from memU. Plain ST replies made while off leave earlier memU state intact.
+
 Memorize reads plain text from the saved main chat, including the newest saved
 reply. Automatic admission runs after saving; the server owns size/sleep gates
 and failure pause. Delete publication updates the saved source without starting

@@ -40,7 +40,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const statuses = { PENDING: 'PENDING', PROCESSING: 'PROCESSING', SUCCESS: 'SUCCESS', FAILURE: 'FAILURE' };
   const extras = { baseInfo: { userId: 'TestOwner', userName: 'TestOwner', characterId: 'TestSoul', characterName: 'TestSoul' } };
-  let scope = 'loaded-main', saves = 0, reads = 0, publications = [], alerts = [], inspectWrites = 0;
+  let scope = 'loaded-main', saves = 0, reads = 0, publications = [], alerts = [], inspectWrites = 0, undos = [];
   let ctx = { chatId: 'renamed-main', chatMetadata: { integrity: 'test-main' }, characterId: 0,
     characters: [{ name: 'TestSoul', avatar: 'test.png' }], getCurrentChatId: () => ctx.chatId,
     chat: [{ name: 'TestOwner', is_user: true, mes: 'UNSAVED must never publish' }] };
@@ -66,6 +66,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
       result = { turn_system_prompt: 'Fictional system', turn_user_prompt: 'Fictional human message' };
     } else if (url === '/api/plugins/memu/conversationTurn') {
       result = listenResponse;
+    } else if (url === '/api/plugins/memu/conversationTurnUndo') {
+      undos.push(JSON.parse(options.body));
+      result = { status: 'restored' };
     } else assert.fail(`Unexpected request ${url}`);
     return { ok: true, status: 200, json: async () => result };
   };
@@ -170,12 +173,15 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   let duringSave;
   ctx.saveReply = async ({ getMessage }) => {
     calls.replies++;
-    ctx.chat.push({ name: 'TestSoul', mes: getMessage, extra: {} });
+    ctx.chat.push({ name: 'TestSoul', mes: getMessage, extra: {}, gen_finished: new Date(calls.replies * 1000),
+      swipe_id: 0, swipes: [getMessage], swipe_info: [{ extra: {} }] });
+    await hooks.onMessageReceived(ctx.chat.length - 1);
     if (duringSave) duringSave();
   };
   st.saveChat = async () => { saves++; }; // swallowed persistence failure: server still returns prior saved rows
   const hookMemory = { ...producer, preparePendingRetrieveTurnForInterceptor: async () => true,
-    dispatchConversationTurn: async () => ({ reply: 'Newest saved reply', savedSource: bound, generationMetadata: { api: 'test-api', model: 'test-model' } }),
+    dispatchConversationTurn: async () => ({ reply: 'Newest saved reply', savedSource: bound,
+      generationMetadata: { api: 'test-api', model: 'test-model', turn_id: `test-turn-${calls.replies + 1}` } }),
     dropPendingTurnIfStopped: () => false };
   const hooks = load('memory/exports.ts', {
     'utils/context-extra': { st, memuExtras: extras, OVERRIDE_SUMMARIZER: { get: () => true } },
@@ -191,6 +197,8 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(publications.at(-1).body.intent, 'automatic');
   assert.equal(publications.at(-1).body.source_message_count, 1); // no unsaved fallback after swallowed save
   assert.equal(ctx.chat.at(-1).extra.model, 'test-model');
+  assert.equal(ctx.chat.at(-1).extra.memu_turn_id, 'test-turn-1');
+  assert.equal(ctx.chat.at(-1).swipe_info[0].extra.memu_turn_id, 'test-turn-1');
   // Successful persistence captures the newest reply and stamps metadata before saved-file read.
   st.saveChat = async () => { saves++; persisted = [{ chat_metadata: {} }, ...structuredClone(ctx.chat)]; };
   await generate();
@@ -218,6 +226,80 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(publications.at(-1).body.intent, 'publish_only');
   assert.equal(publications.at(-1).body.source_message_count, 1); // native saved end, not in-memory length
   assert.equal(saves, beforeDeleteSave);
+  // Removing a native off-mode reply must not Undo the MCP reply still in the chat.
+  const user = { name: 'TestOwner', is_user: true, mes: 'Fictional request' };
+  const mcpReply = { name: 'TestSoul', mes: 'MCP reply', gen_finished: '2026-01-01T00:00:00.000Z',
+    extra: { memu_turn_id: 'mcp-reply-a', memu_turn_finished: Date.parse('2026-01-01T00:00:00.000Z') },
+    swipe_id: 0, swipes: ['MCP reply'], swipe_info: [{ extra: {} }] };
+  const nativeReply = { name: 'TestSoul', mes: 'Native reply', gen_finished: '2026-01-01T00:01:00.000Z',
+    extra: { ...mcpReply.extra }, swipe_id: 0, swipes: ['Native reply'] };
+  const beforeUndo = undos.length;
+  ctx.chat = [user, mcpReply];
+  await hooks.onMessageReceived(1);
+  ctx.disabled = true;
+  ctx.chat.push(user, nativeReply);
+  await hooks.onMessageReceived(3);
+  ctx.disabled = false;
+  ctx.chat.pop();
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, beforeUndo);
+  ctx.chat.push(nativeReply);
+  await hooks.onMessageReceived(3);
+  nativeReply.swipe_id = nativeReply.swipes.length;
+  delete nativeReply.gen_finished; // native swipe overshoot resets this before its event
+  await hooks.onMessageSwiped(3); await flush();
+  assert.equal(undos.length, beforeUndo);
+  // Reloaded dates and genuine MCP regeneration use the prior selected variant.
+  ctx.chat = [user, structuredClone(mcpReply)];
+  await hooks.onMessageReceived(1);
+  ctx.chat[1].swipe_id = ctx.chat[1].swipes.length;
+  delete ctx.chat[1].gen_finished;
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.length, beforeUndo + 1);
+  assert.deepEqual(undos.at(-1), { conversationId: 'integrity:test-main', userId: 'TestOwner', soulId: 'TestSoul', turnId: 'mcp-reply-a' });
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.length, beforeUndo + 1);
+  ctx.chat = [user, structuredClone(mcpReply)];
+  await hooks.onMessageReceived(1);
+  ctx.chat.pop();
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, beforeUndo + 2);
+  // Invalid dates and untagged old replies do not qualify.
+  for (const reply of [{ ...mcpReply, gen_finished: 'invalid' }, { ...mcpReply, extra: {} }]) {
+    ctx.chat = [user, reply];
+    await hooks.onMessageReceived(1);
+    ctx.chat.pop(); await hooks.onMessageDeleted(); await flush();
+    assert.equal(undos.length, beforeUndo + 2);
+  }
+  ctx.chat = [user, { ...structuredClone(mcpReply), gen_finished: new Date(mcpReply.gen_finished) }];
+  await hooks.onMessageReceived(1); ctx.chat.pop();
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, beforeUndo + 3);
+  // Browsing an older saved variant is inert; regenerating it identifies that variant, not the newest one.
+  ctx.chat = [user, { ...structuredClone(mcpReply), swipes: ['old', 'new'], swipe_id: 1 }];
+  await hooks.onMessageReceived(1);
+  ctx.chat[1].swipe_id = 0;
+  ctx.chat[1].extra.memu_turn_id = 'older-variant';
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.length, beforeUndo + 3);
+  ctx.chat[1].swipe_id = 2; delete ctx.chat[1].gen_finished;
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.at(-1).turnId, 'older-variant');
+  const undoCount = undos.length;
+  // A chat switch during async initialization cannot Undo the new chat.
+  ctx.chat = [user, structuredClone(mcpReply)];
+  await hooks.onMessageReceived(1); ctx.chat.pop();
+  utils.initChatExtraInfo = async () => { scope = 'other-chat'; };
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, undoCount);
+  scope = bound.scope; utils.initChatExtraInfo = async () => {};
+  ctx.chatMetadata = { main_chat: 'parent' };
+  ctx.chat = [user, structuredClone(mcpReply)];
+  await hooks.onMessageReceived(1); ctx.chat.pop();
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, undoCount);
+  ctx.chatMetadata = { integrity: 'test-main' };
+  console.log('Reply-scoped Undo keeps native/inherited swipes inert and matches saved MCP generations.');
   extras.summary = undefined; persisted = [];
   await producer.doSummary(0, 0);
   assert.equal(extras.summary.summaryTaskStatus, 'FAILURE'); assert.equal(extras.summary.summaryTaskId, null);

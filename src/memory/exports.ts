@@ -21,12 +21,22 @@ let lastGenerationStoppedAt = 0;
 let _pendingSwipeUndo: Promise<void> | null = null;
 let _lastChatLength = 0;
 let _lastTailIsUser = false;
+let _lastTailTurnId = '';
+
+function replyTurnId(message: any): string {
+    if (!message || message.is_user || !message.gen_finished) return '';
+    const finished = new Date(message.gen_finished).getTime();
+    // Stock ST copies extras into new swipes; only the original generation qualifies.
+    return Number.isFinite(finished) && message.extra?.memu_turn_finished === finished
+        ? String(message.extra?.memu_turn_id || '') : '';
+}
 
 function refreshChatSnapshot(): void {
     const ctx = st.getContext();
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     _lastChatLength = chat.length;
     _lastTailIsUser = !!chat[chat.length - 1]?.is_user;
+    _lastTailTurnId = replyTurnId(chat[chat.length - 1]);
 }
 
 async function waitForPendingSwipeUndo(): Promise<void> {
@@ -41,7 +51,8 @@ async function waitForPendingSwipeUndo(): Promise<void> {
     }
 }
 
-function queueConversationUndo(ctx: any, conversationId: string, soulId: string): void {
+function queueConversationUndo(ctx: any, conversationId: string, soulId: string, turnId: string): void {
+    if (!turnId) return;
     const scope = currentScope(ctx);
     _pendingSwipeUndo = (async () => {
         if (!(await isMemuActive())) return;
@@ -49,7 +60,7 @@ function queueConversationUndo(ctx: any, conversationId: string, soulId: string)
         if (currentScope() !== scope) return;
         const userId = String(memuExtras.baseInfo?.userId || '');
         if (conversationId && userId && soulId) {
-            await conversationTurnUndo(conversationId, userId, soulId);
+            await conversationTurnUndo(conversationId, userId, soulId, turnId);
         }
     })();
 }
@@ -133,23 +144,24 @@ async function maybeClearStaleLocalState(): Promise<void> {
 }
 
 export async function onMessageReceived(_msgIdAny: any): Promise<void> {
-    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
 export async function onUserMessageSent(_msgIdAny: any): Promise<void> {
-    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
 export async function onMessageEdited(_msgIdAny: any): Promise<void> {
-    if (!(await isMemuActive())) return;
     refreshChatSnapshot();
 }
 
 export async function onMessageDeleted(): Promise<void> {
     const scope = currentScope();
-    if (!(await isMemuActive())) return;
+    const turnId = _lastTailTurnId;
+    if (!(await isMemuActive())) {
+        refreshChatSnapshot();
+        return;
+    }
     if (currentScope() !== scope) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
@@ -159,7 +171,7 @@ export async function onMessageDeleted(): Promise<void> {
     const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
     const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
     if (deletedLatestAssistant && conversationId && soulId) {
-        queueConversationUndo(ctx, conversationId, soulId);
+        queueConversationUndo(ctx, conversationId, soulId, turnId);
     }
     refreshChatSnapshot();
     try {
@@ -175,7 +187,13 @@ export async function onMessageDeleted(): Promise<void> {
 }
 
 export async function onMessageSwiped(msgIdAny: any): Promise<void> {
-    if (!(await isMemuActive())) return;
+    const scope = currentScope();
+    const turnId = _lastTailTurnId;
+    if (!(await isMemuActive())) {
+        refreshChatSnapshot();
+        return;
+    }
+    if (currentScope() !== scope) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
     const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
@@ -187,7 +205,7 @@ export async function onMessageSwiped(msgIdAny: any): Promise<void> {
         && Array.isArray(message.swipes)
         && message.swipe_id === message.swipes.length;
     if (isSyntheticRegeneration && conversationId && soulId) {
-        queueConversationUndo(ctx, conversationId, soulId);
+        queueConversationUndo(ctx, conversationId, soulId, turnId);
     }
     refreshChatSnapshot();
 }
@@ -206,7 +224,8 @@ function stampLatestSoulMessageGenerationMetadata(ctx: any, metadata: any): void
     if (!metadata || typeof metadata !== 'object') return;
     const api = typeof metadata.api === 'string' ? metadata.api.trim() : '';
     const model = typeof metadata.model === 'string' ? metadata.model.trim() : '';
-    if (!api && !model) return;
+    const turnId = String(metadata.turn_id || '');
+    if (!api && !model && !turnId) return;
 
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     const message = chat[chat.length - 1];
@@ -215,6 +234,11 @@ function stampLatestSoulMessageGenerationMetadata(ctx: any, metadata: any): void
     message.extra = message.extra && typeof message.extra === 'object' ? message.extra : {};
     if (api) message.extra.api = api;
     if (model) message.extra.model = model;
+    const finished = message.gen_finished ? new Date(message.gen_finished).getTime() : NaN;
+    if (turnId && Number.isFinite(finished)) {
+        message.extra.memu_turn_id = turnId;
+        message.extra.memu_turn_finished = finished;
+    }
 
     const swipeId = typeof message.swipe_id === 'number' ? message.swipe_id : 0;
     const swipeInfo = Array.isArray(message.swipe_info) ? message.swipe_info[swipeId] : null;
@@ -222,6 +246,10 @@ function stampLatestSoulMessageGenerationMetadata(ctx: any, metadata: any): void
         swipeInfo.extra = swipeInfo.extra && typeof swipeInfo.extra === 'object' ? swipeInfo.extra : {};
         if (api) swipeInfo.extra.api = api;
         if (model) swipeInfo.extra.model = model;
+        if (turnId && Number.isFinite(finished)) {
+            swipeInfo.extra.memu_turn_id = turnId;
+            swipeInfo.extra.memu_turn_finished = finished;
+        }
     }
 }
 
@@ -274,6 +302,7 @@ export async function memuGenerationInterceptor(
             await ctx.saveReply({ type, getMessage: reply });
             if (currentScope() !== scope) return;
             stampLatestSoulMessageGenerationMetadata(ctx, turnResult.generationMetadata);
+            refreshChatSnapshot();
         }
         if (currentScope() !== scope) return;
         await st.saveChat();
@@ -304,6 +333,7 @@ export async function memuGenerationInterceptor(
 export function onChatChanged(): void {
     const ctx = st.getContext();
     const scope = currentScope(ctx);
+    refreshChatSnapshot();
     resetRetrievePipelineState();
     stopSummaryPolling();
     refreshMemuGate();

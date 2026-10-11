@@ -75,6 +75,7 @@ export type ConversationTurnResponse = {
   generation_metadata?: {
     api?: string;
     model?: string;
+    turn_id?: string;
   };
   should_respond?: boolean;
   response_target?: 'respond' | 'listen' | 'private' | string;
@@ -204,8 +205,8 @@ export async function conversationTurn(body: ConversationTurnRequest): Promise<C
   return request<ConversationTurnResponse>('/conversationTurn', body);
 }
 
-export async function conversationTurnUndo(conversationId: string, userId: string, soulId: string): Promise<{ status: string }> {
-  return request<{ status: string }>('/conversationTurnUndo', { conversationId, userId, soulId });
+export async function conversationTurnUndo(conversationId: string, userId: string, soulId: string, turnId: string): Promise<{ status: string }> {
+  return request<{ status: string }>('/conversationTurnUndo', { conversationId, userId, soulId, turnId });
 }
 
 export async function scopeStorageProbe(userId: string, soulId: string): Promise<ScopeStorageProbeResponse> {

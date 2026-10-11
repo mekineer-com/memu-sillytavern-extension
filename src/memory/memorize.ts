@@ -44,6 +44,7 @@ export type ConversationTurnDispatchResult = {
     generationMetadata?: {
         api?: string;
         model?: string;
+        turn_id?: string;
     };
     savedSource?: SavedSource;
 };
