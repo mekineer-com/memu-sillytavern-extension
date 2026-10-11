@@ -114,23 +114,10 @@ function installChatOptionResetCursor(): void {
             if (!(await isMemuActive())) return;
             const scope = currentScope();
             const { st } = await import('./utils/context-extra');
-            const { initChatExtraInfo } = await import('./memory/utils');
-            const { doSummary, deleteMemuLorebooksForCurrentCharacter } = await import('./memory/memorize');
-
-            await deleteMemuLorebooksForCurrentCharacter();
+            const { doSummary } = await import('./memory/memorize');
             if (!(await isMemuActive()) || currentScope() !== scope) return;
 
-            // Keep baseInfo; wipe progress markers so next digest starts from turn 0.
             const ctx: any = st.getContext() as any;
-            const extras: any = ctx?.chatMetadata?.memuExtras;
-            if (extras && typeof extras === 'object') {
-                try { delete extras.summary; } catch { }
-                try { delete extras.retrieve; } catch { }
-            }
-
-            await st.saveChat();
-            try { await initChatExtraInfo(ctx); } catch { }
-
             const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
             if (chat.length === 0) {
                 info("memorize from beginning skipped: empty chat");
@@ -139,7 +126,6 @@ function installChatOptionResetCursor(): void {
 
             // Force a full digest immediately (do not require leaving/re-entering the chat).
             await doSummary(0, chat.length - 1, { force: true });
-            info(`memorize from beginning started (messages=${chat.length})`);
         } catch (e) {
             logError("reset failed", e);
         }

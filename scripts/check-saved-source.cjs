@@ -47,6 +47,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   let persisted = [{ chat_metadata: { integrity: 'test-main' } }, ...rows];
   let settings = { version: 4, useServerSettings: false, useClaudeCode: true, defaultProfileId: 'captured-profile', stepProfileId: { reflection: 'captured-reflection' } };
   let admission = { status: 'deferred' }, nativeRead, proxyWait, proxyError = false, listenResponse;
+  let importLorebooks = false, categoriesResponse = { categories: [] }, lorebooks = [];
   const fetch = async (url, options) => {
     let result;
     if (url === '/csrf-token') result = { token: 'fictional-csrf' };
@@ -69,6 +70,14 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     } else if (url === '/api/plugins/memu/conversationTurnUndo') {
       undos.push(JSON.parse(options.body));
       result = { status: 'restored' };
+    } else if (url === '/api/plugins/memu/retrieveDefaultCategories') {
+      result = categoriesResponse;
+    } else if (url === '/api/worldinfo/list') {
+      result = lorebooks.map(name => ({ name }));
+    } else if (url === '/api/worldinfo/delete') {
+      const { name } = JSON.parse(options.body);
+      lorebooks = lorebooks.filter(book => book !== name);
+      result = {};
     } else assert.fail(`Unexpected request ${url}`);
     return { ok: true, status: 200, json: async () => result };
   };
@@ -80,11 +89,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   const utils = { currentScope: () => scope, initChatExtraInfo: async () => {},
     isMemuActive: async () => !ctx.chatMetadata.main_chat && !ctx.groupId && !ctx.disabled };
   const log = { warn() {}, error() {}, onceWarn() {}, onceError() {}, info() {} };
-  const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console };
+  const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console, fetch };
   let inspection;
   const producer = load('memory/memorize.ts', {
-    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => false }, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network, 'utils/csrf': csrf,
-    'utils/types': { MemuTaskStatus: statuses }, '@silly-tavern/scripts/world-info.js': {},
+    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => importLorebooks }, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network, 'utils/csrf': csrf,
+    'utils/types': { MemuTaskStatus: statuses }, '@silly-tavern/scripts/world-info.js': { updateWorldInfoList: async () => {} },
     './utils': utils, 'utils/log': log, 'ui/inspect-panel': {
       getInspectData: () => inspection, stashInspectData: value => { inspection = value; }, seedInspectPromptTextarea() {},
     },
@@ -301,8 +310,10 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   ctx.chatMetadata = { integrity: 'test-main' };
   console.log('Reply-scoped Undo keeps native/inherited swipes inert and matches saved MCP generations.');
   extras.summary = undefined; persisted = [];
+  const beforeRefusedSave = saves;
   await producer.doSummary(0, 0);
-  assert.equal(extras.summary.summaryTaskStatus, 'FAILURE'); assert.equal(extras.summary.summaryTaskId, null);
+  assert.equal(extras.summary, undefined); assert.equal(saves, beforeRefusedSave);
+  assert.match(alerts.at(-1), /Saved chat is missing or unreadable/);
   // Real retrieve + dispatch must hand successful listen's saved source to the interceptor.
   let listenResult;
   hookMemory.preparePendingRetrieveTurnForInterceptor = producer.preparePendingRetrieveTurnForInterceptor;
@@ -330,5 +341,55 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(extras.summary, undefined);
   }
   console.log('Real successful listen dispatch publishes saved human rows automatically, without saveReply or an invented task.');
+  // Exercise the actual menu action, not a replacement rebuild handler.
+  const indexSource = fs.readFileSync(`${__dirname}/../src/index.tsx`, 'utf8');
+  const reset = { currentScope: utils.currentScope, isMemuActive: utils.isMemuActive,
+    info: log.info, logError: log.error, require: name => {
+      if (name === './utils/context-extra') return { st };
+      if (name === './memory/memorize') return producer;
+      assert.fail(`Unexpected rebuild import ${name}`);
+    } };
+  vm.runInNewContext(ts.transpileModule(indexSource.slice(indexSource.indexOf('    async function resetCursor()'),
+    indexSource.indexOf('\n\n    function tryInstall()')), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, reset);
+  importLorebooks = true;
+  lorebooks = ['memU - TestSoul - Old', 'memU - OtherSoul - Private', 'Manual book'];
+  extras.summary = { summaryTaskId: 'old-task', summaryTaskStatus: 'SUCCESS', summaryRange: [0, 1] };
+  extras.retrieve = { history: [], nowRetrieve: { summaryTaskId: 'old-task', summary: 'Old dossier prose' } };
+  ctx.chatMetadata = { integrity: 'test-main', memuExtras: extras };
+  ctx.chat = [rows[0], rows[3]];
+  persisted = [{ chat_metadata: {} }, ...ctx.chat];
+  const beforeMetadata = JSON.stringify(ctx.chatMetadata), beforeBooks = [...lorebooks], beforeSaves = saves;
+  for (const status of ['deferred', 'waiting_for_import', 'nothing_to_memorize', 'published', 'coalesced']) {
+    admission = { status }; await reset.resetCursor();
+    assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
+    assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+    assert.match(publications.at(-1).url, /rebuild=true/);
+  }
+  proxyError = true; await reset.resetCursor(); proxyError = false;
+  assert.match(alerts.at(-1), /TestSoul is paused/);
+  assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
+  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+  persisted = []; await reset.resetCursor();
+  assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
+  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+  const beforeEmpty = publications.length;
+  ctx.chat = []; await reset.resetCursor();
+  assert.equal(publications.length, beforeEmpty); assert.equal(saves, beforeSaves);
+  assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata); assert.deepEqual(lorebooks, beforeBooks);
+  ctx.chat = [rows[0], rows[3]]; persisted = [{ chat_metadata: {} }, ...ctx.chat];
+  admission = { status: 'accepted', taskId: 'rebuilt-task' };
+  await reset.resetCursor();
+  assert.equal(extras.summary.summaryTaskId, 'rebuilt-task');
+  assert.equal(extras.summary.summaryTaskStatus, 'PENDING'); assert.equal(extras.summary.force, true);
+  assert.equal(saves, beforeSaves + 1); assert.deepEqual(lorebooks, beforeBooks);
+  const completed = extras.summary; completed.summaryTaskStatus = 'SUCCESS';
+  categoriesResponse = {}; await producer.retrieveMemories(completed);
+  assert.deepEqual(lorebooks, beforeBooks); // malformed data must never be treated as an empty result
+  categoriesResponse = { categories: [] }; await producer.retrieveMemories(completed);
+  assert.deepEqual(lorebooks, ['memU - OtherSoul - Private', 'Manual book']);
+  assert.equal(extras.retrieve.nowRetrieve.summaryTaskId, 'rebuilt-task');
+  console.log('Refused rebuild leaves ST metadata/books untouched; accepted empty completion prunes only its managed books.');
   console.log('Saved capture, missing/empty/copy source, serialized read/admission, frozen scope/settings, rewind and post-save boundaries pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -170,20 +170,7 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
     } catch (error) {
         if (currentScope() !== scope) return;
         logError(`memorize failed (range=${from}-${to})`, error);
-        if ([MemuTaskStatus.PENDING, MemuTaskStatus.PROCESSING].includes(memuExtras.summary?.summaryTaskStatus)) return;
-        const prevRange = memuExtras.summary?.summaryRange ?? [-1, -1];
-        memuExtras.summary = {
-            // IMPORTANT: don't advance the cursor on failure.
-            summaryRange: prevRange,
-            summaryTaskId: null,
-            summaryTaskStatus: MemuTaskStatus.FAILURE,
-            force: opts.force === true,
-            tail: opts.tail === true,
-            failureCount: (memuExtras.summary?.failureCount ?? 0) + 1,
-            lastError: error instanceof Error ? error.message : String(error),
-            lastFailureAt: Date.now(),
-        };
-        await st.saveChat();
+        window.alert(`memU Memorize failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
@@ -1081,7 +1068,6 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     if (!(await isMemuActive())) return;
     const scope = currentScope();
     if (!IMPORT_LOREBOOKS.get()) return;
-    if (!Array.isArray(categories) || categories.length === 0) return;
 
     const ctx: any = st.getContext();
     const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
