@@ -102,6 +102,9 @@ export function installSourceLifecycle(): void {
                 if (sources.length && !(await getPluginPing()).ok) throw new Error('memU is offline; linked chat deletion refused');
             } catch (error) {
                 window.alert(`Chat deletion refused: ${error instanceof Error ? error.message : String(error)}`);
+                if (url.pathname === '/api/characters/delete') {
+                    return new Response(null, { status: 409, statusText: 'Chat deletion refused' });
+                }
                 throw error;
             }
             const response = await nativeFetch(input, init);

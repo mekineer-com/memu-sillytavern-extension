@@ -46,7 +46,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     chat: [{ name: 'TestOwner', is_user: true, mes: 'UNSAVED must never publish' }] };
   let persisted = [{ chat_metadata: { integrity: 'test-main' } }, ...rows];
   let settings = { version: 4, useServerSettings: false, useClaudeCode: true, defaultProfileId: 'captured-profile', stepProfileId: { reflection: 'captured-reflection' } };
-  let admission = { status: 'deferred' }, nativeRead, proxyWait, proxyError = false, listenResponse;
+  let admission = { status: 'deferred' }, nativeRead, proxyWait, proxyError = false, listenResponse, undoError = false, turnWait, undoWait;
   let importLorebooks = false, categoriesResponse = { categories: [] }, lorebooks = [];
   const fetch = async (url, options) => {
     let result;
@@ -67,9 +67,12 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
       result = { turn_system_prompt: 'Fictional system', turn_user_prompt: 'Fictional human message' };
     } else if (url === '/api/plugins/memu/conversationTurn') {
       assert.equal(Object.hasOwn(JSON.parse(options.body), 'soul_card'), false);
+      if (turnWait) await turnWait();
       result = listenResponse;
     } else if (url === '/api/plugins/memu/conversationTurnUndo') {
       undos.push(JSON.parse(options.body));
+      if (undoWait) await undoWait();
+      if (undoError) return { ok: false, status: 503, text: async () => 'Fictional Undo outage' };
       result = { status: 'restored' };
     } else if (url === '/api/plugins/memu/retrieveDefaultCategories') {
       result = categoriesResponse;
@@ -192,7 +195,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     dropPendingTurnIfStopped: () => false };
   const hooks = load('memory/exports.ts', {
     'utils/context-extra': { st, memuExtras: extras, OVERRIDE_SUMMARIZER: { get: () => true } },
-    './memorize': hookMemory, './utils': utils, './summary-poller': {},
+    './memorize': hookMemory, './utils': utils, './summary-poller': { stopSummaryPolling() {} },
     'utils/network': network, 'utils/log': log,
     'ui/inspect-panel': { getInspectData: () => null, stashInspectData: value => { inspectWrites++; if (value.turnStatus === 'error') calls.turnErrors++; } },
   }, globals);
@@ -217,10 +220,28 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(calls.replies, beforeError + 1); assert.equal(calls.turnErrors, 0); assert.equal(inspectWrites, 0);
   assert.match(alerts.at(-1), /saved chat Memorize failed/);
   const beforeSave = saves, beforePublish = publications.length;
+  const beforeSwitchedReplyUndo = undos.length;
   duringSave = () => { scope = 'loaded-copy'; ctx.chatMetadata = { main_chat: 'parent' }; };
   await generate();
   assert.equal(saves, beforeSave); assert.equal(publications.length, beforePublish);
   assert.equal(ctx.chat.at(-1).extra.model, undefined);
+  await flush();
+  assert.equal(undos.length, beforeSwitchedReplyUndo + 1);
+  assert.equal(undos.at(-1).conversationId, 'integrity:test-main');
+  assert.equal(undos.at(-1).soulId, 'TestSoul');
+  // Stock rendering can also reject when navigation clears its shared chat array mid-saveReply.
+  scope = bound.scope; ctx.chatMetadata = { integrity: 'test-main' };
+  ctx.chat = [rows[0]];
+  const beforeRejectedSave = saves, beforeRejectedPublication = publications.length, beforeRejectedUndo = undos.length;
+  duringSave = () => {
+    scope = 'loaded-copy'; ctx.chatMetadata = { main_chat: 'parent' }; ctx.chat = [];
+    throw new Error('Fictional stale ST render failure');
+  };
+  await generate(); await flush();
+  assert.equal(undos.length, beforeRejectedUndo + 1);
+  assert.equal(undos.at(-1).conversationId, 'integrity:test-main');
+  assert.equal(saves, beforeRejectedSave); assert.equal(publications.length, beforeRejectedPublication);
+  assert.equal(ctx.chat.length, 0);
   // An opted-out copy stays native, including Continue.
   const beforeAbort = aborts;
   await hooks.memuGenerationInterceptor([], 0, () => { aborts++; }, 'continue');
@@ -312,19 +333,112 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await hooks.onMessageSwiped(1); await flush();
   assert.equal(undos.at(-1).turnId, 'older-variant');
   const undoCount = undos.length;
-  // A chat switch during async initialization cannot Undo the new chat.
+  // A queued Undo keeps its original scope even if publication initialization opens another chat.
   ctx.chat = [user, structuredClone(mcpReply)];
   await hooks.onMessageReceived(1); ctx.chat.pop();
   utils.initChatExtraInfo = async () => { scope = 'other-chat'; };
   await hooks.onMessageDeleted(); await flush();
-  assert.equal(undos.length, undoCount);
+  assert.equal(undos.length, undoCount + 1);
+  assert.equal(undos.at(-1).conversationId, 'integrity:test-main');
   scope = bound.scope; utils.initChatExtraInfo = async () => {};
   ctx.chatMetadata = { main_chat: 'parent' };
   ctx.chat = [user, structuredClone(mcpReply)];
   await hooks.onMessageReceived(1); ctx.chat.pop();
   await hooks.onMessageDeleted(); await flush();
-  assert.equal(undos.length, undoCount);
+  assert.equal(undos.length, undoCount + 1);
   ctx.chatMetadata = { integrity: 'test-main' };
+  // Native multi-row truncation removes the human request and reply together.
+  ctx.chat = [user, structuredClone(mcpReply), user, structuredClone(mcpReply)];
+  ctx.chat[3].extra.memu_turn_id = 'multi-row-reply';
+  await hooks.onMessageReceived(3);
+  ctx.chat.length = 2;
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.at(-1).turnId, 'multi-row-reply');
+  const afterTruncation = undos.length;
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.length, afterTruncation); // remaining tail is not a removed reply
+  // A plain ST reply or an unanswered human message after the MCP reply does not hide its removal.
+  for (const tail of [user, nativeReply]) {
+    ctx.chat = [user, structuredClone(mcpReply), user, tail];
+    await hooks.onMessageReceived(3); ctx.chat.length = 1;
+    const beforeMixedDelete = undos.length;
+    await hooks.onMessageDeleted(); await flush();
+    assert.equal(undos.length, beforeMixedDelete + 1);
+    assert.equal(undos.at(-1).turnId, 'mcp-reply-a');
+  }
+  // Deleting the whole row while browsing an older swipe still names its newest real MCP reply.
+  const newestSwipe = { gen_finished: '2026-01-01T00:02:00.000Z', extra: {
+    memu_turn_id: 'newest-swipe', memu_turn_finished: Date.parse('2026-01-01T00:02:00.000Z'),
+  } };
+  const swipedReply = () => ({ ...structuredClone(mcpReply),
+    swipes: ['MCP reply', 'Newest swipe'], swipe_id: 0,
+    swipe_info: [{ gen_finished: mcpReply.gen_finished, extra: { ...mcpReply.extra } }, structuredClone(newestSwipe)],
+  });
+  ctx.chat = [user, swipedReply()];
+  await hooks.onMessageReceived(1); await hooks.onMessageSwiped(1);
+  ctx.chat.pop(); await hooks.onMessageDeleted(); await flush();
+  assert.equal(undos.at(-1).turnId, 'newest-swipe');
+  // Stock removes the visible swipe first, then replaces displayed text before MESSAGE_SWIPED.
+  ctx.chat = [user, swipedReply()];
+  Object.assign(ctx.chat[1], newestSwipe, { mes: 'Newest swipe', swipe_id: 1 });
+  await hooks.onMessageReceived(1);
+  ctx.chat[1].swipes.splice(1, 1); ctx.chat[1].swipe_info.splice(1, 1); ctx.chat[1].swipe_id = 0;
+  const beforeSwipePublication = publications.length;
+  await hooks.onMessageSwipeDeleted({ messageId: 1, swipeId: 1, newSwipeId: 0 });
+  assert.equal(publications.length, beforeSwipePublication);
+  Object.assign(ctx.chat[1], ctx.chat[1].swipe_info[0], { mes: ctx.chat[1].swipes[0] });
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.at(-1).turnId, 'newest-swipe');
+  assert.equal(publications.at(-1).body.conversation.at(-1).content, 'MCP reply');
+  // Selected swipe deletion on an earlier row also waits for ST to replace its displayed text.
+  ctx.chat = [user, swipedReply(), user, structuredClone(mcpReply)];
+  Object.assign(ctx.chat[1], newestSwipe, { mes: 'Newest swipe', swipe_id: 1 });
+  await hooks.onMessageReceived(3);
+  ctx.chat[1].swipes.splice(1, 1); ctx.chat[1].swipe_info.splice(1, 1); ctx.chat[1].swipe_id = 0;
+  const beforeEarlierSwipePublication = publications.length, beforeEarlierSwipeUndo = undos.length;
+  await hooks.onMessageSwipeDeleted({ messageId: 1, swipeId: 1, newSwipeId: 0 });
+  assert.equal(publications.length, beforeEarlierSwipePublication);
+  Object.assign(ctx.chat[1], ctx.chat[1].swipe_info[0], { mes: ctx.chat[1].swipes[0] });
+  await hooks.onMessageSwiped(1); await flush();
+  assert.equal(undos.length, beforeEarlierSwipeUndo);
+  assert.equal(publications.at(-1).body.conversation[1].content, 'MCP reply');
+  assert.equal(publications.at(-1).body.intent, 'publish_only');
+  // Removing an unselected newest swipe has no subsequent native MESSAGE_SWIPED event.
+  ctx.chat = [user, swipedReply()]; await hooks.onMessageReceived(1);
+  ctx.chat[1].swipes.splice(1, 1); ctx.chat[1].swipe_info.splice(1, 1);
+  await hooks.onMessageSwipeDeleted({ messageId: 1, swipeId: 1, newSwipeId: 0 }); await flush();
+  assert.equal(undos.at(-1).turnId, 'newest-swipe');
+  assert.equal(publications.at(-1).body.conversation.at(-1).content, 'MCP reply');
+  // A failed Undo alerts at the request, and cannot swallow the next generation.
+  ctx.chat = [user, structuredClone(mcpReply)]; await hooks.onMessageReceived(1);
+  ctx.chat.pop(); undoError = true;
+  await hooks.onMessageDeleted(); await flush(); undoError = false;
+  assert.match(alerts.at(-1), /reply Undo failed.*Fictional Undo outage/);
+  const repliesAfterFailedUndo = calls.replies;
+  await generate();
+  assert.equal(calls.replies, repliesAfterFailedUndo + 1);
+  // Changing chats never detaches an in-flight Undo from the next generation's wait.
+  ctx.chat = [user, structuredClone(mcpReply)]; await hooks.onMessageReceived(1);
+  ctx.chat.pop();
+  let releaseUndo;
+  undoWait = () => new Promise(resolve => { releaseUndo = resolve; });
+  await hooks.onMessageDeleted(); await flush();
+  assert.equal(typeof releaseUndo, 'function');
+  const originalChatId = ctx.getCurrentChatId;
+  utils.refreshMemuGate = () => {};
+  ctx.getCurrentChatId = () => undefined; scope = 'empty-chat'; hooks.onChatChanged();
+  ctx.getCurrentChatId = originalChatId; scope = bound.scope;
+  const repliesBeforeUndoFinished = calls.replies;
+  const waitingGeneration = generate(); await flush();
+  assert.equal(calls.replies, repliesBeforeUndoFinished);
+  undoWait = undefined; releaseUndo(); await waitingGeneration;
+  assert.equal(calls.replies, repliesBeforeUndoFinished + 1);
+  // Discovery errors while deleting are visible too, not console-only.
+  const activeGate = utils.isMemuActive;
+  utils.isMemuActive = async () => { throw new Error('Fictional discovery outage'); };
+  await hooks.onMessageDeleted();
+  assert.match(alerts.at(-1), /publication failed.*Fictional discovery outage/);
+  utils.isMemuActive = activeGate;
   console.log('Reply-scoped Undo keeps native/inherited swipes inert and matches saved MCP generations.');
   extras.summary = undefined; persisted = [];
   const beforeRefusedSave = saves;
@@ -358,6 +472,29 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(extras.summary, undefined);
   }
   console.log('Real successful listen dispatch publishes saved human rows automatically, without saveReply or an invented task.');
+  // Delayed real server completion after navigation undoes only the abandoned original turn.
+  for (const failUndo of [false, true]) {
+    listenResponse = { ok: true, response: 'Abandoned reply', generation_metadata: { turn_id: 'abandoned-original-turn' } };
+    let releaseTurn;
+    turnWait = () => new Promise(resolve => { releaseTurn = resolve; });
+    const beforeSwitchSave = saves, beforeSwitchPublication = publications.length, beforeSwitchUndo = undos.length;
+    const oldChat = ctx;
+    const turning = generate(); await flush();
+    assert.equal(typeof releaseTurn, 'function');
+    scope = 'replacement-chat';
+    ctx = { ...oldChat, chat: [{ name: 'OtherOwner', is_user: true, mes: 'Replacement chat' }],
+      getCurrentChatId: () => undefined, chatMetadata: { integrity: 'replacement' } };
+    utils.refreshMemuGate = () => {};
+    hooks.onChatChanged();
+    undoError = failUndo;
+    releaseTurn(); await turning; await flush();
+    assert.equal(undos.length, beforeSwitchUndo + 1);
+    assert.deepEqual(undos.at(-1), { conversationId: 'integrity:test-main', userId: 'TestOwner', soulId: 'TestSoul', turnId: 'abandoned-original-turn' });
+    assert.equal(saves, beforeSwitchSave); assert.equal(publications.length, beforeSwitchPublication);
+    assert.equal(ctx.chat[0].mes, 'Replacement chat'); assert.equal(ctx.chat[0].extra, undefined);
+    if (failUndo) assert.match(alerts.at(-1), /reply Undo failed/);
+    turnWait = undefined; undoError = false; ctx = oldChat; scope = bound.scope;
+  }
   // Exercise the actual menu action, not a replacement rebuild handler.
   const indexSource = fs.readFileSync(`${__dirname}/../src/index.tsx`, 'utf8');
   const reset = { currentScope: utils.currentScope, isMemuActive: utils.isMemuActive,
@@ -467,7 +604,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   };
   const host = { fetch: transport, location: { href: 'http://fictional-st/', origin: 'http://fictional-st' },
     alert: value => lifecycleAlerts.push(value) };
-  const lifecycleGlobals = { window: host, fetch: (...args) => host.fetch(...args), URL, Request, FormData, File };
+  const lifecycleGlobals = { window: host, fetch: (...args) => host.fetch(...args), URL, Request, Response, FormData, File };
   const lifecycleCsrf = load('utils/csrf.ts', {}, lifecycleGlobals);
   const lifecycleNetwork = load('utils/network.ts', { 'utils/csrf': lifecycleCsrf }, lifecycleGlobals);
   const lifecycle = load('memory/source-lifecycle.ts', {
@@ -530,7 +667,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await host.fetch('/api/characters/delete', cardOptions);
   assert.equal(retired.length, 1); retired.pop();
   savedHeader = null; start = lifecycleCalls.length;
-  await assert.rejects(host.fetch('/api/characters/delete', cardOptions), /metadata is unreadable/);
+  const refusedCard = await host.fetch('/api/characters/delete', cardOptions);
+  assert.equal(refusedCard.status, 409); assert.equal(refusedCard.ok, false);
+  assert.match(lifecycleAlerts.at(-1), /metadata is unreadable/);
   assert(!lifecycleCalls.slice(start).includes('/api/characters/delete'));
   savedHeader = linked; simple = [{ file_name: 'target.jsonl' }, { file_name: 'second.jsonl' }];
   retireFails = true;
@@ -542,7 +681,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await host.fetch('/api/characters/delete', { ...cardOptions, body: JSON.stringify({ avatar_url: 'other.png', delete_chats: false }) });
   assert.deepEqual(lifecycleCalls.slice(start), ['/api/characters/delete']);
   simple = { error: true }; start = lifecycleCalls.length;
-  await assert.rejects(host.fetch('/api/characters/delete', cardOptions), /chats are unreadable/);
+  const unreadableCard = await host.fetch('/api/characters/delete', cardOptions);
+  assert.equal(unreadableCard.status, 409);
+  assert.match(lifecycleAlerts.at(-1), /chats are unreadable/);
   assert(!lifecycleCalls.slice(start).includes('/api/characters/delete'));
   missingDirectory = true; start = lifecycleCalls.length;
   await host.fetch('/api/characters/delete', cardOptions);

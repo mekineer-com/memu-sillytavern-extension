@@ -1,6 +1,6 @@
 import { CategoryResponse } from "memu-js";
 import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
-import { conversationRetrieve, conversationTurn, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
+import { conversationRetrieve, conversationTurn, conversationTurnUndo, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
 import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { postJsonWithCsrf } from "utils/csrf";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
@@ -892,7 +892,18 @@ export async function dispatchConversationTurn(
         promptOverridePayload,
     });
 
-    if (currentScope() !== turn.scope) return { reply: '' };
+    if (currentScope() !== turn.scope) {
+        const turnId = resp?.generation_metadata?.turn_id;
+        if (turnId) {
+            try {
+                await conversationTurnUndo(turn.conversationId, turn.userId, turn.soulId, turnId);
+            } catch (error) {
+                logError('Abandoned reply Undo failed', error);
+                window.alert(`memU reply Undo failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+        return { reply: '' };
+    }
     const responseTarget = String((resp as any)?.response_target ?? '').trim().toLowerCase();
     const shouldRespond = typeof (resp as any)?.should_respond === 'boolean'
         ? Boolean((resp as any).should_respond)

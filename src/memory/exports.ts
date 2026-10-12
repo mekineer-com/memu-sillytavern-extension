@@ -18,10 +18,12 @@ import { getInspectData, stashInspectData } from "ui/inspect-panel";
 
 const staleCursorResetOnceByScope = new Set<string>();
 let lastGenerationStoppedAt = 0;
-let _pendingSwipeUndo: Promise<void> | null = null;
-let _lastChatLength = 0;
-let _lastTailIsUser = false;
-let _lastTailTurnId = '';
+let _pendingUndo: Promise<void> | null = null;
+let _lastReplyMessage: any;
+let _lastReplyTurnId = '';
+let _lastSelectedTurnId = '';
+let _lastSelectedSwipes: number[] = [];
+let _deletedSelectedSwipe: number | null = null;
 
 function replyTurnId(message: any): string {
     if (!message || message.is_user || !message.gen_finished) return '';
@@ -34,35 +36,44 @@ function replyTurnId(message: any): string {
 function refreshChatSnapshot(): void {
     const ctx = st.getContext();
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
-    _lastChatLength = chat.length;
-    _lastTailIsUser = !!chat[chat.length - 1]?.is_user;
-    _lastTailTurnId = replyTurnId(chat[chat.length - 1]);
+    _lastSelectedSwipes = chat.map(message => message.swipe_id ?? 0);
+    _lastSelectedTurnId = replyTurnId(chat[chat.length - 1]);
+    _lastReplyMessage = undefined;
+    _lastReplyTurnId = '';
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const variants = replyVariants(chat[i]).filter(variant => replyTurnId(variant))
+            .sort((a, b) => new Date(b.gen_finished).getTime() - new Date(a.gen_finished).getTime());
+        if (!variants.length) continue;
+        _lastReplyMessage = chat[i];
+        _lastReplyTurnId = replyTurnId(variants[0]);
+        break;
+    }
 }
 
-async function waitForPendingSwipeUndo(): Promise<void> {
-    const pending = _pendingSwipeUndo;
+function replyVariants(message: any): any[] {
+    return !message || message.is_user ? [] : [message, ...(message.swipe_info || [])];
+}
+
+async function waitForPendingUndo(): Promise<void> {
+    const pending = _pendingUndo;
     if (!pending) return;
     try {
         await pending;
     } finally {
-        if (_pendingSwipeUndo === pending) {
-            _pendingSwipeUndo = null;
+        if (_pendingUndo === pending) {
+            _pendingUndo = null;
         }
     }
 }
 
-function queueConversationUndo(ctx: any, conversationId: string, soulId: string, turnId: string): void {
+function queueConversationUndo(conversationId: string, userId: string, soulId: string, turnId: string): void {
     if (!turnId) return;
-    const scope = currentScope(ctx);
-    _pendingSwipeUndo = (async () => {
-        if (!(await isMemuActive())) return;
-        await initChatExtraInfo(ctx);
-        if (currentScope() !== scope) return;
-        const userId = String(memuExtras.baseInfo?.userId || '');
-        if (conversationId && userId && soulId) {
-            await conversationTurnUndo(conversationId, userId, soulId, turnId);
-        }
-    })();
+    _pendingUndo = (_pendingUndo || Promise.resolve())
+        .then(() => conversationTurnUndo(conversationId, userId, soulId, turnId))
+        .then(() => {}, error => {
+            logError('Reply Undo failed', error);
+            window.alert(`memU reply Undo failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
 }
 
 /**
@@ -147,40 +158,32 @@ export async function onMessageReceived(_msgIdAny: any): Promise<void> {
     refreshChatSnapshot();
 }
 
-export async function onUserMessageSent(_msgIdAny: any): Promise<void> {
-    refreshChatSnapshot();
-}
-
-export async function onMessageEdited(_msgIdAny: any): Promise<void> {
-    refreshChatSnapshot();
-}
+export const onUserMessageSent = onMessageReceived;
+export const onMessageEdited = onMessageReceived;
 
 export async function onMessageDeleted(): Promise<void> {
     const scope = currentScope();
-    const turnId = _lastTailTurnId;
-    if (!(await isMemuActive())) {
-        refreshChatSnapshot();
-        return;
-    }
-    if (currentScope() !== scope) return;
-    const ctx = st.getContext();
-    const conversationId = getChatIdSafe();
-    const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
-    const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
-    const nowLength = chat.length;
-    const nowTailIsUser = !!chat[nowLength - 1]?.is_user;
-    const deletedLatestAssistant = _lastChatLength === nowLength + 1 && !_lastTailIsUser && nowTailIsUser;
-    if (deletedLatestAssistant && conversationId && soulId) {
-        queueConversationUndo(ctx, conversationId, soulId, turnId);
-    }
-    refreshChatSnapshot();
+    const turnId = _lastReplyTurnId;
+    const reply = _lastReplyMessage;
     try {
+        if (!(await isMemuActive())) {
+            if (currentScope() === scope) refreshChatSnapshot();
+            return;
+        }
+        if (currentScope() !== scope) return;
+        const ctx = st.getContext();
+        const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
+        const info = memuExtras.baseInfo;
+        const removed = !chat.includes(reply) || !replyVariants(reply).some(variant => replyTurnId(variant) === turnId);
+        if (removed && info) {
+            queueConversationUndo(getChatIdSafe(), info.userId, info.characterId, turnId);
+        }
+        refreshChatSnapshot();
         await initChatExtraInfo(ctx);
         if (currentScope() !== scope) return;
         await ctx.saveChat();
         if (currentScope() !== scope) return;
         const source = bindSavedSource(ctx);
-        if (currentScope() !== scope) return;
         await publishSavedSource(source, 'publish_only');
     } catch (error) {
         logError('Saved chat publication after deletion failed', error);
@@ -188,9 +191,23 @@ export async function onMessageDeleted(): Promise<void> {
     }
 }
 
+export async function onMessageSwipeDeleted({ messageId, swipeId }: { messageId: number; swipeId: number }): Promise<void> {
+    if (swipeId === _lastSelectedSwipes[messageId]) {
+        // Stock ST replaces the displayed text in the following MESSAGE_SWIPED event.
+        _deletedSelectedSwipe = messageId;
+        return;
+    }
+    await onMessageDeleted();
+}
+
 export async function onMessageSwiped(msgIdAny: any): Promise<void> {
+    if (_deletedSelectedSwipe === Number(msgIdAny)) {
+        _deletedSelectedSwipe = null;
+        await onMessageDeleted();
+        return;
+    }
     const scope = currentScope();
-    const turnId = _lastTailTurnId;
+    const turnId = _lastSelectedTurnId;
     if (!(await isMemuActive())) {
         refreshChatSnapshot();
         return;
@@ -198,7 +215,7 @@ export async function onMessageSwiped(msgIdAny: any): Promise<void> {
     if (currentScope() !== scope) return;
     const ctx = st.getContext();
     const conversationId = getChatIdSafe();
-    const soulId = String(ctx.characters?.[ctx.characterId]?.name || '');
+    const info = memuExtras.baseInfo;
     const chat = Array.isArray(ctx?.chat) ? ctx.chat : [];
     const messageId = Number(msgIdAny);
     const message = chat[messageId];
@@ -206,8 +223,8 @@ export async function onMessageSwiped(msgIdAny: any): Promise<void> {
         && message && !message.is_user
         && Array.isArray(message.swipes)
         && message.swipe_id === message.swipes.length;
-    if (isSyntheticRegeneration && conversationId && soulId) {
-        queueConversationUndo(ctx, conversationId, soulId, turnId);
+    if (isSyntheticRegeneration && conversationId && info) {
+        queueConversationUndo(conversationId, info.userId, info.characterId, turnId);
     }
     refreshChatSnapshot();
 }
@@ -280,7 +297,7 @@ export async function memuGenerationInterceptor(
         window.alert('memU does not support Continue. Send a new message instead.');
         return;
     }
-    await waitForPendingSwipeUndo();
+    await waitForPendingUndo();
     if (currentScope() !== scope) return;
     if (dropPendingTurnIfStopped(lastGenerationStoppedAt)) {
         return;
@@ -293,7 +310,15 @@ export async function memuGenerationInterceptor(
             throw new Error('memU retrieve prep failed — turn blocked.');
         }
         const turnResult = await dispatchConversationTurn({ debug: true });
-        if (currentScope() !== scope) return;
+        const undoAbandonedReply = () => {
+            const data = turnResult.savedSource?.data;
+            if (data) queueConversationUndo(data.conversationId, data.userId, data.characterId,
+                turnResult.generationMetadata?.turn_id || '');
+        };
+        if (currentScope() !== scope) {
+            undoAbandonedReply();
+            return;
+        }
         savedSource = turnResult.savedSource;
         const reply = turnResult.reply;
         const ctx: any = st.getContext();
@@ -301,7 +326,11 @@ export async function memuGenerationInterceptor(
             throw new Error('SillyTavern context.saveReply is unavailable');
         }
         if (reply) {
-            await ctx.saveReply({ type, getMessage: reply });
+            try {
+                await ctx.saveReply({ type, getMessage: reply });
+            } finally {
+                if (currentScope() !== scope) undoAbandonedReply();
+            }
             if (currentScope() !== scope) return;
             stampLatestSoulMessageGenerationMetadata(ctx, turnResult.generationMetadata);
             refreshChatSnapshot();
@@ -339,11 +368,9 @@ export function onChatChanged(): void {
     resetRetrievePipelineState();
     stopSummaryPolling();
     refreshMemuGate();
-    _pendingSwipeUndo = null;
+    _deletedSelectedSwipe = null;
 
     if (ctx.getCurrentChatId() === undefined) {
-        stopSummaryPolling();
-        refreshChatSnapshot();
         return;
     }
 

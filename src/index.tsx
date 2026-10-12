@@ -8,6 +8,7 @@ import {
     onMessageEdited,
     onMessageReceived,
     onMessageSwiped,
+    onMessageSwipeDeleted,
     onMessageDeleted,
     onUserMessageSent,
 } from 'memory/exports';
@@ -38,6 +39,7 @@ function installHooksWithRetry(): void {
             st.eventSource.on(st.event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
             st.eventSource.on(st.event_types.MESSAGE_EDITED, onMessageEdited);
             st.eventSource.on(st.event_types.MESSAGE_SWIPED, onMessageSwiped);
+            st.eventSource.on(st.event_types.MESSAGE_SWIPE_DELETED, onMessageSwipeDeleted);
             st.eventSource.on(st.event_types.MESSAGE_DELETED, onMessageDeleted);
             st.eventSource.on(st.event_types.CHARACTER_DUPLICATED, onCharacterDuplicated);
             st.eventSource.on(st.event_types.CHARACTER_RENAMED, onCharacterRenamed);
