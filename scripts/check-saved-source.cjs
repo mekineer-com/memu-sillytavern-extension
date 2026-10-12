@@ -66,6 +66,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     } else if (url === '/api/plugins/memu/conversationRetrieve') {
       result = { turn_system_prompt: 'Fictional system', turn_user_prompt: 'Fictional human message' };
     } else if (url === '/api/plugins/memu/conversationTurn') {
+      assert.equal(Object.hasOwn(JSON.parse(options.body), 'soul_card'), false);
       result = listenResponse;
     } else if (url === '/api/plugins/memu/conversationTurnUndo') {
       undos.push(JSON.parse(options.body));
@@ -87,6 +88,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await network.getPluginConfig();
   const st = { getContext: () => ctx, saveChat: async () => { saves++; } };
   const utils = { currentScope: () => scope, initChatExtraInfo: async () => {},
+    refreshSoulCard: async () => {}, cardText: card => Object.fromEntries(['description', 'personality', 'scenario', 'mes_example'].map(field => [field, String(card[field] ?? '')])),
     isMemuActive: async () => !ctx.chatMetadata.main_chat && !ctx.groupId && !ctx.disabled };
   const log = { warn() {}, error() {}, onceWarn() {}, onceError() {}, info() {} };
   const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console, fetch };

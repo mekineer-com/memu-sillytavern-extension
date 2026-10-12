@@ -4,7 +4,7 @@ import { captureRuntimeSettings, conversationRetrieve, conversationTurn, memoriz
 import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { postJsonWithCsrf } from "utils/csrf";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
-import { currentScope, initChatExtraInfo, isMemuActive } from "./utils";
+import { cardText, currentScope, initChatExtraInfo, isMemuActive, refreshSoulCard } from "./utils";
 import { warn, error as logError, onceWarn, onceError } from "utils/log";
 import {
     getInspectData,
@@ -389,10 +389,12 @@ function resolveSoulCard(ctx: any): string {
     const char = ctx?.characters?.[ctx?.characterId];
     if (!char) return '';
     const name = String(char.name || '').trim();
-    const description = String(char.description || '').trim();
-    const personality = String(char.personality || '').trim();
-    const scenario = String(char.scenario || '').trim();
-    const mes_example = String(char.mes_example || '').trim();
+    const text = cardText(char);
+    const description = text.description.trim();
+    const personality = text.personality.trim();
+    const scenario = text.scenario.trim();
+    const mes_example = text.mes_example.trim();
+    if (typeof char.data?.extensions?.memu?.description_auto === 'string' && !personality && !scenario && !mes_example) return '';
 
     const parts: string[] = [];
     if (name) parts.push(name);
@@ -641,6 +643,8 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
     _pendingRetrieveTurn = turn;
 
     const retrieveCtx: any = st.getContext();
+    await refreshSoulCard();
+    if (currentScope() !== scope || _pendingRetrieveTurn !== turn) return;
     const retrieveSoulCard = resolveSoulCard(retrieveCtx);
 
     let resp: any;
@@ -860,8 +864,6 @@ export async function dispatchConversationTurn(
         });
     }
 
-    const turnCtx: any = st.getContext();
-    const turnSoulCard = resolveSoulCard(turnCtx);
     const preparedPayload = turn.preparedPayload;
     if (!preparedPayload || typeof preparedPayload !== 'object') {
         throw new Error('memU prepared payload is missing — retrieve must complete before turn.');
@@ -888,7 +890,6 @@ export async function dispatchConversationTurn(
         messageSourceId: turn.querySourceId,
         history: turn.history,
         debug: includeDebug,
-        soul_card: turnSoulCard,
         promptOverridePayload,
     });
 

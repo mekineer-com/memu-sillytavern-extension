@@ -3,7 +3,7 @@ import { createOwner, createSoul, getOwner, getSoul, getSouls } from "utils/netw
 import { power_user } from "@silly-tavern/scripts/power-user.js";
 import { extension_settings, writeExtensionFieldBulk } from "@silly-tavern/scripts/extensions.js";
 import { saveSettings } from "@silly-tavern/script.js";
-import { postJsonWithCsrf } from "utils/csrf";
+import { getCsrfTokenCached, postJsonWithCsrf } from "utils/csrf";
 
 export const appReady = new Promise<void>(resolve => st.eventSource.once(st.event_types.APP_READY, resolve));
 let discovery: { scope: string; promise: ReturnType<typeof getSouls> } | undefined;
@@ -159,11 +159,148 @@ export async function writeMemuDisabled(character: any, disabled: boolean): Prom
         await claimSoulCard(character, true, first);
         if (character.avatar !== avatar || String(character.name || '').trim() !== name) throw new Error('Character changed while enabling memU');
     }
-    const existing = character.data?.extensions?.memu;
-    if (existing?.disabled === disabled && (disabled || existing?.enabled_for === name)) return;
-    const result = await writeExtensionFieldBulk([avatar], 'memu', { ...existing, disabled, ...(!disabled ? { enabled_for: name } : {}) });
-    if (!result.updated.includes(avatar)) throw new Error('Failed to save the character memU setting');
-    refreshMemuGate();
+    const operation = soulCardChain.then(async () => {
+        const current = st.getContext().characters.find((card: any) => card.avatar === avatar) ?? character;
+        const existing = current.data?.extensions?.memu;
+        if (existing?.disabled === disabled && (disabled || existing?.enabled_for === name)) return;
+        const text = cardText(current);
+        const reset = !disabled && existing?.enabled_for !== name && existing?.description_auto !== undefined
+            ? { description_auto: text.description.trim() ? null : '', card_text: text } : {};
+        const result = await writeExtensionFieldBulk([avatar], 'memu', {
+            ...existing, ...reset, disabled, ...(!disabled ? { enabled_for: name } : {}),
+        });
+        if (!result.updated.includes(avatar)) throw new Error('Failed to save the character memU setting');
+        refreshMemuGate();
+    });
+    soulCardChain = operation.catch(() => {});
+    await operation;
+}
+
+const cardInputs = {
+    description: 'description_textarea', personality: 'personality_textarea',
+    scenario: 'scenario_pole', mes_example: 'mes_example_textarea',
+};
+
+export function cardText(character: any): Record<string, string> {
+    const editor = typeof document !== 'undefined' && document.getElementById('avatar_url_pole') as HTMLInputElement;
+    return Object.fromEntries(Object.entries(cardInputs).map(([field, id]) => {
+        const input = editor?.value === character.avatar ? document.getElementById(id) as HTMLInputElement : null;
+        return [field, String(input ? input.value : character[field] ?? '')];
+    }));
+}
+
+export async function reconcileSoulCard(character: any, editedField?: string): Promise<boolean> {
+    if (!character || !canUseSoulCard(character)) return false;
+    const text = cardText(character);
+    const previous = character.data?.extensions?.memu ?? {};
+    let auto = previous.description_auto;
+    let baseline = previous.card_text;
+    const cleared = !text.description.trim() && (editedField === 'description'
+        || (!editedField && (auto === undefined || String(baseline?.description ?? '').trim())));
+    if (editedField && auto === null && !cleared
+        && !!text.description.trim() === !!String(baseline?.description ?? '').trim()) return false;
+    if (cleared) {
+        auto = ''; baseline = text;
+    } else if (editedField || auto === undefined
+        || (typeof auto === 'string' && Object.keys(cardInputs).some(field => text[field] !== baseline?.[field]))) {
+        auto = null; baseline = text;
+    }
+    if (auto !== previous.description_auto || JSON.stringify(baseline) !== JSON.stringify(previous.card_text)) {
+        const metadata = {
+            ...previous, description_auto: auto, card_text: baseline,
+        };
+        character.data.extensions.memu = metadata;
+        const avatar = character.avatar;
+        const operation = soulCardChain.then(async () => {
+            const current = st.getContext().characters.find((card: any) => card.avatar === avatar) ?? character;
+            const result = await writeExtensionFieldBulk([avatar], 'memu', {
+                ...current.data.extensions.memu, description_auto: auto, card_text: baseline,
+            });
+            if (!result.updated.includes(avatar)) throw new Error('Failed to save the card following setting');
+        });
+        soulCardChain = operation.catch(() => {});
+        await operation;
+    }
+    return typeof character.data?.extensions?.memu?.description_auto === 'string';
+}
+
+async function writeDescriptionToCard(characterName: string, narrativeSelf: string, displayedAvatar: string, displayedText: Record<string, string>): Promise<void> {
+    const scope = currentScope();
+    const operation = soulCardChain.then(async () => {
+        const csrfToken = await getCsrfTokenCached();
+        const ctx: any = st.getContext();
+        const character = ctx.characters?.[ctx.characterId];
+        if (currentScope() !== scope || character?.avatar !== displayedAvatar || character.name.trim() !== characterName
+            || !canUseSoulCard(character) || character.data?.extensions?.memu?.disabled === true
+            || character.data?.extensions?.memu?.description_auto === null
+            || JSON.stringify(cardText(character)) !== JSON.stringify(displayedText)) return;
+        const metadata = { ...character.data.extensions.memu, description_auto: narrativeSelf,
+            card_text: { ...displayedText, description: narrativeSelf } };
+        const resp = await fetch('/api/characters/merge-attributes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+            body: JSON.stringify({ avatars: [displayedAvatar], data: {
+                description: narrativeSelf, data: { description: narrativeSelf, extensions: { memu: metadata } },
+            } }),
+        });
+        if (!resp.ok || !(await resp.json()).updated.includes(displayedAvatar)) throw new Error('Failed to save the automatic Description');
+        const editedWhileWriting = character.data.extensions.memu.description_auto === null
+            || JSON.stringify(cardText(character)) !== JSON.stringify(displayedText);
+        const resetWhileWriting = character.data.extensions.memu.description_auto === ''
+            && !cardText(character).description.trim()
+            && JSON.stringify(character.data.extensions.memu.card_text) === JSON.stringify(cardText(character));
+        await ctx.getOneCharacter(displayedAvatar);
+        if (currentScope() !== scope) return;
+        const current = st.getContext() as any;
+        const refreshed = current.characters[current.characterId];
+        if (editedWhileWriting || refreshed.data?.extensions?.memu?.description_auto === null
+            || JSON.stringify(cardText(character)) !== JSON.stringify(displayedText)) {
+            return { character: refreshed, reset: resetWhileWriting };
+        }
+        if (refreshed.description !== narrativeSelf || refreshed.data?.extensions?.memu?.description_auto !== narrativeSelf) {
+            throw new Error('Could not confirm the automatic Description');
+        }
+        const editor = typeof document !== 'undefined' && document.getElementById('avatar_url_pole') as HTMLInputElement;
+        if (editor?.value === displayedAvatar) {
+            const description = document.getElementById(cardInputs.description) as HTMLInputElement;
+            if (description?.value === displayedText.description) description.value = narrativeSelf;
+            const json = document.getElementById('character_json_data') as HTMLInputElement;
+            if (json) json.value = refreshed.json_data;
+        }
+    });
+    soulCardChain = operation.catch(() => {});
+    const edited = await operation;
+    if (edited) await reconcileSoulCard(edited.character, edited.reset ? 'description' : 'manual');
+}
+
+export async function refreshSoulCard(): Promise<void> {
+    const scope = currentScope();
+    if (!(await isMemuActive()) || currentScope() !== scope) return;
+    const ctx: any = st.getContext();
+    const character = ctx.characters[ctx.characterId];
+    if (!(await reconcileSoulCard(character)) || currentScope() !== scope) return;
+    const text = cardText(character);
+    const live = await getSoul(character.name.trim(), true);
+    if (currentScope() !== scope || !(await reconcileSoulCard(character))) return;
+    if (typeof live.narrative_self !== 'string') throw new Error('Soul narrative read did not return narrative_self');
+    if (text.description !== live.narrative_self) {
+        await writeDescriptionToCard(character.name.trim(), live.narrative_self, character.avatar, text);
+    }
+}
+
+export function onSoulCardInput(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    const field = Object.entries(cardInputs).find(([, id]) => id === target?.id)?.[0];
+    if (!field) return;
+    const ctx: any = st.getContext();
+    const character = ctx.characters?.[ctx.characterId];
+    const editor = document.getElementById('avatar_url_pole') as HTMLInputElement;
+    if (editor?.value !== character?.avatar) return;
+    void reconcileSoulCard(character, field).catch(error => window.alert(String(error)));
+}
+
+export async function onSoulCardEdited(event: any): Promise<void> {
+    await reconcileSoulCard(event.detail?.character);
+    await refreshSoulCard();
 }
 
 

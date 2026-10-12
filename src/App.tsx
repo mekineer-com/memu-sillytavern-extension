@@ -30,7 +30,7 @@ import {
 import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
 import { power_user } from '@silly-tavern/scripts/power-user.js';
-import { appReady, canUseSoulCard, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
+import { appReady, canUseSoulCard, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, refreshSoulCard, soulPersonaName, writeMemuDisabled } from 'memory/utils';
 import { onChatChanged } from 'memory/exports';
 
 const buttonStyle: CSSProperties = {
@@ -136,6 +136,8 @@ export default function App() {
       const active = await isMemuActive();
       if (currentScope() !== scope) return;
       setMemuActive(active);
+      if (active) await refreshSoulCard();
+      if (currentScope() !== scope) return;
       const name = await soulPersonaName(String(character.name || '').trim());
       if (currentScope() !== scope) return;
       const avatar = name ? await ensurePersona(name) : '';

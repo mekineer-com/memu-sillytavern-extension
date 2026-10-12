@@ -139,8 +139,8 @@ export async function createSoul(soulId: string, userName: string): Promise<{ so
   return request<{ soul_id: string; created: boolean }>('/souls', { soul_id: soulId, use_existing: false, user_name: userName });
 }
 
-export async function getSoul(soulId: string): Promise<{ soul_id: string; user_name: string }> {
-  return request(`/souls/${encodeURIComponent(soulId)}`, undefined, 'GET');
+export async function getSoul(soulId: string, includeNarrative = false): Promise<{ soul_id: string; user_name: string; narrative_self?: string }> {
+  return request(`/souls/${encodeURIComponent(soulId)}${includeNarrative ? '?include_narrative=true' : ''}`, undefined, 'GET');
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
@@ -239,7 +239,8 @@ export async function memorizeConversation(
 }
 
 export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<{ narrative_self?: string }> {
-  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion });
+  const runtimeSettings = captureRuntimeSettings();
+  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion, runtimeSettings });
 }
 
 export async function listRelationships(userId: string, soulId: string): Promise<{ relationships: RelationshipRecord[] }> {

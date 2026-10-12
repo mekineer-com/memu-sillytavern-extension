@@ -151,7 +151,7 @@ function loadModule(file, imports, extra = {}) {
     getPluginPing: async () => ({ ok: true }),
     scopeStorageProbe: async () => ({ ok: true }),
     getSouls: async () => { reads++; if (failDiscovery) throw Error('discovery refused'); if (pendingDiscovery) return pendingDiscovery; return { souls }; },
-    getSoul: async id => { reads++; if (!names[id]) throw Error('missing binding'); return { soul_id: id, user_name: names[id] }; },
+    getSoul: async id => { reads++; if (!names[id]) throw Error('missing binding'); return { soul_id: id, user_name: names[id], narrative_self: '' }; },
     getOwner: async () => ({ user_id: owner }),
     createOwner: async id => { owner = id; return { user_id: id }; },
     createSoul: async (id, name) => { assert(owner); creates++; names[id] = name; souls.push(id); return { soul_id: id, created: true }; },

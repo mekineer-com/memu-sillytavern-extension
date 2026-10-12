@@ -1,57 +1,15 @@
 import { CSSProperties, useState } from 'react';
 import { sendNarrativeSuggestion } from 'utils/network';
-import { memuExtras, st } from 'utils/context-extra';
-import { getCsrfTokenCached } from 'utils/csrf';
-import { currentScope, isMemuActive } from 'memory/utils';
+import { memuExtras } from 'utils/context-extra';
+import { currentScope, isMemuActive, refreshSoulCard } from 'memory/utils';
 
 const LS_LAST_SENT = 'memu-narrative-suggestion-last';
 const LS_COOLDOWN_UNTIL = 'memu-narrative-suggestion-cooldown-until';
 const COOLDOWN_MS = 10 * 60 * 1000;
 
-function lsLastWrittenKey(characterName: string): string {
-  return `memu-narrative-last-written-${characterName}`;
-}
-
 function isCoolingDown(): boolean {
   const until = Number(localStorage.getItem(LS_COOLDOWN_UNTIL) || 0);
   return Date.now() < until;
-}
-
-async function writeDescriptionToCard(characterName: string, narrativeSelf: string, displayedAvatar: string, displayedDescription: string): Promise<void> {
-  const ctx = st.getContext() as any;
-  const character = ctx?.characters?.[ctx?.characterId];
-  if (!character?.avatar) throw new Error('No active character');
-
-  const csrfToken = await getCsrfTokenCached();
-  const current = st.getContext() as any;
-  const currentCharacter = current?.characters?.[current?.characterId];
-  if (currentCharacter?.avatar !== displayedAvatar || String(currentCharacter?.description ?? '') !== displayedDescription) {
-    throw new Error('Character description changed while the suggestion was being considered; the card was not overwritten.');
-  }
-  const resp = await fetch('/api/characters/edit-attribute', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
-    body: JSON.stringify({
-      avatar_url: character.avatar,
-      ch_name: character.name,
-      field: 'description',
-      value: narrativeSelf,
-    }),
-  });
-  if (!resp.ok) throw new Error(`edit-attribute failed: ${resp.status}`);
-
-  // Refresh in-memory character so the rest of the UI sees the new value.
-  await (ctx.getOneCharacter as (url: string) => Promise<void>)(character.avatar);
-
-  localStorage.setItem(lsLastWrittenKey(characterName), narrativeSelf);
-}
-
-function getOverrideState(characterName: string): boolean {
-  const lastWritten = localStorage.getItem(lsLastWrittenKey(characterName));
-  if (!lastWritten) return false; // first-time: no override
-  const ctx = st.getContext() as any;
-  const currentDesc = String(ctx?.characters?.[ctx?.characterId]?.description ?? '');
-  return currentDesc !== lastWritten;
 }
 
 type Status = 'idle' | 'pending' | 'ok' | 'err';
@@ -64,13 +22,12 @@ export default function NarrativeSuggestion({ enabled = false }: { enabled?: boo
   const coolingDown = isCoolingDown();
 
   const characterName = memuExtras.baseInfo?.characterName ?? '';
-  const overrideActive = characterName ? getOverrideState(characterName) : false;
 
   async function handleSend() {
     if (!(await isMemuActive())) return;
     const scope = currentScope();
     const suggestion = text.trim();
-    if (!suggestion || coolingDown || overrideActive) return;
+    if (!suggestion || coolingDown) return;
 
     const userId = memuExtras.baseInfo?.userId ?? '';
     const soulId = characterName;
@@ -82,21 +39,16 @@ export default function NarrativeSuggestion({ enabled = false }: { enabled?: boo
 
     setStatus('pending');
     setError('');
-    const ctx = st.getContext() as any;
-    const character = ctx?.characters?.[ctx?.characterId];
-    const displayedAvatar = String(character?.avatar ?? '');
-    const displayedDescription = String(character?.description ?? '');
     try {
-      const result = await sendNarrativeSuggestion(userId, soulId, suggestion);
+      await sendNarrativeSuggestion(userId, soulId, suggestion);
       if (currentScope() !== scope) return;
       localStorage.setItem(LS_LAST_SENT, suggestion);
       localStorage.setItem(LS_COOLDOWN_UNTIL, String(Date.now() + COOLDOWN_MS));
       setLastSent(suggestion);
       setText('');
 
-      if (result.narrative_self) {
-        await writeDescriptionToCard(soulId, result.narrative_self, displayedAvatar, displayedDescription);
-      }
+      await refreshSoulCard();
+      if (currentScope() !== scope) return;
 
       setStatus('ok');
     } catch (error) {
@@ -130,18 +82,13 @@ export default function NarrativeSuggestion({ enabled = false }: { enabled?: boo
           type="button"
           className="menu_button"
           onClick={() => void handleSend()}
-          disabled={!enabled || !text.trim() || coolingDown || overrideActive || status === 'pending'}
+          disabled={!enabled || !text.trim() || coolingDown || status === 'pending'}
         >
           Send
         </button>
-        <span title={status === 'err' ? error : undefined} aria-label={status === 'err' ? error : undefined} style={{ width: 18, display: 'flex', alignItems: 'center' }}>{statusIcon}</span>
+        <span title={status === 'err' ? error : status === 'ok' ? 'Suggestion considered, not necessarily adopted.' : undefined} aria-label={status === 'err' ? error : undefined} style={{ width: 18, display: 'flex', alignItems: 'center' }}>{statusIcon}</span>
       </div>
-      {overrideActive && (
-        <small style={{ opacity: 0.85, color: 'var(--SmartThemeWarnColor, #e6a817)' }}>
-          Manual override active — soul can't update narrative_self until card matches last written value
-        </small>
-      )}
-      {lastSent && !overrideActive && (
+      {lastSent && (
         <small style={{ opacity: 0.75 }}>Last sent: {lastSent}</small>
       )}
     </div>
