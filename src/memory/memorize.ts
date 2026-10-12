@@ -1,6 +1,6 @@
 import { CategoryResponse } from "memu-js";
 import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
-import { captureRuntimeSettings, conversationRetrieve, conversationTurn, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
+import { conversationRetrieve, conversationTurn, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
 import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { postJsonWithCsrf } from "utils/csrf";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
@@ -77,7 +77,6 @@ export function bindSavedSource(ctx: any = st.getContext()): SavedSource {
             ...info,
             conversationId: getChatIdSafe(),
             chatName: info.characterName,
-            runtimeSettings: captureRuntimeSettings(),
         },
     };
     return source;

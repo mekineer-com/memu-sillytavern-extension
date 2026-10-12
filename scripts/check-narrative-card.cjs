@@ -166,7 +166,7 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   const settings = { useServerSettings: false, useClaudeCode: true, defaultProfileId: 'captured', stepProfileId: { reflection: 'captured-step' } };
   let wire;
   const transport = { exports: {}, pluginConfig: settings, request: async (route, payload, method) => { wire = { route, payload, method }; return {}; } };
-  const transportCode = networkSource.slice(networkSource.indexOf('export function captureRuntimeSettings('), networkSource.indexOf('export async function serverStatus('))
+  const transportCode = networkSource.slice(networkSource.indexOf('export async function getModelMappings('), networkSource.indexOf('export async function serverStatus('))
     + networkSource.slice(networkSource.indexOf('export async function getSoul('), networkSource.indexOf('export async function getPluginConfig('))
     + networkSource.slice(networkSource.indexOf('export async function sendNarrativeSuggestion('), networkSource.indexOf('export async function listRelationships('));
   vm.runInNewContext(ts.transpileModule(transportCode, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText, transport);
@@ -175,8 +175,7 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   const sending = transport.exports.sendNarrativeSuggestion('TestOwner', 'TestSoul', 'Fictional request');
   settings.defaultProfileId = 'later'; settings.stepProfileId.reflection = 'later-step';
   await sending;
-  assert.equal(wire.payload.runtimeSettings.defaultProfileId, 'captured');
-  assert.equal(wire.payload.runtimeSettings.stepProfileId.reflection, 'captured-step');
+  assert.equal(Object.hasOwn(wire.payload, 'runtimeSettings'), false);
   assert.equal(wire.payload.userId, 'TestOwner'); assert.equal(wire.payload.soulId, 'TestSoul');
 
   const component = fs.readFileSync(`${__dirname}/../src/component/NarrativeSuggestion.tsx`, 'utf8');

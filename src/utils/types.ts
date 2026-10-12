@@ -7,20 +7,8 @@ export enum MemuTaskStatus {
 
 // --- memu local configuration (stored server-side in the plugin) ---
 
-export type MemuStep =
-  | 'preprocess'
-  | 'memory_extract'
-  | 'category_update'
-  | 'reflection'
-  | 'consolidation'
-  | 'embeddings';
-
 export interface MemuPluginConfigV1 {
   version: 4;
-  useServerSettings?: boolean;
-  useClaudeCode?: boolean;
-  defaultProfileId?: string;
-  stepProfileId?: Partial<Record<MemuStep, string>>;
 
   embeddingModelSelected?: string;
   embeddingModelManual?: string;
@@ -31,6 +19,18 @@ export interface MemuPluginConfigV1 {
 
   updatedAt: string;
 }
+
+export type ModelSelection = { profile_id: string; provider: string; model: string; base_url?: string; context_window_tokens?: number; max_tokens?: number };
+export type ModelChoice = { source: 'config' | 'srmm' | 'st_native' | 'configured'; selection?: ModelSelection };
+export type ModelMappings = {
+  claude_code: boolean;
+  reply_models: Record<string, ModelChoice>;
+  step_models: Record<string, ModelChoice>;
+  st_selected: { selection: ModelSelection } | null;
+  base_model: { provider: string; model: string };
+  providers: Array<{ profile_id: string; provider: string; label: string; supported: boolean; reason?: string;
+    models: Array<{ model: string; context_window_tokens?: number }> }>;
+};
 
 export interface ConnectionProfileSummary {
   id: string;
@@ -106,7 +106,6 @@ export interface ConversationData {
   conversationId?: string;
   chatName: string;
   source_message_count: number;
-  runtimeSettings: MemuPluginConfigV1;
 }
 
 export interface ConversationMessage {

@@ -1,7 +1,8 @@
 import MemorizeProgress from 'component/MemorizeProgress';
 import MemoryShowModal from 'component/MemoryShowModal';
 import NarrativeSuggestion from 'component/NarrativeSuggestion';
-import { ChangeEvent, CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, CSSProperties, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { deleteMemuLorebooksForCurrentCharacter, memorizeNow, syncLorebooksNow } from 'memory/memorize';
 import EyeIcon from 'ui/icons';
 import MemuLogo from 'ui/logo';
@@ -10,24 +11,29 @@ import {
   memuExtras,
   OVERRIDE_SUMMARIZER,
   IMPORT_LOREBOOKS,
-  MENTAL_HEALTH_ADDON,
   SHOW_ADVANCED_MAPPING,
+  MENTAL_HEALTH_ADDON,
   st,
 } from 'utils/context-extra';
 import {
   createRelationship,
   deleteRelationship,
-  getConnectionProfiles,
+  getModelMappings,
   getPluginConfig,
   listRelationships,
   serverStart,
   serverStatus,
   serverStop,
   setPluginConfig,
+  setModelMappings,
   updateRelationship,
   RelationshipRecord,
 } from 'utils/network';
-import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
+import { MemuPluginConfigV1, MemuTaskStatus, ModelMappings, ModelChoice, ModelSelection } from 'utils/types';
+import { main_api } from '@silly-tavern/script.js';
+import { getChatCompletionModel, model_list, oai_settings } from '@silly-tavern/scripts/openai.js';
+import { getTextGenModel, getTextGenServer, textgenerationwebui_settings } from '@silly-tavern/scripts/textgen-settings.js';
+import { extension_settings } from '@silly-tavern/scripts/extensions.js';
 import { postJsonWithCsrf } from 'utils/csrf';
 import { power_user } from '@silly-tavern/scripts/power-user.js';
 import { appReady, canUseSoulCard, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, refreshSoulCard, soulPersonaName, writeMemuDisabled } from 'memory/utils';
@@ -60,7 +66,25 @@ const sectionTitleStyle: CSSProperties = {
 };
 
 function defaultCfg(): MemuPluginConfigV1 {
-  return { version: 4, useServerSettings: true, useClaudeCode: false, updatedAt: new Date().toISOString() };
+  return { version: 4, updatedAt: new Date().toISOString() };
+}
+
+function nativeModelSelection(): ModelSelection | null {
+  const cc = main_api === 'openai';
+  if (!cc && main_api !== 'textgenerationwebui') return null;
+  const provider = cc ? oai_settings.chat_completion_source : textgenerationwebui_settings.type;
+  if (!cc && provider === 'ollama' && !textgenerationwebui_settings.ollama_model) return null;
+  const model = cc ? getChatCompletionModel() : getTextGenModel();
+  if (!provider || !model) return null;
+  const manager = extension_settings.connectionManager;
+  const profile = (manager?.profiles || []).find((p: any) => p.id === manager?.selectedProfile && p.api === provider && p.mode === (cc ? 'cc' : 'tc'));
+  const metadata = cc ? model_list?.find((row: any) => row.id === model) : null;
+  const capacity = metadata?.context_length ?? metadata?.context_window_tokens ?? metadata?.context_window;
+  return { profile_id: profile?.id || `native:${cc ? 'cc' : 'tc'}:${provider}`, provider, model,
+    ...(Number.isInteger(capacity) && capacity > 0 ? { context_window_tokens: capacity } : {}),
+    ...(cc && Number.isInteger(oai_settings.openai_max_tokens) && oai_settings.openai_max_tokens > 0 ? { max_tokens: oai_settings.openai_max_tokens } : {}),
+    ...(!cc ? { base_url: getTextGenServer() } : provider === 'custom' ? { base_url: oai_settings.custom_url }
+      : ['openai', 'mistralai', 'deepseek', 'xai'].includes(provider) && oai_settings.reverse_proxy ? { base_url: oai_settings.reverse_proxy } : {}) };
 }
 
 type RelationshipEditorState = {
@@ -86,13 +110,11 @@ const RELATIONSHIP_SUGGESTIONS = [
 export default function App() {
   const [pluginOk, setPluginOk] = useState<boolean | null>(null);
   const [pluginConfig, setPluginConfigState] = useState<MemuPluginConfigV1 | null>(null);
-  const [profiles, setProfiles] = useState<ConnectionProfileSummary[]>([]);
+  const [mappings, setMappings] = useState<ModelMappings | null>(null);
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [serverCtl, setServerCtl] = useState<any | null>(null);
   const [serverCtlBusy, setServerCtlBusy] = useState<'idle' | 'working' | 'error'>('idle');
-
-  const [showAdvancedMapping, setShowAdvancedMapping] = useState<boolean>(false);
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
   const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
@@ -118,6 +140,7 @@ export default function App() {
       await appReady;
       if (currentScope() !== scope) return;
       const ctx: any = st.getContext();
+      setCurrentCharacter(currentSelectedCharacterName());
       const copy = !!ctx.chatMetadata?.main_chat;
       setCopiedChat(copy);
       setPersonas({ ...power_user.personas });
@@ -158,6 +181,7 @@ export default function App() {
     reload();
     st.eventSource.on(st.event_types.CHAT_CHANGED, reload);
     st.eventSource.on(st.event_types.CHARACTER_EDITED, reload);
+    st.eventSource.on(st.event_types.CHARACTER_EDITOR_OPENED, reload);
     const personaEvents = [st.event_types.PERSONA_CREATED, st.event_types.PERSONA_UPDATED, st.event_types.PERSONA_DELETED];
     const reloadPersonas = () => setPersonas({ ...power_user.personas });
     for (const event of personaEvents) st.eventSource.on(event, reloadPersonas);
@@ -165,6 +189,7 @@ export default function App() {
     return () => {
       st.eventSource.removeListener(st.event_types.CHAT_CHANGED, reload);
       st.eventSource.removeListener(st.event_types.CHARACTER_EDITED, reload);
+      st.eventSource.removeListener(st.event_types.CHARACTER_EDITOR_OPENED, reload);
       for (const event of personaEvents) st.eventSource.removeListener(event, reloadPersonas);
       window.removeEventListener('memu:server-ready', reload);
     };
@@ -218,8 +243,13 @@ export default function App() {
   const [memoryText, setMemoryText] = useState<string>('');
   const [eyeHover, setEyeHover] = useState<boolean>(false);
   const skipNextAutosaveRef = useRef<boolean>(true);
-  const profilesSigRef = useRef<string>('');
-  const prevDefaultIsHordeRef = useRef<boolean>(false);
+  const [showAdvancedMapping, setShowAdvancedMapping] = useState(() => SHOW_ADVANCED_MAPPING.get() === 'true');
+  const [nativeSelection, setNativeSelection] = useState<ModelSelection | null>(nativeModelSelection);
+  const pendingMappings = useRef<Partial<ModelMappings>>({});
+  const mappingTimer = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const mappingSave = useRef<Promise<void>>(Promise.resolve());
+  const mappingState = useRef(mappings);
+  mappingState.current = mappings;
 
   useEffect(() => {
     const onChatChanged = () => {
@@ -254,43 +284,36 @@ export default function App() {
         setPluginOk(true);
         setPluginConfigState(cfg);
 
-        try {
-          const pref = SHOW_ADVANCED_MAPPING.get();
-          if (pref !== null) {
-            setShowAdvancedMapping(pref === 'true');
-          } else {
-            const m = (cfg as any)?.stepProfileId;
-            const hasOverrides = m && typeof m === 'object' && Object.keys(m).some((k) => k !== 'all' && String(m[k] ?? '').trim().length > 0);
-            if (hasOverrides) setShowAdvancedMapping(true);
-          }
-        } catch {
-          // ignore
-        }
-
-        const prof = await getConnectionProfiles();
-        if (Array.isArray(prof?.profiles)) {
-          const sig = JSON.stringify(prof.profiles);
-          profilesSigRef.current = sig;
-          setProfiles(prof.profiles);
-        }
       } catch {
         setPluginOk(false);
       }
     })();
   }, []);
 
-  async function refreshProfiles(): Promise<void> {
-    try {
-      if (!pluginOk) return;
-      const prof = await getConnectionProfiles();
-      if (!Array.isArray(prof?.profiles)) return;
-      const sig = JSON.stringify(prof.profiles);
-      if (sig === profilesSigRef.current) return;
-      profilesSigRef.current = sig;
-      setProfiles(prof.profiles);
-    } catch {
-      // ignore
-    }
+  useEffect(() => {
+    void getModelMappings().then(result => { mappingState.current = result; setMappings(result); })
+      .catch(error => { setConfigStatus('error'); setSwitchError(String(error)); });
+  }, []);
+
+  function changeModelMappings(patch: Partial<ModelMappings>) {
+    if (!mappingState.current) return;
+    const merge = (base: Partial<ModelMappings>, update: Partial<ModelMappings>) => ({ ...base, ...update,
+      reply_models: { ...base.reply_models, ...update.reply_models }, step_models: { ...base.step_models, ...update.step_models } });
+    const next = merge(mappingState.current, patch) as ModelMappings;
+    mappingState.current = next; setMappings(next);
+    pendingMappings.current = merge(pendingMappings.current, patch);
+    if (mappingTimer.current !== null) window.clearTimeout(mappingTimer.current);
+    setConfigStatus('saving');
+    mappingTimer.current = window.setTimeout(() => {
+      const saving = pendingMappings.current; pendingMappings.current = {};
+      const displayed = mappingState.current;
+      mappingSave.current = mappingSave.current.catch(() => {}).then(async () => {
+        try {
+          const result = await setModelMappings(saving);
+          if (mappingState.current === displayed) { mappingState.current = result; setMappings(result); setConfigStatus('saved'); }
+        } catch (error) { setConfigStatus('error'); setSwitchError(String(error)); }
+      });
+    }, 350);
   }
 
   async function refreshRelationships(): Promise<void> {
@@ -357,43 +380,33 @@ export default function App() {
   }, [pluginOk, (pluginConfig as any)?.serverPath, (pluginConfig as any)?.autoStartServer]);
 
   useEffect(() => {
-    if (!pluginOk) return;
-    const t = window.setInterval(() => {
-      void refreshProfiles();
-    }, 30_000);
-
-    const onFocus = () => { void refreshProfiles(); };
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') void refreshProfiles();
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-
-    const settingsUpdatedEvent = (st as any)?.event_types?.SETTINGS_UPDATED;
-    const eventSourceAny = (st as any)?.eventSource;
-    const onSettingsUpdated = () => { void refreshProfiles(); };
-    if (settingsUpdatedEvent && eventSourceAny?.on) {
-      eventSourceAny.on(settingsUpdatedEvent, onSettingsUpdated);
-    }
-
-    return () => {
-      window.clearInterval(t);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-      if (settingsUpdatedEvent && eventSourceAny?.removeListener) {
-        eventSourceAny.removeListener(settingsUpdatedEvent, onSettingsUpdated);
+    const events = [st.event_types.MAIN_API_CHANGED, st.event_types.CHATCOMPLETION_SOURCE_CHANGED, st.event_types.CHATCOMPLETION_MODEL_CHANGED, st.event_types.CONNECTION_PROFILE_LOADED, st.event_types.OAI_PRESET_CHANGED_AFTER, st.event_types.PRESET_CHANGED, st.event_types.SETTINGS_UPDATED];
+    const changed = () => {
+      const selection = nativeModelSelection();
+      setNativeSelection(selection);
+      const current = mappingState.current;
+      if (selection && current && JSON.stringify(selection) !== JSON.stringify(current.st_selected?.selection)
+        && [...Object.values(current.reply_models), ...Object.values(current.step_models)].some(row => row.source === "st_native")) {
+        changeModelMappings({ st_selected: { selection } });
       }
     };
-  }, [pluginOk]);
+    for (const event of events) st.eventSource.on(event, changed);
+    if (mappings) changed();
+    return () => { for (const event of events) st.eventSource.removeListener(event, changed); };
+  }, [!!mappings]);
 
   async function doServerStart() {
     setServerCtlBusy('working');
     try {
       const r = await serverStart();
       setServerCtl(r?.status ?? r);
+      const current = await getModelMappings();
+      mappingState.current = current;
+      setMappings(current);
       setServerCtlBusy('idle');
-    } catch {
+    } catch (error) {
       setServerCtlBusy('error');
+      setSwitchError(String(error));
     }
   }
 
@@ -449,115 +462,66 @@ export default function App() {
     };
   }, [pluginConfig, pluginOk]);
 
-  const defaultAlias = useMemo(
-    () => profiles.find((p) => String(p.id || '').trim() === 'default'),
-    [profiles],
-  );
-  const defaultProfileId = useMemo(
-    () => String(pluginConfig?.defaultProfileId || 'default').trim() || 'default',
-    [pluginConfig?.defaultProfileId],
-  );
-  const effectiveDefaultProvider = useMemo(() => {
-    if (defaultProfileId === 'default') {
-      return String(defaultAlias?.provider || '').trim().toLowerCase();
+
+  function renderModelPicker(group: 'reply_models' | 'step_models', role: string) {
+    const current = mappings?.[group]?.[role] || { source: 'config' };
+    const value = JSON.stringify(current);
+    const choices = [{ value: JSON.stringify({ source: 'config' }), label: `default (config.json: ${mappings?.base_model?.model || 'unconfigured'})`, disabled: false }];
+    if (group === 'step_models') choices.push({ value: JSON.stringify({ source: 'srmm' }), label: 'default (SRMM)', disabled: false });
+    const native = nativeSelection;
+    const supportedNative = native && mappings?.providers.some(provider => provider.profile_id === native.profile_id && provider.supported);
+    choices.push({ value: JSON.stringify({ source: 'st_native' }), label: `default (SillyTavern selected: ${native?.provider || 'none'} ${native?.model || ''})`, disabled: !supportedNative });
+    for (const provider of mappings?.providers || []) {
+      if (!provider.models.length) choices.push({ value: JSON.stringify({ source: 'configured', selection: { profile_id: provider.profile_id, provider: provider.provider, model: '' } }),
+        label: `${provider.label} (unavailable: ${provider.reason || 'Choose a model in ST'})`, disabled: true });
+      for (const model of provider.models) choices.push({ value: JSON.stringify({ source: 'configured', selection: { profile_id: provider.profile_id, provider: provider.provider, model: model.model } }),
+        label: `${provider.label}: ${model.model}${provider.supported ? '' : ` (unavailable: ${provider.reason})`}`, disabled: !provider.supported });
     }
-    const p = profiles.find((x) => String(x.id || '').trim() === defaultProfileId);
-    return String(p?.provider || '').trim().toLowerCase();
-  }, [defaultAlias, defaultProfileId, profiles]);
-  const defaultIsHorde = effectiveDefaultProvider === 'horde';
-  const providerByProfileId = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of profiles) {
-      const id = String(p.id || '').trim();
-      if (!id) continue;
-      m.set(id, String(p.provider || '').trim().toLowerCase());
-    }
-    return m;
-  }, [profiles]);
-  const providerForProfileId = (id: string): string => {
-    const s = String(id || '').trim();
-    if (!s) return '';
-    if (s === 'default') return effectiveDefaultProvider;
-    return providerByProfileId.get(s) || '';
-  };
-
-  useEffect(() => {
-    if (!defaultIsHorde) return;
-    if (showAdvancedMapping) return;
-    setShowAdvancedMapping(true);
-  }, [defaultIsHorde, showAdvancedMapping]);
-
-  useEffect(() => {
-    const prev = prevDefaultIsHordeRef.current;
-    prevDefaultIsHordeRef.current = defaultIsHorde;
-    if (!prev || defaultIsHorde) return;
-
-    const advancedSteps: MemuStep[] = ['preprocess', 'memory_extract', 'category_update', 'reflection'];
-    const stepMap = (pluginConfig as any)?.stepProfileId;
-    const hasExplicitOverrides = !!(
-      stepMap &&
-      typeof stepMap === 'object' &&
-      advancedSteps.some((k) => {
-        const v = (stepMap as any)?.[k];
-        const s = String(v ?? '').trim();
-        return !!s && s !== 'default';
-      })
-    );
-    if (hasExplicitOverrides) return;
-
-    setShowAdvancedMapping(false);
-    try {
-      SHOW_ADVANCED_MAPPING.set(false);
-    } catch {
-      // ignore
-    }
-  }, [defaultIsHorde, pluginConfig?.stepProfileId]);
-
-  function renderProfilePicker(
-    value: string | undefined,
-    onChange: (v: string) => void,
-    opts?: { allowModelDefault?: boolean; includeDefaultAlias?: boolean; forceBlank?: boolean; blankLabel?: string; excludeProviders?: string[] },
-  ) {
-    const allowModelDefault = opts?.allowModelDefault === true;
-    const includeDefaultAlias = opts?.includeDefaultAlias !== false;
-    const forceBlank = opts?.forceBlank === true;
-    if (!profiles.length) {
-      return (
-        <input
-          className="text_pole"
-          value={value ?? ''}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="profile id"
-        />
-      );
-    }
-
-    const banned = new Set((opts?.excludeProviders || []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean));
-    const options = (includeDefaultAlias ? profiles : profiles.filter((p) => String(p.id || '').trim() !== 'default'))
-      .filter((p) => !banned.has(String(p.provider || '').trim().toLowerCase()));
-    let v = (value ?? (allowModelDefault ? '' : 'default')).trim();
-    if (forceBlank && (v === '' || v === 'default')) v = '';
-    if (v && !options.some((p) => String(p.id || '').trim() === v)) v = '';
-
-    return (
-      <select className="text_pole" value={v} onChange={(e) => onChange(e.target.value)}>
-        {(allowModelDefault || forceBlank) && <option value="">{forceBlank ? (opts?.blankLabel || '!') : 'default (Model Mapping)'}</option>}
-        {options.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
-    );
+    if (!choices.some(choice => choice.value === value)) choices.push({ value, label: `Configured: ${current.selection?.provider || ''} ${current.selection?.model || current.source}`, disabled: false });
+    return <select id={`memu-model-${role}`} className="text_pole" value={value} disabled={!mappings} onFocus={() => {
+      void getModelMappings('all').then(result => {
+        if (!mappingState.current) return;
+        const next = { ...mappingState.current, providers: result.providers };
+        mappingState.current = next; setMappings(next);
+      }).catch(error => setSwitchError(String(error)));
+    }} onChange={event => {
+      const choice: ModelChoice = JSON.parse(event.target.value);
+      changeModelMappings({ [group]: { [role]: choice }, ...(choice.source === 'st_native' && native ? { st_selected: { selection: native } } : {}) });
+    }}>{choices.map(choice => <option key={choice.value} value={choice.value} disabled={choice.disabled}>{choice.label}</option>)}</select>;
   }
 
-  const stepLabels: Array<{ step: MemuStep; label: string; hint: string }> = [
-    { step: 'preprocess', label: 'Preprocess', hint: 'Raw multimodal → concise text' },
-    { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
-    { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
-    { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
-    { step: 'consolidation', label: 'Consolidation', hint: 'Weekly reflection — edges, intentions, diary' },
-  ];
+  function cardMatchesSelection(): boolean {
+    const ctx: any = st.getContext();
+    const avatar = ctx.characters?.[ctx.characterId]?.avatar;
+    return !!avatar && typeof document !== 'undefined' && !ctx.groupId
+      && document.getElementById('form_create')?.getAttribute('actiontype') === 'editcharacter'
+      && (document.getElementById('avatar_url_pole') as HTMLInputElement)?.value === avatar;
+  }
+
+  function renderMemuSwitch(id: string, onCard = false) {
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap' }}>
+      {onCard && <span>Enable memU:</span>}
+      <button id={id} type="button" role="switch" className="memu-toggle" aria-label="memU"
+        aria-checked={memuActive && !copiedChat}
+        disabled={switchBusy || copiedChat || !currentCharacter || (!memuActive && !personas[persona]) || (onCard && !cardMatchesSelection())}
+        onClick={() => { if (!onCard || cardMatchesSelection()) void changeMemu(!memuActive); }}><span /></button>
+      {!onCard && <span>memU</span>}
+      {!onCard && <span className="memu-runtime-info">
+        <button type="button" className="menu_button" aria-label="About memU" aria-describedby={`${id}-info`}><i className="fa-solid fa-info-circle" /></button>
+        <span id={`${id}-info`} role="tooltip">{copiedChat ? 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.' : 'Enable memory for this character. Turning it off keeps the Soul and its memories.'}</span>
+      </span>}
+    </div>;
+  }
+
+  function openMemuPanel() {
+    const drawer = document.querySelector('#extensions-settings-button > .drawer-content');
+    if (!drawer?.classList.contains('openDrawer')) (document.querySelector('#extensions-settings-button > .drawer-toggle') as HTMLElement)?.click();
+    const section = document.querySelector('.memu-ext-settings > .inline-drawer');
+    const content = section?.querySelector('.inline-drawer-content');
+    if (content && getComputedStyle(content).display === 'none') (section?.querySelector('.inline-drawer-toggle') as HTMLElement)?.click();
+    section?.scrollIntoView({ block: 'nearest' });
+  }
+
 
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
     if (!memuActive || copiedChat) return;
@@ -730,6 +694,7 @@ export default function App() {
     }
   }
 
+  const cardHost = typeof document !== 'undefined' ? document.getElementById('avatar-and-name-block') : null;
   return (
     <>
                 <style>{`
@@ -741,7 +706,26 @@ export default function App() {
                   }
                   .memu-runtime-info:hover [role="tooltip"],
                   .memu-runtime-info:focus-within [role="tooltip"] { display: block; }
+                  .memu-toggle { width: 44px; height: 24px; padding: 3px; border: 0; border-radius: 20px; background: #52616c; cursor: pointer; }
+                  .memu-toggle span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #eef8ff; }
+                  .memu-toggle[aria-checked="true"] { background: #7dcaf7; }
+                  .memu-toggle[aria-checked="true"] span { transform: translateX(20px); }
+                  .memu-toggle:disabled { opacity: .5; cursor: default; }
+                  #form_create:not([actiontype="editcharacter"]) .memu-card-controls { display: none !important; }
                 `}</style>
+      {cardHost && createPortal(<div className="memu-card-controls" style={{ display: cardMatchesSelection() ? 'flex' : 'none', alignItems: 'center', gap: 6, minWidth: 0 }}>
+        <button id="memu_card_panel" type="button" className="menu_button" style={{ flexShrink: 0 }} aria-label="Open memU panel" onClick={openMemuPanel}><MemuLogo width={58} height={20} /></button>
+        <select id="memu_soul_persona" aria-label="Soul persona" className="text_pole" style={{ flex: 1, minWidth: 0 }} value={persona} disabled={switchBusy || copiedChat || personaLocked || !currentCharacter || !cardMatchesSelection()}
+          onChange={e => { if (cardMatchesSelection()) selectPersona(e.target.value); }}>
+          <option value="">Select a persona</option>
+          {Object.entries(personas).map(([avatar, name]) => <option key={avatar} value={avatar}>{name}</option>)}
+        </select>
+        <span className="memu-runtime-info" style={{ flexShrink: 0 }}>
+          <button type="button" className="menu_button" aria-label="About Soul personas" aria-describedby="memu-persona-info"><i className="fa-solid fa-info-circle" /></button>
+          <span id="memu-persona-info" role="tooltip">For memU, only one persona is allowed.</span>
+        </span>
+        {renderMemuSwitch('memu_card_enabled', true)}
+      </div>, cardHost)}
       <div className="memu-ext-settings" style={{ marginBottom: 16 }}>
         <div className="inline-drawer">
           <div className="inline-drawer-toggle inline-drawer-header">
@@ -875,127 +859,29 @@ export default function App() {
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label className="checkbox_label expander" htmlFor="use_server_settings">
-                    <input
-                      id="use_server_settings"
-                      type="checkbox"
-                      className="checkbox"
-                      checked={pluginConfig?.useServerSettings !== false}
-                      onChange={(e) => updatePluginConfig({ useServerSettings: e.target.checked })}
-                      aria-controls="memu-runtime-overrides"
-                      aria-expanded={pluginConfig?.useServerSettings === false}
-                    />
-                    <span>Use server settings</span>
-                  </label>
-                  <span className="memu-runtime-info">
-                    <button type="button" className="menu_button" aria-label="Scheduled agentic turn settings" aria-describedby="memu-agentic-settings-info">
-                      <i className="fa-solid fa-info-circle" aria-hidden="true" />
-                    </button>
-                    <span id="memu-agentic-settings-info" role="tooltip">
-                      The Soul's scheduled agentic turns use mcp-memu-server/config.json.
-                    </span>
-                  </span>
-                </div>
-
-                {pluginConfig?.useServerSettings === false && (
-                  <div id="memu-runtime-overrides" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <label className="checkbox_label expander" htmlFor="use_claude_code">
-                      <input
-                        id="use_claude_code"
-                        type="checkbox"
-                        className="checkbox"
-                        checked={pluginConfig?.useClaudeCode === true}
-                        onChange={(e) => updatePluginConfig({ useClaudeCode: e.target.checked })}
-                      />
-                      <span>Use Claude Code</span>
-                    </label>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {renderProfilePicker(
-                    pluginConfig?.defaultProfileId,
-                    (v) => updatePluginConfig({ defaultProfileId: (v || 'default') as any }),
-                    { allowModelDefault: false },
-                  )}
-                </div>
-
-                {!defaultIsHorde && (
-                  <label className="checkbox_label expander" htmlFor="advanced_mapping">
-                    <input
-                      id="advanced_mapping"
-                      type="checkbox"
-                      className="checkbox"
-                      checked={showAdvancedMapping}
-                      onChange={(e) => {
-                        const v = e.target.checked;
-                        setShowAdvancedMapping(v);
-                        try {
-                          SHOW_ADVANCED_MAPPING.set(v);
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                    />
-                    <span>Advanced Mapping</span>
-                  </label>
-                )}
-
-                {(showAdvancedMapping || defaultIsHorde) && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {stepLabels.map((s) => (
-                      <div key={s.step} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        {(() => {
-                          const removeInheritance = defaultIsHorde;
-                          const raw = String(pluginConfig?.stepProfileId?.[s.step] || '').trim();
-                          const rawProvider = providerForProfileId(raw);
-                          const missing = removeInheritance && (!raw || raw === 'default' || rawProvider === 'horde');
-                          return (
-                            <label>
-                              {s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span>{missing ? <span title="Select a provider profile for this step" style={{ marginLeft: 6, opacity: 0.9 }}>!</span> : null}
-                            </label>
-                          );
-                        })()}
-                        {renderProfilePicker(
-                          pluginConfig?.stepProfileId?.[s.step],
-                          (v) => updatePluginConfig({ stepProfileId: { ...(pluginConfig?.stepProfileId ?? {}), [s.step]: v || undefined } as any }),
-                          defaultIsHorde
-                            ? { allowModelDefault: false, includeDefaultAlias: false, forceBlank: true, blankLabel: '!', excludeProviders: ['horde'] }
-                            : { allowModelDefault: true, includeDefaultAlias: true, excludeProviders: ['horde'] },
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                  </div>
-                )}
+                <label className="checkbox_label" htmlFor="use_claude_code">
+                  <input id="use_claude_code" type="checkbox" checked={mappings?.claude_code === true} disabled={!mappings} onChange={event => changeModelMappings({ claude_code: event.target.checked })} />
+                  <span>Use Claude Code</span>
+                  <span className="memu-runtime-info"><button type="button" className="menu_button" aria-label="Scheduled agentic turn settings" aria-describedby="memu-agentic-settings-info"><i className="fa-solid fa-info-circle" /></button><span id="memu-agentic-settings-info" role="tooltip">The Soul's scheduled agentic turns use mcp-memu-server/config.json.</span></span>
+                </label>
+                <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>)</label>
+                {renderModelPicker('reply_models', 'srmm')}
+                {!mappings?.claude_code && <>
+                  <label>Other OpenAlma App Replies <span className="memu-runtime-info"><button type="button" className="menu_button" aria-label="About other app replies" aria-describedby="memu-iris-model-info"><i className="fa-solid fa-info-circle" /></button><span id="memu-iris-model-info" role="tooltip">Except the Iris voice model</span></span></label>
+                  {renderModelPicker('reply_models', 'other_apps')}
+                  <label className="checkbox_label"><input id="advanced_mapping" type="checkbox" checked={showAdvancedMapping} onChange={event => { setShowAdvancedMapping(event.target.checked); SHOW_ADVANCED_MAPPING.set(event.target.checked); }} />Advanced Mapping</label>
+                  {showAdvancedMapping && <div id="memu-advanced-mapping" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <small>Steps may follow <span style={{ color: '#7dcaf7' }}>SRMM</span> or use their own model.</small>
+                    {Object.entries({ preprocess: 'Preprocess', memory_extract: 'Memory Extract', category_update: 'Category Update', reflection: 'Reflection', consolidation: 'Consolidation' }).map(([role, label]) => <div key={role}><label>{label}</label>{renderModelPicker('step_models', role)}</div>)}
+                  </div>}
+                </>}
               </div>
             )}
 
             {/* Memory */}
             <div style={sectionStyle}>
               <h4 style={sectionTitleStyle}>Memory</h4>
-              <label className="checkbox_label">
-                <input id="memu_character_enabled" type="checkbox" checked={memuActive && !copiedChat}
-                  disabled={switchBusy || copiedChat || !currentCharacter || (!memuActive && !personas[persona])}
-                  onChange={e => void changeMemu(e.target.checked)} />
-                <span>memU</span>
-                <span className="memu-runtime-info">
-                  <button type="button" className="menu_button" aria-label="About memU" aria-describedby="memu-switch-info"><i className="fa-solid fa-info-circle" /></button>
-                  <span id="memu-switch-info" role="tooltip">{copiedChat ? 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.' : 'Enable memory for this character. Turning it off keeps the Soul and its memories.'}</span>
-                </span>
-              </label>
-              <label>
-                Persona <span className="memu-runtime-info">
-                  <button type="button" className="menu_button" aria-label="About Soul personas" aria-describedby="memu-persona-info"><i className="fa-solid fa-info-circle" /></button>
-                  <span id="memu-persona-info" role="tooltip">If you switch persona, the Soul will think it's talking to someone else.</span>
-                </span>
-                <select id="memu_soul_persona" className="text_pole" value={persona} disabled={switchBusy || copiedChat || personaLocked || !currentCharacter}
-                  onChange={e => void selectPersona(e.target.value)}>
-                  <option value="">Select a persona</option>
-                  {Object.entries(personas).map(([avatar, name]) => <option key={avatar} value={avatar}>{name}</option>)}
-                </select>
-              </label>
+              {renderMemuSwitch("memu_character_enabled")}
               {switchError && <small role="alert">{switchError}</small>}
 
               {!currentCharacter && (

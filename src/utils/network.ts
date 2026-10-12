@@ -1,5 +1,5 @@
 import { ConversationData } from 'utils/types';
-import { ConnectionProfileSummary, MemuPluginConfigV1 } from 'utils/types';
+import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings } from 'utils/types';
 import { getCsrfTokenCached } from 'utils/csrf';
 
 const ROUTER_BASE_URL = '/api/plugins/memu';
@@ -148,9 +148,12 @@ export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return pluginConfig;
 }
 
-export function captureRuntimeSettings(): MemuPluginConfigV1 {
-  if (!pluginConfig) throw new Error('memU plugin settings are not loaded yet');
-  return { ...pluginConfig, stepProfileId: { ...pluginConfig.stepProfileId } };
+export async function getModelMappings(profileId?: string): Promise<ModelMappings> {
+  return request(`/modelMappings${profileId ? `?models=${encodeURIComponent(profileId)}` : ''}`, undefined, 'GET');
+}
+
+export async function setModelMappings(patch: Partial<Pick<ModelMappings, 'claude_code' | 'reply_models' | 'step_models' | 'st_selected'>>): Promise<ModelMappings> {
+  return request('/modelMappings', patch);
 }
 
 export async function serverStatus(): Promise<any> {
@@ -234,13 +237,11 @@ export async function memorizeConversation(
     chat_name: conversationData.chatName,
     source_message_count: conversationData.source_message_count,
     intent: opts.intent ?? 'manual',
-    runtimeSettings: conversationData.runtimeSettings,
   });
 }
 
 export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<{ narrative_self?: string }> {
-  const runtimeSettings = captureRuntimeSettings();
-  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion, runtimeSettings });
+  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion });
 }
 
 export async function listRelationships(userId: string, soulId: string): Promise<{ relationships: RelationshipRecord[] }> {

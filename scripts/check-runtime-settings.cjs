@@ -12,76 +12,143 @@ let cursor = 0;
 const react = {
   useState(initial) {
     const index = cursor++;
-    if (!(index in states)) states[index] = initial;
+    if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial;
     return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }];
   },
   useEffect() {}, useMemo: fn => fn(), useRef: value => ({ current: value }),
 };
+let formMode = 'editcharacter';
+const uiCtx = { characters: [{ name: 'TestSoul', avatar: 'test.png' }], characterId: 0 };
+const editor = { value: 'test.png' };
+const cardHost = {};
 const context = {
-  exports: {},
-  require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? jsx : { default: () => null, __esModule: true, st: {}, memuExtras: {} },
+  exports: {}, localStorage: { getItem: () => null, setItem() {} }, window: { setTimeout: () => 1, clearTimeout() {} },
+  document: { getElementById: id => ({ 'avatar-and-name-block': cardHost, avatar_url_pole: editor,
+    form_create: { getAttribute: () => formMode } })[id] },
+  require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? jsx
+    : name === 'react-dom' ? { createPortal: (children, target) => ({ type: 'portal', props: { children, target } }) }
+    : { default: () => null, __esModule: true, st: { getContext: () => uiCtx }, memuExtras: {}, SHOW_ADVANCED_MAPPING: { get: () => null, set() {} } },
 };
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, context);
 states[0] = true;
-states[1] = { version: 4, defaultProfileId: 'test-api', stepProfileId: { reflection: 'test-reflection' }, useClaudeCode: false };
-states[2] = [{ id: 'test-api', name: 'Fictional API / test-model' }, { id: 'test-reflection', name: 'Fictional reflection' }];
+states[1] = { version: 4, serverPath: '/fictional/server' };
+states[2] = { claude_code: false, reply_models: { srmm: { source: 'config' }, other_apps: { source: 'config' } }, step_models: { memory_extract: { source: 'srmm' } }, st_selected: null,
+  base_model: { provider: 'openai', model: 'custom-outside-catalog' }, providers: [
+    { profile_id: 'test-api', provider: 'openai', label: 'Fictional API', supported: true, models: [{ model: 'test-model' }] },
+    { profile_id: 'unsupported', provider: 'claude', label: 'Native Claude', supported: false, reason: 'Unsupported transport', models: [{ model: 'native-model' }] },
+  ] };
 const render = () => { cursor = 0; return context.exports.default(); };
-function nodes(tree) {
-  if (!tree || typeof tree !== 'object') return [];
-  if (Array.isArray(tree)) return tree.flatMap(nodes);
-  return [tree, ...nodes(tree.props?.children)];
-}
+function nodes(tree) { if (!tree || typeof tree !== 'object') return []; if (Array.isArray(tree)) return tree.flatMap(nodes); return [tree, ...nodes(tree.props?.children)]; }
 const find = (tree, id) => nodes(tree).find(node => node.props?.id === id);
-const change = (tree, id, checked) => find(tree, id).props.onChange({ target: { checked } });
 let tree = render();
-assert.equal(find(tree, 'use_server_settings').props.checked, true);
-assert.equal(find(tree, 'memu-runtime-overrides'), undefined);
-const tooltip = find(tree, 'memu-agentic-settings-info');
-assert.equal(tooltip.props.children.trim(), "The Soul's scheduled agentic turns use mcp-memu-server/config.json.");
-assert.equal(tooltip.props.role, 'tooltip');
-assert(nodes(tree).some(node => node.type === 'button' && node.props['aria-describedby'] === tooltip.props.id));
+assert.equal(find(tree, 'use_server_settings'), undefined);
+assert.equal(find(tree, 'use_claude_code').props.checked, false);
+assert(find(tree, 'memu-model-srmm')); assert(find(tree, 'memu-model-other_apps'));
+assert.equal(find(tree, 'memu-iris-model-info').props.children, 'Except the Iris voice model');
+assert(nodes(tree).some(node => node.type === 'option' && /custom-outside-catalog/.test(node.props.children)));
+assert(nodes(tree).some(node => node.type === 'option' && /Native Claude/.test(node.props.children) && node.props.disabled));
+assert.equal(find(tree, 'memu-agentic-settings-info').props.children, "The Soul's scheduled agentic turns use mcp-memu-server/config.json.");
 assert(source.includes('.memu-runtime-info:hover [role="tooltip"]'));
 assert(source.includes('.memu-runtime-info:focus-within [role="tooltip"]'));
-change(tree, 'use_server_settings', false);
-tree = render();
-assert(find(tree, 'memu-runtime-overrides'));
-assert.equal(find(tree, 'use_claude_code').props.checked, false);
-assert(nodes(tree).some(node => node.type === 'select' && node.props.value === 'test-api'));
-assert(nodes(tree).some(node => node.type === 'option' && node.props.children === 'Fictional API / test-model'));
-change(tree, 'use_claude_code', true);
-tree = render();
-assert.equal(find(tree, 'use_claude_code').props.checked, true);
-change(tree, 'use_server_settings', true);
-tree = render();
-assert.equal(find(tree, 'use_claude_code'), undefined);
-assert(find(tree, 'memu-agentic-settings-info'));
-assert(find(tree, 'override_summarizer'));
-change(tree, 'use_server_settings', false);
-tree = render();
-assert.equal(find(tree, 'use_claude_code').props.checked, true);
-assert.equal(states[1].defaultProfileId, 'test-api');
-assert.equal(states[1].stepProfileId.reflection, 'test-reflection');
-change(tree, 'use_claude_code', false);
-assert.equal(find(render(), 'use_claude_code').props.checked, false);
-console.log('Isolated App render: defaults, collapse/restore, API label, Claude toggle and tooltip wiring pass (no browser/live test).');
+const beforeRows = JSON.stringify(states[2].step_models);
+find(tree, 'advanced_mapping').props.onChange({ target: { checked: true } });
+tree = render(); assert(find(tree, 'memu-model-memory_extract')); assert.equal(JSON.stringify(states[2].step_models), beforeRows);
+find(tree, 'use_claude_code').props.onChange({ target: { checked: true } });
+tree = render(); assert(find(tree, 'memu-model-srmm')); assert.equal(find(tree, 'memu-model-other_apps'), undefined); assert.equal(find(tree, 'advanced_mapping'), undefined);
+assert.equal(JSON.stringify(states[2].step_models), beforeRows);
+find(tree, 'use_claude_code').props.onChange({ target: { checked: false } });
+assert(find(render(), 'memu-model-memory_extract'));
+console.log('Canonical defaults, configured catalog, unsupported transport, CLI collapse and visibility-only Advanced Mapping pass.');
+
+const native = { main_api: 'textgenerationwebui', textgenerationwebui_settings: { type: 'ollama' },
+  getTextGenModel: () => assert.fail('Unconfigured Ollama must not call the throwing native getter'),
+  extension_settings: {}, model_list: [], oai_settings: {}, getChatCompletionModel: () => 'fictional-model' };
+vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('function nativeModelSelection('), source.indexOf('type RelationshipEditorState')), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText, native);
+assert.equal(native.nativeModelSelection(), null);
+native.main_api = 'openai';
+native.oai_settings = { chat_completion_source: 'openrouter', reverse_proxy: 'https://proxy.invalid/v1' };
+assert.equal(native.nativeModelSelection().base_url, undefined);
+native.oai_settings.chat_completion_source = 'openai';
+assert.equal(native.nativeModelSelection().base_url, 'https://proxy.invalid/v1');
+assert(source.includes('st.event_types.SETTINGS_UPDATED'));
+
+(async () => {
+  let starts = 0, reads = 0, loaded, busy;
+  const ready = { mappingState: { current: null }, serverStart: async () => { starts++; return { status: { healthy: true } }; },
+    getModelMappings: async () => { reads++; return { claude_code: false, reply_models: {}, step_models: {}, providers: [] }; },
+    setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => assert.fail(value) };
+  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStart('), source.indexOf('  async function doServerStop(')), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, ready);
+  await ready.doServerStart(); assert.equal(starts, 1); assert.equal(reads, 1); assert.equal(busy, 'idle'); assert.equal(ready.mappingState.current, loaded);
+})().catch(error => { console.error(error); process.exitCode = 1; });
 
 // Character switch and copied-chat UI use the same panel, not a second settings store.
-states[10] = 'TestSoul'; states[12] = true; states[13] = true;
-states[14] = 'owner.png'; states[15] = true; states[16] = { 'owner.png': 'TestOwner' }; states[17] = false;
+states[9] = 'TestSoul'; states[11] = true; states[12] = true;
+states[13] = 'owner.png'; states[14] = true; states[15] = { 'owner.png': 'TestOwner' }; states[16] = false;
 tree = render();
-assert.equal(find(tree, 'memu_character_enabled').props.checked, false);
+assert.equal(find(tree, 'memu_character_enabled').props['aria-checked'], false);
 assert.equal(find(tree, 'memu_character_enabled').props.disabled, true);
 assert.equal(find(tree, 'memu_soul_persona').props.disabled, true);
-assert.equal(find(tree, 'memu-switch-info').props.children, 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.');
-states[13] = false; states[15] = false; states[14] = ''; states[12] = false;
+assert.equal(find(tree, 'memu_character_enabled-info').props.children, 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.');
+states[12] = false; states[14] = false; states[13] = ''; states[11] = false;
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, true);
-states[12] = true;
-assert.equal(find(render(), 'memu_character_enabled').props.checked, true);
+states[11] = true;
+assert.equal(find(render(), 'memu_character_enabled').props['aria-checked'], true);
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, false); // missing binding must not prevent opt-out
-states[14] = 'owner.png';
+states[13] = 'owner.png';
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, false);
-states[15] = true; states[12] = false;
+states[14] = true; states[11] = false;
 assert.equal(find(render(), 'memu_soul_persona').props.disabled, true);
+assert.equal(find(render(), 'memu-persona-info').props.children, 'For memU, only one persona is allowed.');
+assert.equal(find(render(), 'memu_soul_persona').props.name, undefined);
+const portal = nodes(render()).find(node => node.type === 'portal');
+assert.equal(portal.props.target, cardHost);
+const row = portal.props.children;
+assert.equal(row.props.style.minWidth, 0);
+assert.equal(row.props.children[0].props.id, 'memu_card_panel');
+assert.equal(row.props.children[1].props.id, 'memu_soul_persona');
+assert.equal(row.props.children[2].props.className, 'memu-runtime-info');
+assert.equal(row.props.children[3].props.children[0].props.children, 'Enable memU:');
+assert.equal(find(render(), 'memu_soul_persona').props.style.minWidth, 0);
+assert.equal(find(render(), 'memu_card_enabled').props.type, 'button');
+assert.equal(find(render(), 'memu_card_enabled').props.role, 'switch');
+assert.equal(find(render(), 'memu_card_enabled').props['aria-checked'], find(render(), 'memu_character_enabled').props['aria-checked']);
+formMode = 'createcharacter';
+assert.equal(nodes(render()).find(node => node.type === 'portal').props.children.props.style.display, 'none');
+assert.equal(find(render(), 'memu_card_enabled').props.disabled, true);
+find(render(), 'memu_card_enabled').props.onClick(); // must not touch the previously selected Soul
+formMode = 'editcharacter'; editor.value = 'other-card.png';
+assert.equal(find(render(), 'memu_soul_persona').props.disabled, true);
+find(render(), 'memu_soul_persona').props.onChange({ target: { value: 'another-persona' } });
+editor.value = 'test.png';
+uiCtx.characterId = undefined;
+assert.equal(find(render(), 'memu_card_enabled').props.disabled, true);
+uiCtx.characterId = 0;
+const switchContext = { exports: {}, memuActive: false, copiedChat: false, switchBusy: false, currentCharacter: 'TestSoul',
+  personas: { 'owner.png': 'TestOwner' }, persona: 'owner.png', cardMatchesSelection: () => true,
+  require: () => jsx, changeMemu: value => { switchContext.memuActive = value; } };
+vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  function renderMemuSwitch('), source.indexOf('  function openMemuPanel(')), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+}).outputText, switchContext);
+find(switchContext.renderMemuSwitch('card', true), 'card').props.onClick();
+assert.equal(find(switchContext.renderMemuSwitch('panel'), 'panel').props['aria-checked'], true);
+find(switchContext.renderMemuSwitch('panel'), 'panel').props.onClick();
+assert.equal(find(switchContext.renderMemuSwitch('card', true), 'card').props['aria-checked'], false);
+let drawerOpen = false, expanded = false, opened = 0, scrolled = 0;
+const section = { querySelector: selector => selector === '.inline-drawer-content' ? {} : { click: () => { expanded = true; } },
+  scrollIntoView: () => { scrolled++; } };
+const opening = { document: { querySelector: selector => selector.endsWith(' > .drawer-content')
+  ? { classList: { contains: () => drawerOpen } }
+  : selector.endsWith(' > .drawer-toggle') ? { click: () => { drawerOpen = true; opened++; } } : section },
+  getComputedStyle: () => ({ display: expanded ? 'flex' : 'none' }) };
+vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  function openMemuPanel('), source.indexOf('  function handleOverrideSummarizerChange(')), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS },
+}).outputText, opening);
+opening.openMemuPanel(); opening.openMemuPanel();
+assert.equal(opened, 1); assert.equal(expanded, true); assert.equal(scrolled, 2);
 states[0] = false;
 assert(nodes(render()).some(node => node.type === 'style' && node.props.children.includes('.memu-runtime-info')));
 
@@ -89,7 +156,7 @@ const personaCallbacks = new Map();
 let seenPersonas, cleanup;
 const personaEffect = {
   useEffect: callback => { cleanup = callback(); }, reloadCharacter: async () => {},
-    st: { event_types: { CHAT_CHANGED: 'chat', CHARACTER_EDITED: 'edited-card', PERSONA_CREATED: 'created', PERSONA_UPDATED: 'updated', PERSONA_DELETED: 'deleted' },
+    st: { event_types: { CHAT_CHANGED: 'chat', CHARACTER_EDITED: 'edited-card', CHARACTER_EDITOR_OPENED: 'editor-opened', PERSONA_CREATED: 'created', PERSONA_UPDATED: 'updated', PERSONA_DELETED: 'deleted' },
     eventSource: { on: (event, callback) => personaCallbacks.set(event, callback), removeListener: event => personaCallbacks.delete(event) } },
   power_user: { personas: {} }, setPersonas: value => { seenPersonas = value; },
   window: { addEventListener() {}, removeEventListener() {} },
@@ -98,6 +165,7 @@ const effectStart = source.indexOf('  useEffect(() => {\n    const reload');
 vm.runInNewContext(ts.transpileModule(source.slice(effectStart, source.indexOf('  async function changeMemu(', effectStart)), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText, personaEffect);
+assert.equal(typeof personaCallbacks.get('editor-opened'), 'function');
 for (const event of ['created', 'updated', 'deleted']) {
   personaEffect.power_user.personas = event === 'deleted' ? {} : { avatar: event };
   personaCallbacks.get(event)();
