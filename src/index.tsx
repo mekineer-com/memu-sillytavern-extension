@@ -17,7 +17,7 @@ import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREB
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
-import { currentScope, isMemuActive } from './memory/utils';
+import { currentScope, isMemuActive, onCharacterDuplicated, onCharacterRenamed } from './memory/utils';
 
 (globalThis as any).memuGenerationInterceptor = memuGenerationInterceptor;
 
@@ -37,6 +37,8 @@ function installHooksWithRetry(): void {
             st.eventSource.on(st.event_types.MESSAGE_EDITED, onMessageEdited);
             st.eventSource.on(st.event_types.MESSAGE_SWIPED, onMessageSwiped);
             st.eventSource.on(st.event_types.MESSAGE_DELETED, onMessageDeleted);
+            st.eventSource.on(st.event_types.CHARACTER_DUPLICATED, onCharacterDuplicated);
+            st.eventSource.on(st.event_types.CHARACTER_RENAMED, onCharacterRenamed);
             return true;
         } catch (e) {
             logError("hooks install failed", e);

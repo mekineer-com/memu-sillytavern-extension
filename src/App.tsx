@@ -30,7 +30,7 @@ import {
 import { ConnectionProfileSummary, MemuPluginConfigV1, MemuStep, MemuTaskStatus } from 'utils/types';
 import { postJsonWithCsrf } from 'utils/csrf';
 import { power_user } from '@silly-tavern/scripts/power-user.js';
-import { appReady, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
+import { appReady, canUseSoulCard, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, soulPersonaName, writeMemuDisabled } from 'memory/utils';
 import { onChatChanged } from 'memory/exports';
 
 const buttonStyle: CSSProperties = {
@@ -129,6 +129,10 @@ export default function App() {
       }
       const character = ctx.characters?.[ctx.characterId];
       if (!character || ctx.groupId) return;
+      if (!canUseSoulCard(character, true)) {
+        setSwitchError('This Soul belongs to its first ST card. Give this card a different name.');
+        return;
+      }
       const active = await isMemuActive();
       if (currentScope() !== scope) return;
       setMemuActive(active);
@@ -151,12 +155,14 @@ export default function App() {
     const reload = () => { void reloadCharacter(); };
     reload();
     st.eventSource.on(st.event_types.CHAT_CHANGED, reload);
+    st.eventSource.on(st.event_types.CHARACTER_EDITED, reload);
     const personaEvents = [st.event_types.PERSONA_CREATED, st.event_types.PERSONA_UPDATED, st.event_types.PERSONA_DELETED];
     const reloadPersonas = () => setPersonas({ ...power_user.personas });
     for (const event of personaEvents) st.eventSource.on(event, reloadPersonas);
     window.addEventListener('memu:server-ready', reload);
     return () => {
       st.eventSource.removeListener(st.event_types.CHAT_CHANGED, reload);
+      st.eventSource.removeListener(st.event_types.CHARACTER_EDITED, reload);
       for (const event of personaEvents) st.eventSource.removeListener(event, reloadPersonas);
       window.removeEventListener('memu:server-ready', reload);
     };
@@ -170,6 +176,9 @@ export default function App() {
     setSwitchBusy(true);
     setSwitchError('');
     try {
+      if (enabled && !canUseSoulCard(character, true)) {
+        throw new Error('This Soul belongs to its first ST card. Give this card a different name.');
+      }
       if (enabled && !personaLocked) {
         await writeMemuDisabled(character, true);
         if (currentScope() !== scope) return;
