@@ -177,6 +177,8 @@ export async function onMessageDeleted(): Promise<void> {
     try {
         await initChatExtraInfo(ctx);
         if (currentScope() !== scope) return;
+        await ctx.saveChat();
+        if (currentScope() !== scope) return;
         const source = bindSavedSource(ctx);
         if (currentScope() !== scope) return;
         await publishSavedSource(source, 'publish_only');

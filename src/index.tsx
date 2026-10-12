@@ -159,7 +159,7 @@ function installChatOptionResetCursor(): void {
             if (isMemorizeActive()) return;
             const { st } = await import('./utils/context-extra');
             const ctx: any = st.getContext() as any;
-            if (!ctx?.characterId && !ctx?.groupId) return;
+            if (ctx?.characterId == null && !ctx?.groupId) return;
             const chat: any[] = Array.isArray(ctx?.chat) ? ctx.chat : [];
             if (chat.length === 0) return;
             if (!window.confirm('Warning!!! This option is for developer testing. This will rename your current database and start a new one. Other SillyTavern chats will not be included in the new database. Other client chats, such as WhatsApp chats, will not be included.')) return;

@@ -228,13 +228,32 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await hooks.memuGenerationInterceptor([], 0, () => { aborts++; }, 'continue');
   assert.equal(aborts, beforeAbort);
   scope = bound.scope; ctx.chatMetadata = { integrity: 'test-main' }; duringSave = null;
-  persisted = [{ chat_metadata: {} }, rows[0]];
+  ctx.chat = [rows[0]];
+  persisted = [{ chat_metadata: {} }, rows[0], { name: 'TestSoul', mes: 'Deleted reply still on disk' }];
   const beforeDeleteSave = saves;
   admission = { status: 'published' };
-  await hooks.onMessageDeleted();
+  let releaseDeletionSave;
+  ctx.saveChat = async () => {
+    saves++;
+    await new Promise(resolve => { releaseDeletionSave = resolve; });
+    persisted = [{ chat_metadata: {} }, ...structuredClone(ctx.chat)];
+  };
+  const deletion = hooks.onMessageDeleted();
+  const beforeDeletionPublish = publications.length;
+  await flush();
+  assert.equal(typeof releaseDeletionSave, 'function');
+  assert.equal(publications.length, beforeDeletionPublish);
+  releaseDeletionSave(); await deletion;
   assert.equal(publications.at(-1).body.intent, 'publish_only');
-  assert.equal(publications.at(-1).body.source_message_count, 1); // native saved end, not in-memory length
-  assert.equal(saves, beforeDeleteSave);
+  assert.equal(publications.at(-1).body.source_message_count, 1);
+  assert.deepEqual(publications.at(-1).body.conversation.map(row => row.content), [rows[0].mes]);
+  assert.equal(saves, beforeDeleteSave + 1);
+  const beforeSwitchPublish = publications.length;
+  const switchedDeletion = hooks.onMessageDeleted(); await flush();
+  scope = 'other-chat'; releaseDeletionSave(); await switchedDeletion;
+  assert.equal(publications.length, beforeSwitchPublish);
+  scope = bound.scope;
+  ctx.saveChat = async () => { saves++; persisted = [{ chat_metadata: {} }, ...structuredClone(ctx.chat)]; };
   // Removing a native off-mode reply must not Undo the MCP reply still in the chat.
   const user = { name: 'TestOwner', is_user: true, mes: 'Fictional request' };
   const mcpReply = { name: 'TestSoul', mes: 'MCP reply', gen_finished: '2026-01-01T00:00:00.000Z',
@@ -353,6 +372,21 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     indexSource.indexOf('\n\n    function tryInstall()')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, reset);
+  const menu = { anchor: { addEventListener: (_event, callback) => { menu.click = callback; } },
+    isMemuActive: utils.isMemuActive, isMemorizeActive: () => false,
+    window: { confirm: () => true }, document: { getElementById: () => null },
+    resetCursor: reset.resetCursor, require: reset.require };
+  vm.runInNewContext(ts.transpileModule(indexSource.slice(indexSource.indexOf("        anchor.addEventListener('click'"),
+    indexSource.indexOf('\n\n        // Place it near')), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, menu);
+  reset.resetCursor = () => menu.click({ preventDefault() {} });
+  const beforeMissingCard = publications.length;
+  for (const missing of [null, undefined]) {
+    ctx.characterId = missing; await reset.resetCursor();
+  }
+  assert.equal(publications.length, beforeMissingCard);
+  ctx.characterId = 0;
   importLorebooks = true;
   lorebooks = ['memU - TestSoul - Old', 'memU - OtherSoul - Private', 'Manual book'];
   extras.summary = { summaryTaskId: 'old-task', summaryTaskStatus: 'SUCCESS', summaryRange: [0, 1] };
