@@ -40,7 +40,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
   const statuses = { PENDING: 'PENDING', PROCESSING: 'PROCESSING', SUCCESS: 'SUCCESS', FAILURE: 'FAILURE' };
   const extras = { baseInfo: { userId: 'TestOwner', userName: 'TestOwner', characterId: 'TestSoul', characterName: 'TestSoul' } };
-  let scope = 'loaded-main', saves = 0, reads = 0, publications = [], alerts = [], inspectWrites = 0, undos = [];
+  let scope = 'loaded-main', saves = 0, reads = 0, publications = [], alerts = [], inspectWrites = 0, undos = [], cardRefreshes = 0;
   let ctx = { chatId: 'renamed-main', chatMetadata: { integrity: 'test-main' }, characterId: 0,
     characters: [{ name: 'TestSoul', avatar: 'test.png' }], getCurrentChatId: () => ctx.chatId,
     chat: [{ name: 'TestOwner', is_user: true, mes: 'UNSAVED must never publish' }] };
@@ -90,7 +90,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   await network.getPluginConfig();
   const st = { getContext: () => ctx, saveChat: async () => { saves++; } };
   const utils = { currentScope: () => scope, initChatExtraInfo: async () => {},
-    refreshSoulCard: async () => {}, cardText: card => Object.fromEntries(['description', 'personality', 'scenario', 'mes_example'].map(field => [field, String(card[field] ?? '')])),
+    refreshSoulCard: async () => { cardRefreshes++; }, cardText: card => Object.fromEntries(['description', 'personality', 'scenario', 'mes_example'].map(field => [field, String(card[field] ?? '')])),
     isMemuActive: async () => !ctx.chatMetadata.main_chat && !ctx.groupId && !ctx.disabled };
   const log = { warn() {}, error() {}, onceWarn() {}, onceError() {}, info() {} };
   const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console, fetch };
@@ -458,11 +458,12 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   admission = { status: 'deferred' }; extras.summary = undefined;
   for (const decision of [{ response_target: 'listen' }, { should_respond: false }]) {
     listenResponse = { ok: true, response: '', ...decision };
-    const beforeListenSave = saves, beforeListenPublish = publications.length;
+    const beforeListenSave = saves, beforeListenPublish = publications.length, beforeListenRefresh = cardRefreshes;
     await generate();
     assert.equal(listenResult.reply, '');
     assert.equal(listenResult.savedSource.scope, bound.scope);
     assert.equal(inspection.turnStatus, 'ok');
+    assert.equal(cardRefreshes, beforeListenRefresh + 1);
     assert.equal(saves, beforeListenSave + 1);
     assert.equal(publications.length, beforeListenPublish + 1);
     assert.equal(publications.at(-1).body.intent, 'automatic');

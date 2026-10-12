@@ -1,6 +1,6 @@
 import { CSSProperties, useState } from 'react';
 import { sendNarrativeSuggestion } from 'utils/network';
-import { memuExtras } from 'utils/context-extra';
+import { memuExtras, st } from 'utils/context-extra';
 import { currentScope, isMemuActive, refreshSoulCard } from 'memory/utils';
 
 const LS_LAST_SENT = 'memu-narrative-suggestion-last';
@@ -21,39 +21,39 @@ export default function NarrativeSuggestion({ enabled = false }: { enabled?: boo
   const [lastSent, setLastSent] = useState<string>(() => localStorage.getItem(LS_LAST_SENT) ?? '');
   const coolingDown = isCoolingDown();
 
-  const characterName = memuExtras.baseInfo?.characterName ?? '';
-
   async function handleSend() {
-    if (!(await isMemuActive())) return;
     const scope = currentScope();
     const suggestion = text.trim();
     if (!suggestion || coolingDown) return;
-
-    const userId = memuExtras.baseInfo?.userId ?? '';
-    const soulId = characterName;
-    if (!userId || !soulId) {
-      setError('Select a soul before sending a suggestion.');
-      setStatus('err');
-      return;
-    }
-
-    setStatus('pending');
-    setError('');
     try {
+      if (!(await isMemuActive()) || currentScope() !== scope) return;
+      const ctx = st.getContext();
+      const userId = memuExtras.baseInfo?.userId ?? '';
+      const soulId = String(ctx.characters?.[ctx.characterId]?.name || '').trim();
+      if (!userId || !soulId) throw new Error('Select a soul before sending a suggestion.');
+      setStatus('pending');
+      setError('');
       await sendNarrativeSuggestion(userId, soulId, suggestion);
-      if (currentScope() !== scope) return;
       localStorage.setItem(LS_LAST_SENT, suggestion);
       localStorage.setItem(LS_COOLDOWN_UNTIL, String(Date.now() + COOLDOWN_MS));
       setLastSent(suggestion);
       setText('');
-
-      await refreshSoulCard();
+      setStatus(currentScope() === scope ? 'ok' : 'idle');
       if (currentScope() !== scope) return;
-
-      setStatus('ok');
+      try {
+        await refreshSoulCard();
+      } catch (error) {
+        window.alert(`Suggestion considered, but ST card refresh failed: ${String(error)}`);
+      } finally {
+        if (currentScope() !== scope) setStatus('idle');
+      }
     } catch (error) {
-      setError(String(error));
-      setStatus('err');
+      if (currentScope() === scope) {
+        setError(String(error));
+        setStatus('err');
+      } else {
+        setStatus('idle');
+      }
     }
   }
 

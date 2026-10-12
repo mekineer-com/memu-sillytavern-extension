@@ -205,7 +205,7 @@ function loadModule(file, imports, extra = {}) {
   const extensionSettings = { memu: { soulCards: {} } };
   let storedSettings = JSON.stringify({ extension_settings: extensionSettings });
   let settingsWrites = 0, settingsReads = 0, saveMode = 'ok', readMode = 'ok', pendingSettings;
-  const cardFiles = new Map(), cardUpdates = [];
+  const cardFiles = new Map(), cardUpdates = [], hookAlerts = [];
   let ready;
   const native = { power_user: { personas: { 'owner.png': 'TestOwner' } } };
   ctx.SlashCommandParser = { commands: { 'persona-create': { callback: async (args, value) => {
@@ -218,7 +218,7 @@ function loadModule(file, imports, extra = {}) {
     captureRuntimeSettings: () => ({ version: 4, useServerSettings: true }),
     getPluginPing: async () => ({ ok: true }),
     scopeStorageProbe: async () => ({ ok: true }),
-    getSouls: async () => { reads++; if (failDiscovery) throw Error('discovery refused'); if (pendingDiscovery) return pendingDiscovery; return { souls }; },
+    getSouls: async () => { reads++; if (failDiscovery) throw Error('discovery refused'); if (pendingDiscovery) return pendingDiscovery; return { souls: [...souls] }; },
     getSoul: async id => { reads++; if (!names[id]) throw Error('missing binding'); return { soul_id: id, user_name: names[id], narrative_self: '' }; },
     getOwner: async () => ({ user_id: owner }),
     createOwner: async id => { owner = id; return { user_id: id }; },
@@ -252,7 +252,7 @@ function loadModule(file, imports, extra = {}) {
       }
       return { updated: result };
     } },
-  });
+  }, { window: { alert: message => hookAlerts.push(message) } });
   const log = { onceError() {}, onceWarn() {}, info() {} };
   let retrieveCalls = 0;
   const memory = { resetRetrievePipelineState() {}, getChatIdSafe: () => 'integrity:shared', preparePendingRetrieveTurnForInterceptor: async () => { retrieveCalls++; return true; }, dispatchConversationTurn: async () => ({ reply: '' }), dropPendingTurnIfStopped: () => false };
@@ -440,6 +440,48 @@ function loadModule(file, imports, extra = {}) {
   for (const entry of ['memorizeNow', 'syncLorebooksNow', 'deleteMemuLorebooksForCurrentCharacter', 'retrieveMemories', 'doSummary', 'addPendingRetrieveToPrompt']) await producer[entry]();
   assert.equal(saves, 0);
 
+  // Ordinary cards must not reserve nonexistent Souls, even after the original is deleted.
+  ctx.chatMetadata = {}; ctx.getCurrentChatId = () => 'main';
+  const ordinary = { name: 'OrdinaryCard', avatar: 'ordinary.png', data: { extensions: { memu: { retained: 7 } } } };
+  ctx.characterId = ctx.characters.push(ordinary) - 1;
+  const beforeOrdinary = [settingsWrites, settingsReads, cardUpdates.length];
+  await utils.onCharacterDuplicated({ oldAvatar: ordinary.avatar });
+  assert.deepEqual([settingsWrites, settingsReads, cardUpdates.length], beforeOrdinary);
+  assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, ordinary.name), false);
+  const ordinaryCopy = JSON.parse(JSON.stringify(ordinary)); ordinaryCopy.avatar = 'ordinary-copy.png';
+  ctx.characters = ctx.characters.filter(card => card !== ordinary);
+  ctx.characterId = ctx.characters.push(ordinaryCopy) - 1;
+  await utils.initChatExtraInfo(ctx, 'TestOwner');
+  await utils.writeMemuDisabled(ordinaryCopy, false);
+  assert.equal(extensionSettings.memu.soulCards[ordinary.name], ordinaryCopy.avatar);
+
+  const plain = { name: 'PlainRename', avatar: 'plain.png', data: { extensions: { memu: { retained: 7 } } } };
+  ctx.characterId = ctx.characters.push(plain) - 1;
+  const plainRenamed = JSON.parse(JSON.stringify(plain)); plainRenamed.name = 'PlainRenamed'; plainRenamed.avatar = 'plain-renamed.png';
+  cardFiles.set(plainRenamed.avatar, plainRenamed);
+  const beforePlain = [settingsWrites, settingsReads, creates];
+  await utils.onCharacterRenamed(plain.avatar, plainRenamed.avatar);
+  assert.deepEqual([settingsWrites, settingsReads, creates], beforePlain);
+  assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, plain.name), false);
+  assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, plainRenamed.name), false);
+  assert.equal(plainRenamed.data.extensions.memu.disabled, true);
+
+  const external = { name: 'ExternalSoul', avatar: 'external.png', data: { extensions: { memu: { retained: 7 } } } };
+  ctx.characterId = ctx.characters.push(external) - 1; utils.refreshMemuGate();
+  assert.equal(await utils.isMemuActive(), false); // cache predates creation elsewhere
+  names[external.name] = 'TestOwner'; souls.push(external.name);
+  await utils.onCharacterDuplicated({ oldAvatar: external.avatar });
+  assert.equal(extensionSettings.memu.soulCards[external.name], external.avatar);
+  const beforeLinked = [reads, settingsWrites, settingsReads];
+  failDiscovery = true;
+  await utils.onCharacterDuplicated({ oldAvatar: external.avatar });
+  assert.deepEqual([reads, settingsWrites, settingsReads], beforeLinked);
+  failDiscovery = false;
+  const beforeExternalSetupCreates = creates;
+  await utils.initChatExtraInfo(ctx, 'TestOwner');
+  assert.equal(creates, beforeExternalSetupCreates);
+  assert.equal(extras.baseInfo.characterName, 'ExternalSoul');
+
   // Native Duplicate identifies its subject before reloading the card list.
   ctx.chatMetadata = {}; ctx.getCurrentChatId = () => 'main';
   change.persona = 'created.png';
@@ -452,11 +494,13 @@ function loadModule(file, imports, extra = {}) {
   const firstGate = utils.isMemuActive();
   await new Promise(resolve => setImmediate(resolve));
   ctx.characterId = ctx.characters.findIndex(card => card.avatar === 'other.png');
-  await utils.onCharacterDuplicated({ oldAvatar: 'event.png' });
-  assert.equal(extensionSettings.memu.soulCards.EventSoul, 'event.png');
+  const duplicating = utils.onCharacterDuplicated({ oldAvatar: 'event.png' });
+  await new Promise(resolve => setImmediate(resolve));
   const copy = JSON.parse(originalText); copy.avatar = 'event-copy.png';
   ctx.characterId = ctx.characters.push(copy) - 1;
   resolveDiscovery({ souls }); assert.equal(await firstGate, false);
+  await duplicating;
+  assert.equal(extensionSettings.memu.soulCards.EventSoul, 'event.png');
   pendingDiscovery = null;
   for (const fields of [{ retained: 7 }, { retained: 7, disabled: false, enabled_for: 'EventSoul' }]) {
     copy.data.extensions.memu = fields;
@@ -514,6 +558,10 @@ function loadModule(file, imports, extra = {}) {
   await utils.writeMemuDisabled(renamedSource, false);
   await utils.writeMemuDisabled(renamedSource, true);
   renamedSource.name = 'AfterDuplicateRename';
+  await utils.onCharacterDuplicated({ oldAvatar: renamedSource.avatar });
+  assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, renamedSource.name), false);
+  assert.equal(extensionSettings.memu.soulCards.BeforeDuplicateRename, renamedSource.avatar);
+  names[renamedSource.name] = 'TestOwner'; souls.push(renamedSource.name);
   const beforeDuplicateFields = JSON.stringify(renamedSource.data.extensions.memu);
   assert.equal(await utils.isMemuActive(), false);
   await utils.onCharacterDuplicated({ oldAvatar: renamedSource.avatar });
@@ -542,7 +590,7 @@ function loadModule(file, imports, extra = {}) {
     const old = { name: `Before${newName}`, avatar: `before-${newName}.png`, data: { extensions: { memu: { retained: 7 } } } };
     names[old.name] = 'TestOwner'; souls.push(old.name);
     ctx.characterId = ctx.characters.push(old) - 1; utils.refreshMemuGate();
-    assert.equal(await utils.isMemuActive(), true);
+    if (newName === 'OtherSoul') assert.equal(await utils.isMemuActive(), true);
     const renamed = JSON.parse(JSON.stringify(old)); renamed.name = newName; renamed.avatar = `renamed-${newName}.png`;
     cardFiles.set(renamed.avatar, renamed);
     const oldSoulCount = creates;
@@ -570,6 +618,44 @@ function loadModule(file, imports, extra = {}) {
       assert.equal(await utils.isMemuActive(), false);
     }
   }
+
+  // Hook failures are visible, and failed claims still roll back; Rename still disables its disk card.
+  for (const hook of ['duplicate', 'rename']) {
+    for (const mode of ['swallow', 'throw', 'read-failure', 'mismatch', 'discovery']) {
+      const name = `Hook-${hook}-${mode}`;
+      const card = { name, avatar: `${name}.png`, data: { extensions: { memu: { retained: 7 } } } };
+      ctx.characterId = ctx.characters.push(card) - 1;
+      names[name] = 'TestOwner'; souls.push(name);
+      const renamed = JSON.parse(JSON.stringify(card)); renamed.avatar = `${name}-renamed.png`;
+      cardFiles.set(renamed.avatar, renamed);
+      saveMode = mode === 'swallow' || mode === 'throw' ? mode : 'ok';
+      readMode = mode === 'read-failure' ? 'throw' : mode === 'mismatch' ? 'mismatch' : 'ok';
+      failDiscovery = mode === 'discovery';
+      const beforeAlerts = hookAlerts.length;
+      await assert.rejects(hook === 'duplicate'
+        ? utils.onCharacterDuplicated({ oldAvatar: card.avatar })
+        : utils.onCharacterRenamed(card.avatar, renamed.avatar), /refused|Failed to save/);
+      assert.equal(hookAlerts.length, beforeAlerts + 1);
+      assert.match(hookAlerts.at(-1), /refused|Failed to save/);
+      assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, name), false);
+      if (hook === 'rename') assert.equal(renamed.data.extensions.memu.disabled, true);
+      saveMode = readMode = 'ok'; failDiscovery = false;
+    }
+  }
+  const emitter = { exports: {}, localStorage: { getItem: () => null }, console: { debug() {}, error() {}, trace() {} } };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../../../../../public/lib/eventemitter.js'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, emitter);
+  const events = new emitter.exports.EventEmitter();
+  events.on('rename', utils.onCharacterRenamed);
+  const failedRename = ctx.characters[ctx.characterId];
+  updated = [];
+  const beforeRenameAlerts = hookAlerts.length;
+  await events.emit('rename', failedRename.avatar, `${failedRename.name}-renamed.png`);
+  assert.equal(hookAlerts.length, beforeRenameAlerts + 1);
+  assert.match(hookAlerts.at(-1), /Failed to save the character memU setting/);
+  assert.equal(extensionSettings.memu.soulCards[failedRename.name], failedRename.avatar);
+  updated = undefined;
 
   // A claim is usable only after stock-save readback confirms this exact field.
   for (const mode of ['swallow', 'throw', 'read-failure', 'mismatch']) {

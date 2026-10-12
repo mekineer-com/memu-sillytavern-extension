@@ -63,6 +63,9 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   assert.equal(JSON.parse(inputs.character_json_data.value).data.extensions.memu.description_auto, 'Real self');
   assert.equal(card.data.extensions.memu.disabled, false); assert.equal(card.data.extensions.memu.enabled_for, 'TestSoul');
   assert.equal(projection.resolveSoulCard(ctx), '');
+  const unchangedWrites = [writes, metadataWrites];
+  await utils.refreshSoulCard();
+  assert.deepEqual([writes, metadataWrites], unchangedWrites);
   narrative = 'Real self evolved'; await utils.refreshSoulCard();
   assert.equal(card.description, narrative); assert.equal(writes, 2);
   // A later unrelated native whole-form save reads the refreshed Description and JSON.
@@ -162,6 +165,22 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
     assert.equal(card.description, description);
   }
 
+  // Exercise the real installer so dropping either manual-edit listener breaks this check.
+  const indexSource = fs.readFileSync(`${__dirname}/../src/index.tsx`, 'utf8');
+  const editHooks = new Map(), inputHooks = new Map();
+  const noOp = () => {};
+  const installer = { window: {}, document: { addEventListener: (name, callback) => inputHooks.set(name, callback) },
+    st: { event_types: { CHARACTER_EDITED: 'card-edited' }, eventSource: { on: (name, callback) => editHooks.set(name, callback) } },
+    onChatChanged: noOp, onGenerationStopped: noOp, onUserMessageSent: noOp, onMessageReceived: noOp,
+    onMessageEdited: noOp, onMessageSwiped: noOp, onMessageSwipeDeleted: noOp, onMessageDeleted: noOp,
+    onCharacterDuplicated: noOp, onCharacterRenamed: noOp,
+    onSoulCardEdited: utils.onSoulCardEdited, onSoulCardInput: utils.onSoulCardInput,
+  };
+  vm.runInNewContext(ts.transpileModule(indexSource.slice(indexSource.indexOf('function installHooksWithRetry()'),
+    indexSource.indexOf('\nlet mounted')), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, installer);
+  assert.equal(editHooks.get('card-edited'), utils.onSoulCardEdited);
+  assert.equal(inputHooks.get('input'), utils.onSoulCardInput);
+
   const networkSource = fs.readFileSync(`${__dirname}/../src/utils/network.ts`, 'utf8');
   const settings = { useServerSettings: false, useClaudeCode: true, defaultProfileId: 'captured', stepProfileId: { reflection: 'captured-step' } };
   let wire;
@@ -180,19 +199,62 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
 
   const component = fs.readFileSync(`${__dirname}/../src/component/NarrativeSuggestion.tsx`, 'utf8');
   const state = ['A fictional suggestion', 'idle', '', '']; let cursor = 0, sent = 0, refreshed = 0;
+  const uiCtx = { characterId: 0, characters: [{ name: 'TestSoul' }] };
+  let uiScope = 'scope', sendWait, refreshWait, sendFails = false, refreshFails = false;
+  const suggestionCalls = [], uiAlerts = [];
   const storage = new Map();
   const ui = { exports: {}, require: name => ({
     react: { useState: initial => { const index = cursor++; return [state[index] ?? initial, value => { state[index] = value; }]; } },
-    'react/jsx-runtime': jsx, 'utils/context-extra': { memuExtras: { baseInfo: { userId: 'TestOwner', characterName: 'TestSoul' } } },
-    'memory/utils': { isMemuActive: async () => true, currentScope: () => 'scope', refreshSoulCard: async () => { refreshed++; } },
-    'utils/network': { sendNarrativeSuggestion: async () => { sent++; return { narrative_self: 'Unchanged real self' }; } },
-  })[name], localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) } };
+    'react/jsx-runtime': jsx, 'utils/context-extra': { st: { getContext: () => uiCtx },
+      memuExtras: { baseInfo: { userId: 'TestOwner', characterName: 'OldHeaderSoul' } } },
+    'memory/utils': { isMemuActive: async () => true, currentScope: () => uiScope, refreshSoulCard: async () => {
+      refreshed++; if (refreshWait) await refreshWait();
+      if (refreshFails) throw new Error('Fictional card refresh failure');
+    } },
+    'utils/network': { sendNarrativeSuggestion: async (...args) => {
+      sent++; suggestionCalls.push(args); if (sendWait) await sendWait();
+      if (sendFails) throw new Error('Fictional suggestion failure');
+      return { narrative_self: 'Unchanged real self' };
+    } },
+  })[name], window: { alert: message => uiAlerts.push(message) },
+    localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) } };
   vm.runInNewContext(ts.transpileModule(component, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, ui);
   function nodes(tree) { return !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(nodes) : [tree, ...nodes(tree.props?.children)]; }
   const button = nodes(ui.exports.default({ enabled: true })).find(node => node.type === 'button');
   assert.equal(button.props.disabled, false); await button.props.onClick();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent, 1); assert.equal(refreshed, 1); assert.equal(state[1], 'ok');
+  assert.deepEqual(suggestionCalls.at(-1), ['TestOwner', 'TestSoul', 'A fictional suggestion']);
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  function sendAgain() {
+    cursor = 0; state[0] = 'Another fictional suggestion'; state[1] = 'idle'; storage.clear();
+    const nextButton = nodes(ui.exports.default({ enabled: true })).find(node => node.type === 'button');
+    nextButton.props.onClick();
+  }
+  // Delivery completes after navigation: remember the send/cooldown, not a permanent spinner.
+  let releaseSend;
+  sendWait = () => new Promise(resolve => { releaseSend = resolve; });
+  const beforeSwitchedRefresh = refreshed;
+  sendAgain(); await flush(); assert.equal(state[1], 'pending');
+  uiScope = 'new-chat'; sendWait = undefined; releaseSend(); await flush();
+  assert.equal(state[1], 'idle'); assert.equal(refreshed, beforeSwitchedRefresh);
+  assert.equal(state[3], 'Another fictional suggestion');
+  assert(Number(storage.get('memu-narrative-suggestion-cooldown-until')) > Date.now());
+  // A following-card refresh error is not a failed suggestion or a reason to ask the Soul again.
+  refreshFails = true; sendAgain(); await flush();
+  assert.equal(state[1], 'ok'); assert.match(uiAlerts.at(-1), /Suggestion considered.*card refresh failure/);
+  assert(Number(storage.get('memu-narrative-suggestion-cooldown-until')) > Date.now());
+  refreshFails = false;
+  // Navigation during the refresh does not leave an old card's success/pending status on the new one.
+  let releaseRefresh;
+  refreshWait = () => new Promise(resolve => { releaseRefresh = resolve; });
+  sendAgain(); await flush(); uiScope = 'third-chat';
+  refreshWait = undefined; releaseRefresh(); await flush(); assert.equal(state[1], 'idle');
+  // True send failure stays visible, without recording success or a new cooldown.
+  sendFails = true; sendAgain(); await flush();
+  assert.equal(state[1], 'err'); assert.match(state[2], /Fictional suggestion failure/);
+  assert.equal(storage.has('memu-narrative-suggestion-cooldown-until'), false);
+  sendFails = false;
   assert(!component.includes('overrideActive')); assert(component.includes('not necessarily adopted'));
   console.log('Durable following/manual cards, Description-only reset, extras, fresh reads, unsaved editor protection and unrestricted suggestions pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

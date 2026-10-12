@@ -70,17 +70,39 @@ function claimSoulCard(character: any, explicit = false, first = firstSoulCard(c
 
 export async function onCharacterDuplicated({ oldAvatar }: { oldAvatar: string }): Promise<void> {
     const source = st.getContext().characters.find((card: any) => card.avatar === oldAvatar);
-    if (source && canUseSoulCard(source, true)) await claimSoulCard({ ...source }, true);
+    if (!source || !canUseSoulCard(source, true)) return;
+    const original = { ...source };
+    const first = firstSoulCard(original);
+    const name = String(original.name || '').trim();
+    try {
+        if (Object.hasOwn(soulCards(), name) || (await getSouls()).souls.includes(name)) {
+            await claimSoulCard(original, true, first);
+        }
+    } catch (error) {
+        window.alert(String(error));
+        throw error;
+    }
 }
 
 export async function onCharacterRenamed(oldAvatar: string, newAvatar: string): Promise<void> {
     const source = st.getContext().characters.find((card: any) => card.avatar === oldAvatar);
     if (!source) return;
+    const original = { ...source };
+    const first = firstSoulCard(original);
+    const name = String(original.name || '').trim();
     const renamed = { ...source, avatar: newAvatar };
     try {
-        if (canUseSoulCard(source, true)) await claimSoulCard({ ...source }, true);
-    } finally {
-        await writeMemuDisabled(renamed, true);
+        try {
+            if (canUseSoulCard(original, true)
+                && (Object.hasOwn(soulCards(), name) || (await getSouls()).souls.includes(name))) {
+                await claimSoulCard(original, true, first);
+            }
+        } finally {
+            await writeMemuDisabled(renamed, true);
+        }
+    } catch (error) {
+        window.alert(String(error));
+        throw error;
     }
 }
 
@@ -304,20 +326,6 @@ export async function onSoulCardEdited(event: any): Promise<void> {
 }
 
 
-async function waitForActiveCharacter(initialCtx: any, attempts: number = 8, delayMs: number = 120): Promise<any | null> {
-    let ctx = initialCtx;
-    for (let i = 0; i < attempts; i++) {
-        const character = ctx?.characters?.[ctx?.characterId];
-        if (character) return character;
-        if (i < attempts - 1) {
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-            ctx = st.getContext();
-        }
-    }
-    return null;
-}
-
-
 async function resolveIdentity(defaultName: string | undefined, proposedSoul: string): Promise<{ userId: string; soulId: string; createSoul: boolean }> {
     const scope = currentScope();
     const existing = await getOwner();
@@ -340,33 +348,6 @@ export function assertDistinctNames(userName: string, soulId: string): void {
     }
 }
 
-async function selectSoulCharacter(ctx: any, soulId: string, shouldCreateSoul: boolean, userName: string): Promise<boolean> {
-    const scope = currentScope(ctx);
-    let target = ctx.characters.findIndex((candidate: any) => String(candidate?.name || '').trim() === soulId);
-    if (target < 0) {
-        const response = await fetch('/api/characters/create', {
-            method: 'POST',
-            headers: ctx.getRequestHeaders(),
-            body: JSON.stringify({ ch_name: soulId }),
-        });
-        if (!response.ok) throw new Error(`Failed to create SillyTavern character (${response.status})`);
-        const avatar = await response.text();
-        await ctx.getCharacters();
-        ctx = st.getContext();
-        target = ctx.characters.findIndex((candidate: any) => candidate?.avatar === avatar);
-        if (target < 0) throw new Error('Created SillyTavern character was not found');
-    }
-    if (currentScope() !== scope) return false;
-    if (shouldCreateSoul) {
-        await createSoul(soulId, userName);
-        refreshMemuGate();
-    }
-    if (currentScope() !== scope) return false;
-    if (String(ctx.characters?.[ctx.characterId]?.name || '').trim() === soulId) return false;
-    await ctx.selectCharacterById(target, { switchMenu: false });
-    return true;
-}
-
 export async function initChatExtraInfo(ctx: any, selectedName?: string): Promise<void> {
     if (ctx.chatMetadata?.main_chat || ctx.groupId) return;
     const scope = currentScope(ctx);
@@ -377,15 +358,11 @@ export async function initChatExtraInfo(ctx: any, selectedName?: string): Promis
     if (!selectedName && !(await isMemuActive())) return;
     await appReady;
     if (currentScope() !== scope) return;
-    // IMPORTANT: never guess the character. If SillyTavern context isn"t ready yet, bail and try again later.
-    const character = await waitForActiveCharacter(ctx);
-    if (!character) {
-        return;
-    }
-
+    const character = ctx.characters?.[ctx.characterId];
     if (!qualifiesSoulCard(character, !!selectedName, first)) throw new Error('This Soul belongs to another SillyTavern card');
     const desiredCharacterName = String(character.name || '').trim();
 
+    if (selectedName) refreshMemuGate();
     const existing = memuExtras.baseInfo;
     let userName = await resolveSoulPersonaName(desiredCharacterName, !!selectedName, first) ?? selectedName;
     if (currentScope() !== scope) return;
@@ -394,7 +371,10 @@ export async function initChatExtraInfo(ctx: any, selectedName?: string): Promis
     if (currentScope() !== scope) return;
     const { userId, soulId, createSoul: shouldCreateSoul } = await resolveIdentity(userName, desiredCharacterName);
     if (currentScope() !== scope) return;
-    if (await selectSoulCharacter(ctx, soulId, shouldCreateSoul, userName)) return;
+    if (shouldCreateSoul) {
+        await createSoul(soulId, userName);
+        refreshMemuGate();
+    }
     if (currentScope() !== scope) return;
     await claimSoulCard(character, !!selectedName, first);
     if (currentScope() !== scope) return;
