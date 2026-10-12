@@ -57,6 +57,12 @@ export type SavedSource = {
 
 let savedSourceChain: Promise<void> = Promise.resolve();
 
+export function withSavedSourceQueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = savedSourceChain.then(operation);
+    savedSourceChain = queued.then(() => {}, () => {});
+    return queued;
+}
+
 export function bindSavedSource(ctx: any = st.getContext()): SavedSource {
     const scope = currentScope(ctx);
     const character = ctx.characters?.[ctx.characterId];
@@ -80,7 +86,7 @@ export function bindSavedSource(ctx: any = st.getContext()): SavedSource {
 export function publishSavedSource(source: SavedSource, intent: MemorizeIntent,
     opts: { force?: boolean; tail?: boolean } = {}): Promise<void> {
     opts = { ...opts };
-    const operation = savedSourceChain.then(async () => {
+    return withSavedSourceQueue(async () => {
         const saved = await postJsonWithCsrf('/api/chats/get', source.selector);
         if (!Array.isArray(saved) || saved.length === 0) {
             throw new Error('Saved chat is missing or unreadable');
@@ -110,9 +116,6 @@ export function publishSavedSource(source: SavedSource, intent: MemorizeIntent,
         await st.saveChat();
         if (currentScope() === source.scope) await syncLorebooksNow('after-memorize-local-pending');
     });
-    // A refused capture must not poison later saved publications.
-    savedSourceChain = operation.catch(() => {});
-    return operation;
 }
 
 let _pendingRetrieveTurn: PendingRetrieveTurn | null = null;

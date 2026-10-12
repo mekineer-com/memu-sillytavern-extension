@@ -32,7 +32,7 @@ function load(file, imports, globals) {
     return imports[name];
   }, ...globals };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(`${__dirname}/../src/${file}`, 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
   }).outputText, ctx);
   return ctx.exports;
 }
@@ -424,6 +424,181 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   categoriesResponse = { categories: [] }; await producer.retrieveMemories(completed);
   assert.deepEqual(lorebooks, ['memU - OtherSoul - Private', 'Manual book']);
   assert.equal(extras.retrieve.nowRetrieve.summaryTaskId, 'rebuilt-task');
+
+  // Native lifecycle reads the requested file's header, never the selected card.
+  const { File } = require('node:buffer');
+  const lifecycleAlerts = [], lifecycleCalls = [], retired = [], imported = [];
+  const linked = { integrity: 'foreign-integrity', memuExtras: { baseInfo: {
+    userId: 'OtherOwner', characterId: 'OtherSoul', characterName: 'OtherSoul',
+  } } };
+  let savedHeader = linked, plainWithoutMetadata = false, malformedHeader = false, missingDirectory = false;
+  let online = true, nativeStatus = 200, retireFails = false;
+  let simple = [{ file_name: 'target.jsonl' }];
+  const fileHeaders = { plain: {}, branch: { ...linked, main_chat: 'branch-parent' }, second: { ...linked, integrity: 'second-token' } };
+  let lastNativeInput, lastNativeInit, nativeResponse;
+  const transport = async (input, init) => {
+    const url = input instanceof Request ? new URL(input.url).pathname : input;
+    const body = init?.body instanceof FormData ? null : JSON.parse(init?.body || '{}');
+    lifecycleCalls.push(url);
+    if (url === '/csrf-token') return new Response(JSON.stringify({ token: 'fictional-lifecycle-csrf' }));
+    if (url === '/api/chats/get') {
+      assert.equal(body.avatar_url, 'other.png');
+      if (!body.file_name) {
+        if (missingDirectory) simple = [];
+        return new Response('{}');
+      }
+      const header = body.file_name === 'target' ? savedHeader : fileHeaders[body.file_name];
+      return new Response(JSON.stringify([malformedHeader ? { name: 'Fictional', mes: 'Surviving message' }
+        : plainWithoutMetadata ? { user_name: 'Fictional' } : { chat_metadata: header }]));
+    }
+    if (url === '/api/characters/chats') {
+      assert.equal(body.avatar_url, 'other.png');
+      assert.equal(body.simple, true);
+      return new Response(JSON.stringify(simple));
+    }
+    if (url === '/api/plugins/memu/ping') return new Response(JSON.stringify({ ok: online }));
+    if (url === '/api/plugins/memu/deleteConversationSource') {
+      if (retireFails && body.conversationId !== 'integrity:second-token') return new Response('Fictional cleanup failure', { status: 503 });
+      retired.push(body);
+      return new Response(JSON.stringify({ ok: true }));
+    }
+    lastNativeInput = input; lastNativeInit = init;
+    if (url === '/api/chats/import') imported.push(init.body);
+    nativeResponse = new Response(JSON.stringify({ ok: true }), { status: nativeStatus });
+    return nativeResponse;
+  };
+  const host = { fetch: transport, location: { href: 'http://fictional-st/', origin: 'http://fictional-st' },
+    alert: value => lifecycleAlerts.push(value) };
+  const lifecycleGlobals = { window: host, fetch: (...args) => host.fetch(...args), URL, Request, FormData, File };
+  const lifecycleCsrf = load('utils/csrf.ts', {}, lifecycleGlobals);
+  const lifecycleNetwork = load('utils/network.ts', { 'utils/csrf': lifecycleCsrf }, lifecycleGlobals);
+  const lifecycle = load('memory/source-lifecycle.ts', {
+    'utils/csrf': lifecycleCsrf, 'utils/network': lifecycleNetwork, './memorize': producer,
+  }, lifecycleGlobals);
+  lifecycle.installSourceLifecycle();
+  const wrapped = host.fetch;
+  lifecycle.installSourceLifecycle(); assert.equal(host.fetch, wrapped);
+  const controller = new AbortController();
+  const deleteOptions = { method: 'POST', headers: { 'x-csrf-token': 'native-token' }, signal: controller.signal,
+    body: JSON.stringify({ avatar_url: 'other.png', chatfile: 'target.jsonl' }) };
+  const response = await host.fetch('/api/chats/delete', deleteOptions);
+  assert.equal(response, nativeResponse); assert.equal(lastNativeInit, deleteOptions);
+  assert.deepEqual(retired.pop(), { userId: 'OtherOwner', soulId: 'OtherSoul', conversationId: 'integrity:foreign-integrity' });
+  assert(lifecycleCalls.indexOf('/api/plugins/memu/ping') < lifecycleCalls.indexOf('/api/chats/delete'));
+  assert(lifecycleCalls.indexOf('/api/chats/delete') < lifecycleCalls.indexOf('/api/plugins/memu/deleteConversationSource'));
+  const request = new Request('http://fictional-st/api/chats/delete', deleteOptions);
+  await host.fetch(request);
+  assert.equal(lastNativeInput, request); assert.equal(request.bodyUsed, false);
+  assert.equal(retired.pop().conversationId, 'integrity:foreign-integrity');
+  online = false;
+  let start = lifecycleCalls.length;
+  await assert.rejects(host.fetch('/api/chats/delete', deleteOptions), /offline/);
+  assert(!lifecycleCalls.slice(start).includes('/api/chats/delete')); assert.equal(retired.length, 0);
+  for (const plainHeader of [{}, { ...linked, main_chat: 'branch-parent' }]) {
+    savedHeader = plainHeader; start = lifecycleCalls.length;
+    await host.fetch('/api/chats/delete', deleteOptions);
+    assert(!lifecycleCalls.slice(start).includes('/api/plugins/memu/ping'));
+    assert.equal(retired.length, 0);
+  }
+  plainWithoutMetadata = true; start = lifecycleCalls.length;
+  await host.fetch('/api/chats/delete', deleteOptions);
+  assert(!lifecycleCalls.slice(start).includes('/api/plugins/memu/ping'));
+  plainWithoutMetadata = false;
+  malformedHeader = true; start = lifecycleCalls.length;
+  await assert.rejects(host.fetch('/api/chats/delete', deleteOptions), /chat is unreadable/);
+  assert(!lifecycleCalls.slice(start).includes('/api/chats/delete'));
+  malformedHeader = false;
+  savedHeader = { memuExtras: linked.memuExtras }; online = true;
+  await host.fetch('/api/chats/delete', deleteOptions);
+  assert.equal(retired.pop().conversationId, 'chat:target');
+  nativeStatus = 400;
+  await host.fetch('/api/chats/delete', deleteOptions);
+  assert.equal(retired.length, 0);
+  nativeStatus = 200; retireFails = true;
+  assert.equal(await host.fetch('/api/chats/delete', deleteOptions), nativeResponse);
+  assert.match(lifecycleAlerts.at(-1), /Chat deleted, but memU source cleanup failed/);
+  retireFails = false; savedHeader = null; start = lifecycleCalls.length;
+  await assert.rejects(host.fetch('/api/chats/delete', deleteOptions), /metadata is unreadable/);
+  assert(!lifecycleCalls.slice(start).includes('/api/chats/delete'));
+  for (const identity of [{ userId: 123, characterId: 'OtherSoul' },
+    { userId: {}, characterId: 'OtherSoul' }, { userId: 'OtherOwner', characterId: 123 }]) {
+    savedHeader = { memuExtras: { baseInfo: identity } }; start = lifecycleCalls.length;
+    await assert.rejects(host.fetch('/api/chats/delete', deleteOptions), /identity is unreadable/);
+    assert(!lifecycleCalls.slice(start).includes('/api/chats/delete'));
+  }
+  savedHeader = linked;
+  const cardOptions = { ...deleteOptions, body: JSON.stringify({ avatar_url: 'other.png', delete_chats: true }) };
+  simple = [{ file_name: 'target.jsonl' }, { file_name: 'plain.jsonl' }, { file_name: 'branch.jsonl' }];
+  await host.fetch('/api/characters/delete', cardOptions);
+  assert.equal(retired.length, 1); retired.pop();
+  savedHeader = null; start = lifecycleCalls.length;
+  await assert.rejects(host.fetch('/api/characters/delete', cardOptions), /metadata is unreadable/);
+  assert(!lifecycleCalls.slice(start).includes('/api/characters/delete'));
+  savedHeader = linked; simple = [{ file_name: 'target.jsonl' }, { file_name: 'second.jsonl' }];
+  retireFails = true;
+  assert.equal(await host.fetch('/api/characters/delete', cardOptions), nativeResponse);
+  assert.equal(retired.pop().conversationId, 'integrity:second-token');
+  assert.match(lifecycleAlerts.at(-1), /cleanup failed/);
+  retireFails = false;
+  start = lifecycleCalls.length;
+  await host.fetch('/api/characters/delete', { ...cardOptions, body: JSON.stringify({ avatar_url: 'other.png', delete_chats: false }) });
+  assert.deepEqual(lifecycleCalls.slice(start), ['/api/characters/delete']);
+  simple = { error: true }; start = lifecycleCalls.length;
+  await assert.rejects(host.fetch('/api/characters/delete', cardOptions), /chats are unreadable/);
+  assert(!lifecycleCalls.slice(start).includes('/api/characters/delete'));
+  missingDirectory = true; start = lifecycleCalls.length;
+  await host.fetch('/api/characters/delete', cardOptions);
+  assert.deepEqual(lifecycleCalls.slice(start), ['/api/characters/chats', '/api/chats/get', '/api/characters/chats', '/api/characters/delete']);
+  missingDirectory = false;
+
+  // The existing publication queue brackets deletion and source retirement.
+  let releaseOld, releaseCleanup;
+  admission = { status: 'published' };
+  proxyWait = () => new Promise(resolve => { releaseOld = resolve; });
+  const oldPublication = producer.publishSavedSource(bound, 'publish_only');
+  await flush(); start = lifecycleCalls.length;
+  const normalRetirement = lifecycleNetwork.deleteConversationSource;
+  lifecycleNetwork.deleteConversationSource = async value => {
+    await new Promise(resolve => { releaseCleanup = resolve; });
+    return normalRetirement(value);
+  };
+  const deleting = host.fetch('/api/chats/delete', deleteOptions);
+  let laterRan = false;
+  const later = producer.publishSavedSource(bound, 'publish_only').then(() => { laterRan = true; });
+  await flush(); assert.equal(lifecycleCalls.length, start);
+  proxyWait = null; releaseOld(); await oldPublication; await flush();
+  assert.equal(typeof releaseCleanup, 'function'); assert.equal(laterRan, false);
+  releaseCleanup(); await deleting; await later;
+  assert.equal(laterRan, true); retired.pop();
+  lifecycleNetwork.deleteConversationSource = normalRetirement;
+
+  const otherMetadata = { main_chat: 'native-branch', integrity: 'copied-token', memuExtras: linked.memuExtras, other: { retained: true } };
+  const tailBytes = '\n{"name":"Fictional","mes":"Unchanged row","extra":{"keep":true}}\n';
+  const upload = new FormData();
+  const originalText = JSON.stringify({ user_name: 'Fictional', chat_metadata: otherMetadata }) + tailBytes;
+  upload.append('avatar', new File([originalText], 'fictional.jsonl', { type: 'application/jsonl', lastModified: 123 }));
+  upload.append('file_type', 'jsonl'); upload.append('avatar_url', 'other.png'); upload.append('other', 'untouched');
+  const uploadOptions = { method: 'POST', body: upload, headers: { 'x-csrf-token': 'native-upload-token' }, signal: controller.signal };
+  await host.fetch('/api/chats/import', uploadOptions);
+  const independent = imported.pop(); assert.notEqual(independent, upload);
+  assert.equal(await upload.get('avatar').text(), originalText);
+  const sanitized = await independent.get('avatar').text();
+  assert.equal(sanitized.slice(sanitized.indexOf('\n')), tailBytes);
+  assert.deepEqual(JSON.parse(sanitized.split('\n')[0]).chat_metadata, { main_chat: 'native-branch', other: { retained: true } });
+  assert.equal(independent.get('avatar').name, 'fictional.jsonl');
+  assert.equal(independent.get('avatar').type, 'application/jsonl');
+  assert.equal(independent.get('other'), 'untouched');
+  assert.equal(lastNativeInit.headers, uploadOptions.headers); assert.equal(lastNativeInit.signal, controller.signal);
+  for (const [type, contents] of [['json', originalText], ['jsonl', 'malformed\nunchanged']]) {
+    const unsupported = new FormData(); unsupported.append('file_type', type);
+    unsupported.append('avatar', new File([contents], 'fictional-upload'));
+    const options = { method: 'POST', body: unsupported };
+    await host.fetch('/api/chats/import', options);
+    assert.equal(lastNativeInit, options); assert.equal(imported.pop(), unsupported);
+  }
+  const unrelated = { method: 'POST', body: '{}' };
+  await host.fetch('/api/unrelated', unrelated); assert.equal(lastNativeInit, unrelated);
+  console.log('Native import identity and queued deletion capture/offline/refusal/cleanup boundaries pass.');
   console.log('Refused rebuild leaves ST metadata/books untouched; accepted empty completion prunes only its managed books.');
   console.log('Saved capture, missing/empty/copy source, serialized read/admission, frozen scope/settings, rewind and post-save boundaries pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -18,8 +18,10 @@ import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
 import { currentScope, isMemuActive, onCharacterDuplicated, onCharacterRenamed } from './memory/utils';
+import { installSourceLifecycle } from './memory/source-lifecycle';
 
 (globalThis as any).memuGenerationInterceptor = memuGenerationInterceptor;
+installSourceLifecycle();
 
 function installHooksWithRetry(): void {
     const w = window as any;

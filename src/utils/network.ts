@@ -119,6 +119,10 @@ export async function getPluginPing(): Promise<PluginPing> {
   return request<PluginPing>('/ping', undefined, 'GET');
 }
 
+export async function deleteConversationSource(scope: { userId: string; soulId: string; conversationId: string }): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/deleteConversationSource', scope);
+}
+
 export async function getOwner(): Promise<{ user_id: string | null }> {
   return request<{ user_id: string | null }>('/owner', undefined, 'GET');
 }
