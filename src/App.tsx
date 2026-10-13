@@ -3,7 +3,7 @@ import MemoryShowModal from 'component/MemoryShowModal';
 import NarrativeSuggestion from 'component/NarrativeSuggestion';
 import { ChangeEvent, CSSProperties, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { deleteMemuLorebooksForCurrentCharacter, memorizeNow, syncLorebooksNow } from 'memory/memorize';
+import { deleteMemuLorebooksForCurrentCharacter, memorizeNow, sanitizeWorldInfoName, syncLorebooksNow } from 'memory/memorize';
 import EyeIcon from 'ui/icons';
 import MemuLogo from 'ui/logo';
 import {
@@ -88,6 +88,7 @@ function nativeModelSelection(): ModelSelection | null {
 }
 
 type RelationshipEditorState = {
+  scope: string;
   mode: 'add' | 'edit';
   speakerId?: string;
   name: string;
@@ -131,6 +132,7 @@ export default function App() {
 
   async function reloadCharacter(): Promise<void> {
     setSwitchBusy(true);
+    setRelationships([]);
     setMemuActive(false);
     setPersona('');
     setPersonaLocked(false);
@@ -316,24 +318,32 @@ export default function App() {
     }, 350);
   }
 
+  function relationshipIdentityCurrent(): boolean {
+    return !switchBusy && !!currentCharacter && !!currentUserId
+      && currentCharacter === currentSelectedCharacterName()
+      && currentCharacter === memuExtras.baseInfo?.characterName
+      && currentUserId === memuExtras.baseInfo?.userId;
+  }
+
   async function refreshRelationships(): Promise<void> {
     const scope = currentScope();
-    if (!pluginOk || !currentCharacter || !currentUserId || !(await isMemuActive())) {
+    if (!pluginOk || !memuActive || !relationshipIdentityCurrent()) {
       setRelationships([]);
       setRelationshipsStatus('idle');
       setRelationshipsMessage('');
       return;
     }
-    setRelationshipsStatus('loading');
-    setRelationshipsMessage('');
     try {
+      if (!(await isMemuActive()) || currentScope() !== scope || !relationshipIdentityCurrent()) return;
+      setRelationshipsStatus('loading');
+      setRelationshipsMessage('');
       const resp = await listRelationships(currentUserId, currentCharacter);
-      if (!(await isMemuActive()) || currentScope() !== scope) return;
+      if (!(await isMemuActive()) || currentScope() !== scope || !relationshipIdentityCurrent()) return;
       const rows = Array.isArray(resp?.relationships) ? resp.relationships : [];
       setRelationships(rows);
       setRelationshipsStatus('idle');
     } catch (e: any) {
-      if (currentScope() !== scope) return;
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationships([]);
       setRelationshipsStatus('error');
       setRelationshipsMessage(e?.message || 'Failed to load relationships');
@@ -342,7 +352,7 @@ export default function App() {
 
   useEffect(() => {
     void refreshRelationships();
-  }, [pluginOk, currentCharacter, currentUserId, memuActive]);
+  }, [pluginOk, currentCharacter, currentUserId, memuActive, switchBusy]);
 
   // memory ui prefs — per-soul, so re-read whenever the active chat changes.
   useEffect(() => {
@@ -557,7 +567,9 @@ export default function App() {
   }
 
   function openAddRelationshipEditor(): void {
+    if (!relationshipIdentityCurrent()) return;
     setRelationshipEditor({
+      scope: currentScope(),
       mode: 'add',
       name: '',
       relationship: '',
@@ -565,7 +577,9 @@ export default function App() {
   }
 
   function openEditRelationshipEditor(row: RelationshipRecord): void {
+    if (!relationshipIdentityCurrent()) return;
     setRelationshipEditor({
+      scope: currentScope(),
       mode: 'edit',
       speakerId: row.speaker_id,
       name: String(row.name || ''),
@@ -574,15 +588,15 @@ export default function App() {
   }
 
   async function saveRelationshipEditor(): Promise<void> {
-    if (!(await isMemuActive())) return;
     const scope = currentScope();
-    if (!relationshipEditor || !currentCharacter || !currentUserId) return;
+    if (!relationshipEditor || relationshipEditor.scope !== scope || !relationshipIdentityCurrent()) return;
     const name = String(relationshipEditor.name || '').trim();
     const relationship = String(relationshipEditor.relationship || '').trim();
     if (!name) return;
-    setRelationshipsStatus('saving');
-    setRelationshipsMessage('');
     try {
+      if (!(await isMemuActive()) || currentScope() !== scope || !relationshipIdentityCurrent()) return;
+      setRelationshipsStatus('saving');
+      setRelationshipsMessage('');
       if (relationshipEditor.mode === 'add') {
         await createRelationship(currentUserId, currentCharacter, name, relationship);
       } else if (relationshipEditor.speakerId) {
@@ -591,39 +605,36 @@ export default function App() {
           relationship,
         });
       }
-      if (currentScope() !== scope) return;
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationshipEditor(null);
       await refreshRelationships();
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationshipsStatus('idle');
     } catch (e: any) {
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationshipsStatus('error');
       setRelationshipsMessage(e?.message || 'Failed to save relationship');
     }
   }
 
   async function removeRelationship(speakerId: string): Promise<void> {
-    if (!(await isMemuActive())) return;
     const scope = currentScope();
-    if (!speakerId || !currentCharacter || !currentUserId) return;
-    if (!window.confirm('Remove this relationship?')) return;
-    setRelationshipsStatus('saving');
-    setRelationshipsMessage('');
+    if (!speakerId || !relationshipIdentityCurrent()) return;
     try {
+      if (!(await isMemuActive()) || currentScope() !== scope || !relationshipIdentityCurrent()) return;
+      if (!window.confirm('Remove this relationship?')) return;
+      setRelationshipsStatus('saving');
+      setRelationshipsMessage('');
       await deleteRelationship(currentUserId, currentCharacter, speakerId);
-      if (currentScope() !== scope) return;
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       await refreshRelationships();
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationshipsStatus('idle');
     } catch (e: any) {
+      if (currentScope() !== scope || !relationshipIdentityCurrent()) return;
       setRelationshipsStatus('error');
       setRelationshipsMessage(e?.message || 'Failed to delete relationship');
     }
-  }
-
-  function sanitizeLorebookName(name: string): string {
-    return String(name || '')
-      .replace(/[\/:*?"<>|]/g, '-')
-      .replace(/\s+/g, ' ')
-      .trim();
   }
 
   function getCurrentCharacterLorebookPrefix(): string {
@@ -632,7 +643,7 @@ export default function App() {
       const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
       const raw = String(character?.name || memuExtras.baseInfo?.characterName || '').trim();
       if (!raw) return 'memU - ';
-      return `memU - ${sanitizeLorebookName(raw)} - `;
+      return `memU - ${sanitizeWorldInfoName(raw)} - `.slice(0, 120);
     } catch {
       return 'memU - ';
     }
@@ -1108,7 +1119,8 @@ export default function App() {
                 type="button"
                 className="menu_button"
                 onClick={() => void saveRelationshipEditor()}
-                disabled={!String(relationshipEditor.name || '').trim() || relationshipsStatus === 'saving'}
+                disabled={!String(relationshipEditor.name || '').trim() || relationshipsStatus === 'saving'
+                  || relationshipEditor.scope !== currentScope() || !relationshipIdentityCurrent()}
               >
                 {relationshipsStatus === 'saving' ? 'Saving…' : 'Save'}
               </button>

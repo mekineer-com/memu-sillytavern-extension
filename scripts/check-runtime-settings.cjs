@@ -6,7 +6,7 @@ const ts = require(path.resolve(__dirname, '../../../../../plugins/memu-plugin/n
 const jsx = require('react/jsx-runtime');
 
 // Render real App JSX with isolated hooks; don't initialize ST or run effects.
-const source = fs.readFileSync(`${__dirname}/../src/App.tsx`, 'utf8');
+const source = fs.readFileSync(process.env.MEMU_APP_SOURCE || `${__dirname}/../src/App.tsx`, 'utf8');
 const states = [];
 let cursor = 0;
 const react = {
@@ -717,3 +717,122 @@ function loadModule(file, imports, extra = {}) {
   assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, pendingCard.name), false);
   console.log('Character gate, canonical cards, native rename/duplicate, confirmed claims, persona binding, producer roles and branch polling pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+// Execute the real panel handlers without a live ST session.
+function loadFunctions(text, names, env) {
+  const file = ts.createSourceFile('checks.tsx', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const functions = [];
+  function visit(node) {
+    if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) functions.push(node.getText(file));
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  vm.runInNewContext(ts.transpileModule(functions.join('\n'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, env);
+}
+const flushPanel = () => new Promise(resolve => setImmediate(resolve));
+const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not finish'); process.exitCode = 1; }, 10000);
+(async () => {
+  function panel() {
+    const live = { scope: 'card-a/main', name: 'TestSoul' }, writes = [], updates = [];
+    const env = {
+      live, writes, updates, exports: {}, switchBusy: false, pluginOk: true, memuActive: true,
+      currentCharacter: 'TestSoul', currentUserId: 'TestOwner',
+      currentScope: () => live.scope, currentSelectedCharacterName: () => live.name,
+      memuExtras: { baseInfo: { characterName: 'TestSoul', userId: 'TestOwner' } },
+      relationshipEditor: { scope: live.scope, mode: 'add', name: 'Fictional Peer', relationship: 'friend' },
+      isMemuActive: async () => true, window: { confirm: () => true },
+      listRelationships: async () => ({ relationships: [] }),
+      createRelationship: async (...args) => writes.push(['add', ...args]),
+      updateRelationship: async (...args) => writes.push(['edit', ...args]),
+      deleteRelationship: async (...args) => writes.push(['delete', ...args]),
+      setRelationshipEditor: value => { env.relationshipEditor = value; updates.push(['editor', value]); },
+      setRelationships: value => updates.push(['rows', value]),
+      setRelationshipsStatus: value => updates.push(['status', value]),
+      setRelationshipsMessage: value => updates.push(['message', value]),
+    };
+    loadFunctions(source, ['relationshipIdentityCurrent', 'refreshRelationships', 'openAddRelationshipEditor',
+      'openEditRelationshipEditor', 'saveRelationshipEditor', 'removeRelationship'], env);
+    return env;
+  }
+  for (const mode of ['add', 'edit', 'delete']) {
+    const run = env => mode === 'delete' ? env.removeRelationship('fictional-entity') : env.saveRelationshipEditor();
+    function prepare(env) { env.relationshipEditor.mode = mode; env.relationshipEditor.speakerId = 'fictional-entity'; }
+    const normal = panel(); prepare(normal); await run(normal);
+    assert.equal(normal.writes.length, 1); assert.equal(normal.writes[0][0], mode);
+    assert.deepEqual(normal.writes[0].slice(1, 3), ['TestOwner', 'TestSoul']);
+    for (const change of ['scope', 'stale-render', 'stale-owner']) {
+      const env = panel(); prepare(env);
+      if (change === 'stale-render') env.live.name = 'OtherSoul';
+      if (change === 'stale-owner') env.memuExtras.baseInfo.userId = 'OtherOwner';
+      let release;
+      const gate = new Promise(resolve => { release = resolve; });
+      env.isMemuActive = () => gate;
+      const pending = run(env); await flushPanel();
+      if (change === 'scope') env.live.scope = 'card-b/main';
+      if (release) release(true);
+      await pending; assert.equal(env.writes.length, 0, `${mode}/${change} must not mutate an old destination`);
+    }
+    for (const outcome of ['success', 'failure', 'refresh']) {
+      const late = panel(); prepare(late); let finish;
+      const target = outcome === 'refresh' ? 'listRelationships'
+        : mode === 'delete' ? 'deleteRelationship' : mode === 'edit' ? 'updateRelationship' : 'createRelationship';
+      late[target] = () => new Promise((resolve, reject) => {
+        finish = () => outcome === 'failure' ? reject(new Error('Old-card failure')) : resolve({ relationships: [] });
+      });
+      const pending = run(late); await flushPanel();
+      late.live.scope = 'card-b/main'; const before = late.updates.length;
+      finish(); await pending;
+      assert.equal(late.updates.length, before, `Late ${outcome} must not change the new panel`);
+    }
+  }
+  const draft = panel(); draft.live.scope = 'card-a/new-chat';
+  await draft.saveRelationshipEditor(); assert.equal(draft.writes.length, 0);
+  const ready = panel(); ready.switchBusy = true;
+  await ready.saveRelationshipEditor(); assert.equal(ready.writes.length, 0);
+  ready.switchBusy = false; ready.memuExtras.baseInfo.characterName = 'OldSoul';
+  await ready.saveRelationshipEditor(); assert.equal(ready.writes.length, 0);
+  ready.memuExtras.baseInfo.characterName = ready.currentCharacter;
+  await ready.saveRelationshipEditor(); assert.equal(ready.writes.length, 1);
+  const reload = panel(), retainedDraft = reload.relationshipEditor;
+  reload.appReady = Promise.reject(new Error('Fictional reload failure'));
+  for (const setter of ['setSwitchBusy', 'setMemuActive', 'setPersona', 'setPersonaLocked', 'setSwitchError']) reload[setter] = () => {};
+  loadFunctions(source, ['reloadCharacter'], reload);
+  await reload.reloadCharacter();
+  assert.equal(reload.relationshipEditor, retainedDraft, 'Reload must preserve a human draft');
+  assert(reload.updates.some(([key, value]) => key === 'rows' && value.length === 0));
+  const refreshing = panel(); let release;
+  const refreshGate = new Promise(resolve => { release = resolve; });
+  refreshing.isMemuActive = () => refreshGate;
+  const refresh = refreshing.refreshRelationships(); await flushPanel();
+  refreshing.live.scope = 'card-b/main'; release(true); await refresh;
+  assert.equal(refreshing.updates.length, 0, 'Old refresh must not repopulate rows');
+  assert(source.includes('memuActive, switchBusy]'));
+
+  const memory = fs.readFileSync(process.env.MEMU_MEMORY_SOURCE || `${__dirname}/../src/memory/memorize.ts`, 'utf8');
+  const namingSource = process.env.MEMU_NAMING_SOURCE ? fs.readFileSync(process.env.MEMU_NAMING_SOURCE, 'utf8') : source;
+  for (const length of [100, 110, 111, 120, 150]) {
+    const character = 'Fictional / Soul '.repeat(12).slice(0, length);
+    const prefixes = [], books = [];
+    const env = { exports: {}, currentScope: () => 'stable', isMemuActive: async () => true,
+      initChatExtraInfo: async () => {}, st: { getContext: () => ({ characterId: 0, characters: [{ name: character }] }) },
+      memuExtras: { baseInfo: { characterName: character } }, IMPORT_LOREBOOKS: { get: () => true },
+      deleteLorebooksByPrefix: async prefix => prefixes.push(prefix), updateWorldInfoList: async () => {}, onceError: assert.fail,
+      cleanCategorySummary: text => text, isNullishCategorySummary: () => false,
+      filterCategoryForCharacter: (_category, text) => text, buildWorldInfoFileData: () => ({}),
+      upsertWorldInfoLorebook: async name => books.push(name),
+    };
+    loadFunctions(memory, ['sanitizeWorldInfoName', 'deleteMemuLorebooksForCurrentCharacter', 'syncCategoriesToWorldInfo'], env);
+    const panelFunctions = ['getCurrentCharacterLorebookPrefix'];
+    if (namingSource.includes('function sanitizeLorebookName(')) panelFunctions.push('sanitizeLorebookName');
+    loadFunctions(namingSource, panelFunctions, env);
+    await env.syncCategoriesToWorldInfo(env.memuExtras.baseInfo, [{ name: 'Category', summary: 'Fictional memory.' }]);
+    await env.deleteMemuLorebooksForCurrentCharacter();
+    const prefix = env.getCurrentCharacterLorebookPrefix();
+    assert.equal(books.length, 1);
+    assert(books[0].startsWith(prefix), `Panel prefix must match writer at ${length} characters`);
+    assert.deepEqual(prefixes, [prefix, prefix], 'Pruning and explicit deletion must use the panel prefix');
+  }
+  console.log('Relationship scope/identity, retained draft, stale response, and writer/panel/delete/pruning naming checks pass.');
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(panelCheckTimeout));

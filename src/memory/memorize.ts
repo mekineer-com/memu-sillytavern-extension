@@ -249,7 +249,7 @@ export async function deleteMemuLorebooksForCurrentCharacter(): Promise<void> {
     const info = memuExtras.baseInfo;
     if (!info) return;
     const sanitizedName = sanitizeWorldInfoName(String(info.characterName || '').trim());
-    const prefix = `memU - ${sanitizedName} - `;
+    const prefix = `memU - ${sanitizedName} - `.slice(0, 120);
     if (prefix === 'memU -  - ') return;
     try {
         await deleteLorebooksByPrefix(prefix);
@@ -987,7 +987,7 @@ export async function dispatchConversationTurn(
 
 // --- World Info sync (view memU memories inside ST) ---
 
-function sanitizeWorldInfoName(name: string): string {
+export function sanitizeWorldInfoName(name: string): string {
     return (name || "")
         .replace(/[\/:*?"<>|]/g, '-')
         .replace(/\s+/g, ' ')
@@ -1088,7 +1088,7 @@ async function syncCategoriesToWorldInfo(baseInfo: any, categories: Array<{ name
     const ctx: any = st.getContext();
     const character = (ctx?.characters && ctx?.characterId != null) ? (ctx.characters[ctx.characterId] ?? null) : null;
     const characterName = sanitizeWorldInfoName(String(character?.name || baseInfo?.characterName || 'Character'));
-    const prefix = `memU - ${characterName} - `;
+    const prefix = `memU - ${characterName} - `.slice(0, 120);
 
     const written = new Set<string>();
     for (const cat of categories) {

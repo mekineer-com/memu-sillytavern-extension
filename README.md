@@ -29,6 +29,10 @@ first; its name is stored once for that Soul and the picker then locks. Existing
 Souls reuse or create a matching persona. Older dev DBs without a stored name
 are not automatically upgraded.
 
+Relationship drafts stay bound to the chat/card where they were opened. Switching
+keeps the draft but disables its Save; close that editor before editing the new
+selection. Refreshing the same selection does not discard the draft.
+
 Branches and checkpoints remain plain ST chats with no memU activity. ST's
 controls stay unchanged. In memU-active main chats, replies use MCP only: a
 server error blocks the reply rather than switching APIs. Continue is temporarily
