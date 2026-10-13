@@ -1,7 +1,7 @@
 import { MEMU_DEFAULT_TIMEOUT } from 'utils/consts';
 import { memuExtras, st } from 'utils/context-extra';
 import { getTaskStatus } from 'utils/network';
-import { MemuTaskStatus } from 'utils/types';
+import { MemuTaskStatus, MemuSummary } from 'utils/types';
 import { retrieveMemories } from './memorize';
 import { onceError, onceWarn } from 'utils/log';
 import { currentScope, isMemuActive } from './utils';
@@ -38,7 +38,7 @@ export function startSummaryPolling(intervalMs: number = DEFAULT_INTERVAL_MS): v
             : intervalMs;
         pollerTimer = setTimeout(() => { void loop(); }, nextMs);
     };
-    void loop();
+    pollerTimer = setTimeout(() => { void loop(); }, 0);
 }
 
 export function stopSummaryPolling(): void {
@@ -52,18 +52,17 @@ export function stopSummaryPolling(): void {
 
 async function tick(): Promise<void> {
   try {
-        if (!(await isMemuActive())) return;
+        const scope = currentScope(), generation = pollingGeneration;
+        if (!(await isMemuActive()) || scope !== currentScope() || generation !== pollingGeneration) return;
 
+        await fireAndUpdateTaskStatus();
+        if (scope !== currentScope() || generation !== pollingGeneration) return;
         const summary = memuExtras.summary;
-        if (!summary) {
-            return;
-        }
+        if (!summary) return;
 
         switch (summary.summaryTaskStatus) {
             case MemuTaskStatus.PENDING:
             case MemuTaskStatus.PROCESSING: {
-                // async query latest status (do not wait)
-                void fireAndUpdateTaskStatus(summary.summaryRange, summary.summaryTaskId);
                 break;
             }
             case MemuTaskStatus.SUCCESS: {
@@ -101,17 +100,20 @@ async function tick(): Promise<void> {
     }
 }
 
-function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null): void {
-    if (!taskId) {
-        onceError("poller-fire-taskid-null", "taskId null");
-        return;
-    }
-
+function fireAndUpdateTaskStatus(): Promise<void> {
+    const info = memuExtras.baseInfo;
+    if (!info) return Promise.resolve();
+    const { userId, characterId } = info;
+    const taskId = memuExtras.summary?.summaryTaskId;
     const chatIdAtFire = currentScope();
+    const generation = pollingGeneration;
+    const current = () => generation === pollingGeneration && currentScope() === chatIdAtFire
+        && memuExtras.baseInfo?.userId === userId && memuExtras.baseInfo?.characterId === characterId
+        && memuExtras.summary?.summaryTaskId === taskId;
 
-    getTaskStatus(taskId)
+    return getTaskStatus(userId, characterId)
         .then(async (resp) => {
-            if (!(await isMemuActive()) || currentScope() !== chatIdAtFire || memuExtras.summary?.summaryTaskId !== taskId) {
+            if (!(await isMemuActive()) || !current()) {
                 onceWarn(
                     `poller-stale-chat:${chatIdAtFire}:${taskId}`,
                     `task status response dropped (chat changed while in-flight, taskId=${taskId})`,
@@ -119,27 +121,27 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
                 return;
             }
             const currentSummary = memuExtras.summary;
-            const err = (resp as any)?.error;
-            const raw = String(resp?.status ?? '').toUpperCase();
-            let mapped: MemuTaskStatus;
-            switch (raw) {
-                case 'SUCCESS':
-                    mapped = MemuTaskStatus.SUCCESS;
-                    break;
-                case 'PENDING':
-                    mapped = MemuTaskStatus.PENDING;
-                    break;
-                case 'PROCESSING':
-                    mapped = MemuTaskStatus.PROCESSING;
-                    break;
-                default:
-                    mapped = MemuTaskStatus.FAILURE;
+            if (['IDLE', 'SKIPPED', 'CANCELLED'].includes(resp?.status)) {
+                if (currentSummary) {
+                    memuExtras.summary = undefined;
+                    await st.saveChat();
+                }
+                return;
             }
+            if (!Object.values(MemuTaskStatus).includes(resp?.status as MemuTaskStatus)) {
+                if (isSummaryPollingActive(currentSummary)) memuExtras.summary = { ...currentSummary!,
+                    lastError: 'Memorize status unavailable. Checking again.' };
+                return;
+            }
+            const mapped = resp.status as MemuTaskStatus;
+            const active = mapped === MemuTaskStatus.PENDING || mapped === MemuTaskStatus.PROCESSING;
+            if (!currentSummary && !active) return;
+            const observingNewRun = active && !isSummaryPollingActive(currentSummary);
             // update summary value, do not do other logic
-            memuExtras.summary = {
+            const nextSummary: MemuSummary = {
                 ...currentSummary,
-                summaryRange: range,
-                summaryTaskId: taskId,
+                summaryRange: currentSummary?.summaryRange ?? [0, -1],
+                summaryTaskId: observingNewRun ? `${chatIdAtFire}:${Date.now()}` : taskId,
                 summaryTaskStatus: mapped,
                 progress: (() => {
                     const raw = (resp as any)?.progress;
@@ -154,12 +156,17 @@ function fireAndUpdateTaskStatus(range: [number, number], taskId?: string | null
                         ...(phase ? { phase } : {}),
                     };
                 })(),
-                lastError: mapped === MemuTaskStatus.FAILURE ? (typeof err === 'string' ? err : undefined) : undefined,
-                failureCount: mapped === MemuTaskStatus.FAILURE ? (currentSummary?.failureCount ?? 0) + 1 : 0,
+                lastError: mapped === MemuTaskStatus.FAILURE ? resp.error?.slice(0, 500) : undefined,
+                failureCount: mapped === MemuTaskStatus.FAILURE
+                    ? (currentSummary?.failureCount ?? 0) + Number(currentSummary?.summaryTaskStatus !== mapped) : 0,
             };
+            if (JSON.stringify(nextSummary) === JSON.stringify(currentSummary)) return;
+            memuExtras.summary = nextSummary;
             await st.saveChat();
         })
         .catch((err) => {
+            if (current() && isSummaryPollingActive(memuExtras.summary)) memuExtras.summary = { ...memuExtras.summary!,
+                lastError: 'Memorize status unavailable. Checking again.' };
             onceError("poller-task-status-failed", "task status failed", err);
         });
 }

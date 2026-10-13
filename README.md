@@ -43,6 +43,13 @@ and failure pause. Delete publication updates the saved source without starting
 paid work. Failed work requires explicit Retry in OpenAlma. Use one active browser
 tab per chat; checkpoints and branches never publish to memU.
 
+Manual Memorize first flushes ST's native save. The progress banner observes the
+Soul's current run, including after navigation or an ST restart; it is not a
+receipt for one chat. Polling outages preserve known progress. Cancel remains
+visible as requested until MCP confirms the terminal outcome; a network failure
+does not disable another Cancel attempt. Paid failures still require Launcher
+Retry rather than automatic re-extraction.
+
 **Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
 
 A seamless, powerful memory plugin powered by MemU!

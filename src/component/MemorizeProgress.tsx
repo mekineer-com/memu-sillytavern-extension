@@ -99,6 +99,8 @@ export default function MemorizeProgress(): React.JSX.Element | null {
   const inConsolidationPhase = !cancelling && (phase === 'consolidation' || phase === 'consolidating');
   const label = cancelling
     ? 'Cancelling...'
+    : active && summary.lastError
+      ? summary.lastError
     : failed
       ? `Memorize failed.${failedError ? ` ${failedError}` : ''} Retry in OpenAlma launcher.`
     : inConsolidationPhase
@@ -106,7 +108,7 @@ export default function MemorizeProgress(): React.JSX.Element | null {
       : status === MemuTaskStatus.PENDING
       ? 'Memorize pending...'
       : phase === 'extracting'
-      ? 'Memorizing saved chat...'
+      ? 'Memorizing saved conversations...'
       : progress
       ? `Memorizing (${progressCurrent}/${progressTotal})`
       : 'Memorizing...';
@@ -115,21 +117,27 @@ export default function MemorizeProgress(): React.JSX.Element | null {
     : 0;
 
   async function handleCancel() {
-    if (!(await isMemuActive())) return;
     if (cancelling) return;
-    setCancelling(true);
     const info = memuExtras.baseInfo;
     if (!info) return;
+    const { userId, characterId } = info;
     const requestedTask = currentTaskKey();
-    const result = await cancelMemorize(info.userId, info.characterId);
-    if (requestedTask !== currentTaskKey()) return;
-    if (!result.ok) {
-      setCancelling(false);
-      setRefusedTask(requestedTask);
-      return;
+    let accepted = false;
+    try {
+      if (!(await isMemuActive()) || requestedTask !== currentTaskKey()) return;
+      setCancelling(true);
+      const result = await cancelMemorize(userId, characterId);
+      if (requestedTask !== currentTaskKey()) return;
+      accepted = result.ok === true;
+      if (!accepted) setRefusedTask(requestedTask);
+    } catch {
+      if (requestedTask === currentTaskKey() && memuExtras.summary) {
+        memuExtras.summary = { ...memuExtras.summary,
+          lastError: 'Cancel could not be confirmed. Checking progress.' };
+      }
+    } finally {
+      if (!accepted && requestedTask === currentTaskKey()) setCancelling(false);
     }
-    memuExtras.summary = undefined;
-    await st.saveChat();
   }
 
   return createPortal(

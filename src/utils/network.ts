@@ -17,7 +17,7 @@ export type MemorizeResponse = {
   taskId?: string;
 };
 export type MemorizeTaskStatusResponse = {
-  status: string;
+  status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILURE' | 'CANCELLED' | 'SKIPPED' | 'IDLE' | 'UNKNOWN';
   error?: string;
   progress?: { current: number; total: number; phase?: string };
 };
@@ -38,6 +38,7 @@ export type ConversationRetrieveRequest = {
 };
 type RequestOptions = {
   signal?: AbortSignal;
+  timeoutMs?: number;
 };
 export type ConversationRetrieveResponse = {
   ok: boolean;
@@ -132,7 +133,7 @@ export async function createOwner(userId: string): Promise<{ user_id: string }> 
 }
 
 export async function getSouls(): Promise<{ souls: string[] }> {
-  return request<{ souls: string[] }>('/souls', undefined, 'GET');
+  return request<{ souls: string[] }>('/souls', undefined, 'GET', undefined, { timeoutMs: 60_000 });
 }
 
 export async function createSoul(soulId: string, userName: string): Promise<{ soul_id: string; created: boolean }> {
@@ -140,7 +141,7 @@ export async function createSoul(soulId: string, userName: string): Promise<{ so
 }
 
 export async function getSoul(soulId: string, includeNarrative = false): Promise<{ soul_id: string; user_name: string; narrative_self?: string }> {
-  return request(`/souls/${encodeURIComponent(soulId)}${includeNarrative ? '?include_narrative=true' : ''}`, undefined, 'GET');
+  return request(`/souls/${encodeURIComponent(soulId)}${includeNarrative ? '?include_narrative=true' : ''}`, undefined, 'GET', undefined, { timeoutMs: 60_000 });
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
@@ -189,12 +190,12 @@ export async function getProfileModels(
   return request<{ ok: boolean; models: string[]; message?: string }>(`/models?${params.toString()}`, undefined, 'GET');
 }
 
-export async function getTaskStatus(taskId: string): Promise<MemorizeTaskStatusResponse> {
-  return request<MemorizeTaskStatusResponse>('/getTaskStatus', { taskId });
+export async function getTaskStatus(userId: string, soulId: string): Promise<MemorizeTaskStatusResponse> {
+  return request<MemorizeTaskStatusResponse>('/getTaskStatus', { userId, soulId }, 'POST', undefined, { timeoutMs: 60_000 });
 }
 
 export async function cancelMemorize(userId: string, soulId: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>('/cancelMemorize', { userId, soulId });
+  return request<{ ok: boolean }>('/cancelMemorize', { userId, soulId }, 'POST', undefined, { timeoutMs: 60_000 });
 }
 
 export async function retrieveDefaultCategories(userId: string, soulId: string): Promise<DefaultCategoriesResponse> {
@@ -287,7 +288,9 @@ async function request<T>(
   headers: Record<string, string> = { 'Content-Type': 'application/json' },
   options?: RequestOptions,
 ): Promise<T> {
-  const csrfToken = await getCsrfTokenCached();
+  const deadline = AbortSignal.timeout(options?.timeoutMs ?? 660_000);
+  const signal = options?.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+  const csrfToken = await getCsrfTokenCached(signal);
 
   const resp = await fetch(`${ROUTER_BASE_URL}${url}`, {
     method,
@@ -295,7 +298,7 @@ async function request<T>(
       ...headers,
       'x-csrf-token': csrfToken,
     },
-    signal: options?.signal,
+    signal,
     ...(method === 'GET' ? {} : { body: JSON.stringify(body ?? {}) }),
   });
 

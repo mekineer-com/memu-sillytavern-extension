@@ -27,7 +27,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(sandbox.buildTurnHistory([], 0))), []
 console.log('Plain ST history keeps original source IDs, hidden exclusions, timestamps and speaker attribution.');
 
 function load(file, imports, globals) {
-  const ctx = { exports: {}, require: name => {
+  const ctx = { exports: {}, AbortSignal, require: name => {
     assert(name in imports, `Unexpected import ${name}`);
     return imports[name];
   }, ...globals };
@@ -166,8 +166,9 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(extras.summary.summaryTaskId, 'real-task'); assert.equal(extras.summary.summaryTaskStatus, 'PENDING');
   const activeSummary = extras.summary;
   for (const status of ['waiting_for_import', 'deferred', 'nothing_to_memorize', 'published', 'coalesced']) {
+    const beforeSave = saves;
     admission = { status }; await producer.doSummary(0, 0, { tail: true });
-    assert.equal(extras.summary, activeSummary); assert.equal(saves, 1);
+    assert.equal(extras.summary, activeSummary); assert.equal(saves, beforeSave + 1);
   }
   for (const meta of [{ main_chat: 'ui-checkpoint' }, { main_chat: 'command-branch' }]) {
     ctx.chatMetadata = meta;
@@ -179,6 +180,15 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
     assert.equal(reads, before); assert.equal(extras.summary, activeSummary);
   }
   ctx.disabled = false; ctx.chatMetadata = { integrity: 'test-main' };
+  // Manual admission flushes native edits first, without resetting memU metadata.
+  const savedWriter = st.saveChat, oldChat = ctx.chat, oldPersisted = persisted;
+  ctx.chat = [{ name: 'TestSoul', mes: 'Current saved reply' }];
+  persisted = [{ chat_metadata: {} }, { name: 'TestSoul', mes: 'Discarded old reply' }];
+  st.saveChat = async () => { saves++; persisted = [{ chat_metadata: {} }, ...structuredClone(ctx.chat)]; };
+  admission = { status: 'deferred' };
+  await producer.memorizeNow();
+  assert.equal(publications.at(-1).body.conversation[0].content, 'Current saved reply');
+  st.saveChat = savedWriter; ctx.chat = oldChat; persisted = oldPersisted;
   const calls = { replies: 0, turnErrors: 0 };
   let duringSave;
   ctx.saveReply = async ({ getMessage }) => {
@@ -443,7 +453,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   extras.summary = undefined; persisted = [];
   const beforeRefusedSave = saves;
   await producer.doSummary(0, 0);
-  assert.equal(extras.summary, undefined); assert.equal(saves, beforeRefusedSave);
+  assert.equal(extras.summary, undefined); assert.equal(saves, beforeRefusedSave + 1);
   assert.match(alerts.at(-1), /Saved chat is missing or unreadable/);
   // Real retrieve + dispatch must hand successful listen's saved source to the interceptor.
   let listenResult;
@@ -531,29 +541,30 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   ctx.chat = [rows[0], rows[3]];
   persisted = [{ chat_metadata: {} }, ...ctx.chat];
   const beforeMetadata = JSON.stringify(ctx.chatMetadata), beforeBooks = [...lorebooks], beforeSaves = saves;
+  let flushedSaves = beforeSaves;
   for (const status of ['deferred', 'waiting_for_import', 'nothing_to_memorize', 'published', 'coalesced']) {
     admission = { status }; await reset.resetCursor();
     assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
-    assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+    assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, ++flushedSaves);
     assert.match(publications.at(-1).url, /rebuild=true/);
   }
   proxyError = true; await reset.resetCursor(); proxyError = false;
   assert.match(alerts.at(-1), /TestSoul is paused/);
   assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
-  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, ++flushedSaves);
   persisted = []; await reset.resetCursor();
   assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata);
-  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, beforeSaves);
+  assert.deepEqual(lorebooks, beforeBooks); assert.equal(saves, ++flushedSaves);
   const beforeEmpty = publications.length;
   ctx.chat = []; await reset.resetCursor();
-  assert.equal(publications.length, beforeEmpty); assert.equal(saves, beforeSaves);
+  assert.equal(publications.length, beforeEmpty); assert.equal(saves, flushedSaves);
   assert.equal(JSON.stringify(ctx.chatMetadata), beforeMetadata); assert.deepEqual(lorebooks, beforeBooks);
   ctx.chat = [rows[0], rows[3]]; persisted = [{ chat_metadata: {} }, ...ctx.chat];
   admission = { status: 'accepted', taskId: 'rebuilt-task' };
   await reset.resetCursor();
   assert.equal(extras.summary.summaryTaskId, 'rebuilt-task');
   assert.equal(extras.summary.summaryTaskStatus, 'PENDING'); assert.equal(extras.summary.force, true);
-  assert.equal(saves, beforeSaves + 1); assert.deepEqual(lorebooks, beforeBooks);
+  assert.equal(saves, flushedSaves + 2); assert.deepEqual(lorebooks, beforeBooks);
   const completed = extras.summary; completed.summaryTaskStatus = 'SUCCESS';
   categoriesResponse = {}; await producer.retrieveMemories(completed);
   assert.deepEqual(lorebooks, beforeBooks); // malformed data must never be treated as an empty result

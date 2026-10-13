@@ -168,6 +168,8 @@ export async function doSummary(from: number, to: number, opts: { force?: boolea
     try {
         const source = bindSavedSource();
         if (currentScope() !== scope) return;
+        await st.saveChat();
+        if (currentScope() !== scope) return;
         await publishSavedSource(source, 'manual', opts);
     } catch (error) {
         if (currentScope() !== scope) return;
@@ -285,7 +287,7 @@ export async function retrieveMemories(summary: MemuSummary): Promise<void> {
             onceWarn("worldinfo-sync-failed", "worldinfo sync failed");
         }
 
-        if (currentScope() !== scope) return;
+        if (currentScope() !== scope || memuExtras.summary?.summaryTaskId !== summary.summaryTaskId) return;
         const retrieve: any = memuExtras.retrieve ?? {
             history: [],
         };

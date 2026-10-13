@@ -424,14 +424,15 @@ function loadModule(file, imports, extra = {}) {
   resolveRetrieve({}); await retrieving;
   let resolvePoll;
   extras.summary = { summaryTaskId: 'parent-task', summaryTaskStatus: 'PROCESSING', summaryRange: [0, 2] };
+  let firstPoll;
   const poller = loadModule('memory/summary-poller.ts', {
     'utils/consts': { MEMU_DEFAULT_TIMEOUT: 3000 }, 'utils/context-extra': { st, memuExtras: extras },
     'utils/network': { getTaskStatus: () => new Promise(resolve => { resolvePoll = resolve; }) },
     'utils/types': { MemuTaskStatus: { PROCESSING: 'PROCESSING', PENDING: 'PENDING', SUCCESS: 'SUCCESS' } },
     './memorize': memory, './utils': utils, 'utils/log': log,
-  }, { setTimeout: () => 1, clearTimeout() {} });
+  }, { setTimeout: callback => { firstPoll = callback; return 1; }, clearTimeout() {} });
   names.OtherSoul = 'OtherOwner'; saves = 0;
-  poller.startSummaryPolling(); await new Promise(resolve => setImmediate(resolve));
+  poller.startSummaryPolling(); firstPoll(); await new Promise(resolve => setImmediate(resolve));
   const inherited = { ...extras.summary };
   ctx.getCurrentChatId = () => 'copy'; ctx.chatMetadata = { main_chat: 'main', integrity: 'shared' }; extras.summary = inherited;
   resolvePoll({ status: 'SUCCESS' });
