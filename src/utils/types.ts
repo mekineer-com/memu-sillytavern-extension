@@ -15,7 +15,7 @@ export interface MemuPluginConfigV1 {
 
   // External memu server folder (mcp-memu-server)
   serverPath?: string;
-  autoStartServer?: boolean;
+  autoStartWithSillyTavern?: boolean;
 
   updatedAt: string;
 }

@@ -405,9 +405,11 @@ export default function App() {
 
   async function doServerStart() {
     setServerCtlBusy('working');
+    setSwitchError('');
     try {
       const r = await serverStart();
       setServerCtl(r?.status ?? r);
+      if (!r?.ok) throw new Error(r?.message || 'memU Server could not start.');
       const current = await getModelMappings();
       mappingState.current = current;
       setMappings(current);
@@ -420,12 +422,19 @@ export default function App() {
 
   async function doServerStop() {
     setServerCtlBusy('working');
+    setSwitchError('');
     try {
-      const r = await serverStop();
+      let r = await serverStop();
+      if (r?.confirmationRequired) {
+        if (!window.confirm(r.message)) { setServerCtlBusy('idle'); return; }
+        r = await serverStop(true);
+      }
       setServerCtl(r?.status ?? r);
+      if (!r?.ok) throw new Error(r?.message || 'memU Server could not stop.');
       setServerCtlBusy('idle');
-    } catch {
+    } catch (error) {
       setServerCtlBusy('error');
+      setSwitchError(String(error));
     }
   }
 
@@ -810,8 +819,8 @@ export default function App() {
                   </button>
                     <label className="checkbox_label expander" htmlFor="auto_start_server" style={{ margin: 0 }}>
                       <input id="auto_start_server" type="checkbox" className="checkbox"
-                        checked={pluginConfig?.autoStartServer === true}
-                        onChange={event => updatePluginConfig({ autoStartServer: event.target.checked })} />
+                        checked={pluginConfig?.autoStartWithSillyTavern === true}
+                        onChange={event => updatePluginConfig({ autoStartWithSillyTavern: event.target.checked })} />
                       <span>Auto Start</span>
                     </label>
                 </div>
@@ -830,7 +839,8 @@ export default function App() {
                   const healthy = !!serverCtl?.healthy;
                   const running = !!serverCtl?.running;
                   const baseUrl = serverCtl?.baseUrl;
-                  const statusText = !serverCtl ? 'checking…' : !serverCtl.ok ? 'unavailable' : healthy
+                  const statusText = !serverCtl ? 'checking…' : !serverCtl.ok ? 'unavailable'
+                    : serverCtl.shutdown?.draining || serverCtl.shutdown?.stopping ? 'stopping…' : healthy
                     ? 'running'
                     : running
                       ? 'starting…'

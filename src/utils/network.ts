@@ -164,8 +164,8 @@ export async function serverStart(): Promise<any> {
   return request<any>('/server/start', {}, 'POST');
 }
 
-export async function serverStop(): Promise<any> {
-  return request<any>('/server/stop', {}, 'POST');
+export async function serverStop(confirmUnknown = false): Promise<any> {
+  return request<any>('/server/stop', { confirm_unknown: confirmUnknown }, 'POST');
 }
 
 export async function setPluginConfig(config: Partial<MemuPluginConfigV1>): Promise<{ ok: boolean; config?: MemuPluginConfigV1 }> {

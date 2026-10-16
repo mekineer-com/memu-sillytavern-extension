@@ -56,16 +56,18 @@ assert.equal(serverButtons(tree).length, 2);
 assert.equal(find(tree, 'auto_start_server').props.checked, false);
 assert.equal(find(tree, 'auto_start_server').props.disabled, undefined);
 find(tree, 'auto_start_server').props.onChange({ target: { checked: true } });
-assert.equal(states[1].autoStartServer, true);
-states[1].autoStartServer = false;
+assert.equal(states[1].autoStartWithSillyTavern, true);
+states[1].autoStartWithSillyTavern = false;
 tree = render();
 assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'stopped'));
+states[4] = { ok: true, healthy: true, shutdown: { draining: true } };
+assert(nodes(render()).some(node => node.type === 'b' && node.props.children === 'stopping…'));
 states[4] = { ok: true, managedByLauncher: true, healthy: false };
 tree = render();
 assert.equal(serverButtons(tree).length, 2);
 assert.equal(find(tree, 'auto_start_server').props.disabled, undefined);
 assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'stopped'));
-assert.equal(states[1].autoStartServer, false);
+assert.equal(states[1].autoStartWithSillyTavern, false);
 states[4] = null;
 tree = render();
 const serverPathInput = tree => nodes(tree).find(node => node.props?.placeholder === 'Path to mcp-memu-server');
@@ -125,13 +127,30 @@ assert(source.includes('st.event_types.SETTINGS_UPDATED'));
 
 (async () => {
   let starts = 0, reads = 0, loaded, busy;
-  const ready = { mappingState: { current: null }, serverStart: async () => { starts++; return { status: { healthy: true } }; },
+  const ready = { mappingState: { current: null }, serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
     getModelMappings: async () => { reads++; return { claude_code: false, reply_models: {}, step_models: {}, providers: [] }; },
-    setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => assert.fail(value) };
+    setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => { if (value) assert.fail(value); } };
   vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStart('), source.indexOf('  async function doServerStop(')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, ready);
   await ready.doServerStart(); assert.equal(starts, 1); assert.equal(reads, 1); assert.equal(busy, 'idle'); assert.equal(ready.mappingState.current, loaded);
+  let reported;
+  ready.serverStart = async () => ({ ok: false, message: 'Fictional startup error', status: { ok: false } });
+  ready.setSwitchError = value => { reported = value; };
+  await ready.doServerStart(); assert.match(reported, /Fictional startup error/); assert.equal(reads, 1);
+  let confirm = false, stopCalls = [], stopError, stopBusy;
+  const stopping = { window: { confirm: () => confirm },
+    serverStop: async (confirmed = false) => { stopCalls.push(confirmed); return confirmed
+      ? { ok: true, status: { ok: true } } : { ok: false, confirmationRequired: true, message: 'Unknown Iris activity' }; },
+    setServerCtl() {}, setServerCtlBusy: value => { stopBusy = value; }, setSwitchError: value => { stopError = value; } };
+  vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStop('), source.indexOf('  function updatePluginConfig(')), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, stopping);
+  await stopping.doServerStop(); assert.deepEqual(stopCalls, [false]); assert.equal(stopBusy, 'idle');
+  confirm = true; stopCalls = [];
+  await stopping.doServerStop(); assert.deepEqual(stopCalls, [false, true]); assert.equal(stopBusy, 'idle');
+  stopping.serverStop = async () => ({ ok: false, message: 'Stop the Iris conversation first.' });
+  await stopping.doServerStop(); assert.match(stopError, /Iris conversation/); assert.equal(stopBusy, 'error');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 // Character switch and copied-chat UI use the same panel, not a second settings store.
