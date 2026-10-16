@@ -41,6 +41,13 @@ const render = () => { cursor = 0; return context.exports.default(); };
 function nodes(tree) { if (!tree || typeof tree !== 'object') return []; if (Array.isArray(tree)) return tree.flatMap(nodes); return [tree, ...nodes(tree.props?.children)]; }
 const find = (tree, id) => nodes(tree).find(node => node.props?.id === id);
 let tree = render();
+const serverPathInput = tree => nodes(tree).find(node => node.props?.placeholder === 'Path to mcp-memu-server');
+assert.equal(serverPathInput(tree).props.value, '/fictional/server');
+states[1] = { version: 4 };
+assert.equal(serverPathInput(render()).props.value, '');
+serverPathInput(render()).props.onChange({ target: { value: '/fictional/manual/server' } });
+assert.equal(serverPathInput(render()).props.value, '/fictional/manual/server');
+states[1] = { version: 4, serverPath: '/fictional/server' };
 assert.equal(find(tree, 'use_server_settings'), undefined);
 assert.equal(find(tree, 'use_claude_code').props.checked, false);
 assert(find(tree, 'memu-model-srmm')); assert(find(tree, 'memu-model-other_apps'));

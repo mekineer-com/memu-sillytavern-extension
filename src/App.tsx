@@ -829,9 +829,9 @@ export default function App() {
                   <label>Server path</label>
                   <input
                     className="text_pole"
-                    value={String((pluginConfig as any)?.serverPath || '~/apps/mcp-memu-server')}
+                    value={String((pluginConfig as any)?.serverPath || '')}
                     onChange={(e) => updatePluginConfig({ serverPath: e.target.value as any })}
-                    placeholder="~/apps/mcp-memu-server"
+                    placeholder="Path to mcp-memu-server"
                   />
                 </div>
 
