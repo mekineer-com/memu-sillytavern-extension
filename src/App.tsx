@@ -790,6 +790,9 @@ export default function App() {
                   <span>Backend</span>
                 </h4>
 
+                {serverCtl?.managedByLauncher === true ? (
+                  <p>Use OpenAlma Launcher to start or stop memU Server.</p>
+                ) : serverCtl?.managedByLauncher === false ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
                   <button
                     className="menu_button"
@@ -824,6 +827,7 @@ export default function App() {
                     <span>Auto Start</span>
                   </label>
                 </div>
+                ) : null}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <label>Server path</label>
@@ -840,11 +844,11 @@ export default function App() {
                   const running = !!serverCtl?.running;
                   const baseUrl = serverCtl?.baseUrl;
                   const autoStart = (pluginConfig as any)?.autoStartServer !== false;
-                  const statusText = healthy
+                  const statusText = !serverCtl ? 'checking…' : !serverCtl.ok ? 'unavailable' : healthy
                     ? 'running'
                     : running
                       ? 'starting…'
-                      : (autoStart ? 'stopped' : 'stopped (auto-start off)');
+                      : (serverCtl.managedByLauncher || autoStart ? 'stopped' : 'stopped (auto-start off)');
 
                   return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' }}>
