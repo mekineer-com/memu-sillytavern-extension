@@ -14,7 +14,7 @@ import {
 } from 'memory/exports';
 import { st, pruneStalePerSoulEntries } from './utils/context-extra';
 import { MemuTaskStatus } from './utils/types';
-import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from './utils/consts';
+import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS } from './utils/consts';
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
@@ -248,5 +248,4 @@ installAutomationHooks();
 pruneStalePerSoulEntries([
     MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER,
     MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS,
-    MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON,
 ]);

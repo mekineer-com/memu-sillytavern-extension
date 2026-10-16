@@ -34,7 +34,6 @@ export type ConversationRetrieveRequest = {
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
   soul_card?: string;
-  mentalHealthAddon?: boolean;
 };
 type RequestOptions = {
   signal?: AbortSignal;
@@ -149,11 +148,11 @@ export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return pluginConfig;
 }
 
-export async function getModelMappings(profileId?: string): Promise<ModelMappings> {
-  return request(`/modelMappings${profileId ? `?models=${encodeURIComponent(profileId)}` : ''}`, undefined, 'GET');
+export async function getModelMappings(): Promise<ModelMappings> {
+  return request('/modelMappings', undefined, 'GET');
 }
 
-export async function setModelMappings(patch: Partial<Pick<ModelMappings, 'claude_code' | 'reply_models' | 'step_models' | 'st_selected'>>): Promise<ModelMappings> {
+export async function setModelMappings(patch: Partial<Pick<ModelMappings, 'claude_code' | 'mental_health_query' | 'reply_models' | 'step_models' | 'st_selected'>>): Promise<ModelMappings> {
   return request('/modelMappings', patch);
 }
 

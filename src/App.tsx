@@ -12,7 +12,6 @@ import {
   OVERRIDE_SUMMARIZER,
   IMPORT_LOREBOOKS,
   SHOW_ADVANCED_MAPPING,
-  MENTAL_HEALTH_ADDON,
   st,
 } from 'utils/context-extra';
 import {
@@ -60,6 +59,7 @@ const sectionStyle: CSSProperties = {
 
 const sectionTitleStyle: CSSProperties = {
   margin: 0,
+  marginBottom: '0.33lh',
   display: 'flex',
   alignItems: 'center',
   gap: 8,
@@ -119,7 +119,6 @@ export default function App() {
 
   const [overrideSummarizer, setOverrideSummarizer] = useState<boolean>(true);
   const [importLorebooks, setImportLorebooks] = useState<boolean>(false);
-  const [mentalHealthAddon, setMentalHealthAddon] = useState<boolean>(false);
   const [currentCharacter, setCurrentCharacter] = useState<string>('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
   const [memuActive, setMemuActive] = useState(false);
@@ -361,7 +360,6 @@ export default function App() {
       setCurrentUserId(String(memuExtras.baseInfo?.userId || '').trim());
       setOverrideSummarizer(OVERRIDE_SUMMARIZER.get());
       setImportLorebooks(IMPORT_LOREBOOKS.get());
-      setMentalHealthAddon(MENTAL_HEALTH_ADDON.get());
     }
     reload();
     try {
@@ -387,7 +385,7 @@ export default function App() {
   useEffect(() => {
     if (!pluginOk) return;
     void refreshServerCtl();
-  }, [pluginOk, (pluginConfig as any)?.serverPath, (pluginConfig as any)?.autoStartServer]);
+  }, [pluginOk, (pluginConfig as any)?.serverPath]);
 
   useEffect(() => {
     const events = [st.event_types.MAIN_API_CHANGED, st.event_types.CHATCOMPLETION_SOURCE_CHANGED, st.event_types.CHATCOMPLETION_MODEL_CHANGED, st.event_types.CONNECTION_PROFILE_LOADED, st.event_types.OAI_PRESET_CHANGED_AFTER, st.event_types.PRESET_CHANGED, st.event_types.SETTINGS_UPDATED];
@@ -482,19 +480,14 @@ export default function App() {
     const supportedNative = native && mappings?.providers.some(provider => provider.profile_id === native.profile_id && provider.supported);
     choices.push({ value: JSON.stringify({ source: 'st_native' }), label: `default (SillyTavern selected: ${native?.provider || 'none'} ${native?.model || ''})`, disabled: !supportedNative });
     for (const provider of mappings?.providers || []) {
+      if (provider.profile_id.startsWith('native:')) continue;
       if (!provider.models.length) choices.push({ value: JSON.stringify({ source: 'configured', selection: { profile_id: provider.profile_id, provider: provider.provider, model: '' } }),
         label: `${provider.label} (unavailable: ${provider.reason || 'Choose a model in ST'})`, disabled: true });
       for (const model of provider.models) choices.push({ value: JSON.stringify({ source: 'configured', selection: { profile_id: provider.profile_id, provider: provider.provider, model: model.model } }),
         label: `${provider.label}: ${model.model}${provider.supported ? '' : ` (unavailable: ${provider.reason})`}`, disabled: !provider.supported });
     }
     if (!choices.some(choice => choice.value === value)) choices.push({ value, label: `Configured: ${current.selection?.provider || ''} ${current.selection?.model || current.source}`, disabled: false });
-    return <select id={`memu-model-${role}`} className="text_pole" value={value} disabled={!mappings} onFocus={() => {
-      void getModelMappings('all').then(result => {
-        if (!mappingState.current) return;
-        const next = { ...mappingState.current, providers: result.providers };
-        mappingState.current = next; setMappings(next);
-      }).catch(error => setSwitchError(String(error)));
-    }} onChange={event => {
+    return <select id={`memu-model-${role}`} className="text_pole" value={value} disabled={!mappings} onChange={event => {
       const choice: ModelChoice = JSON.parse(event.target.value);
       changeModelMappings({ [group]: { [role]: choice }, ...(choice.source === 'st_native' && native ? { st_selected: { selection: native } } : {}) });
     }}>{choices.map(choice => <option key={choice.value} value={choice.value} disabled={choice.disabled}>{choice.label}</option>)}</select>;
@@ -509,7 +502,7 @@ export default function App() {
   }
 
   function renderMemuSwitch(id: string, onCard = false) {
-    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap' }}>
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap', marginBottom: onCard ? 0 : '0.33lh' }}>
       {onCard && <span>Enable memU:</span>}
       <button id={id} type="button" role="switch" className="memu-toggle" aria-label="memU"
         aria-checked={memuActive && !copiedChat}
@@ -533,6 +526,14 @@ export default function App() {
   }
 
 
+  const stepLabels: Array<{ step: string; label: string; hint: string }> = [
+    { step: 'preprocess', label: 'Preprocess', hint: 'Raw multimodal → concise text' },
+    { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
+    { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
+    { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
+    { step: 'consolidation', label: 'Consolidation', hint: 'Weekly reflection — edges, intentions, diary' },
+  ];
+
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
     if (!memuActive || copiedChat) return;
     setOverrideSummarizer(e.target.checked);
@@ -549,12 +550,6 @@ export default function App() {
     } else {
       void deleteMemuLorebooksForCurrentCharacter();
     }
-  }
-
-  function handleMentalHealthAddonChange(e: ChangeEvent<HTMLInputElement>) {
-    if (!memuActive || copiedChat) return;
-    setMentalHealthAddon(e.target.checked);
-    MENTAL_HEALTH_ADDON.set(e.target.checked);
   }
 
   async function handleMemorizeNow(): Promise<void> {
@@ -790,9 +785,6 @@ export default function App() {
                   <span>Backend</span>
                 </h4>
 
-                {serverCtl?.managedByLauncher === true ? (
-                  <p>Use OpenAlma Launcher to start or stop memU Server.</p>
-                ) : serverCtl?.managedByLauncher === false ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
                   <button
                     className="menu_button"
@@ -816,18 +808,13 @@ export default function App() {
                   >
                     Stop
                   </button>
-                  <label className="checkbox_label expander" htmlFor="auto_start_server" style={{ margin: 0 }}>
-                    <input
-                      id="auto_start_server"
-                      type="checkbox"
-                      className="checkbox"
-                      checked={(pluginConfig as any)?.autoStartServer !== false}
-                      onChange={(e) => updatePluginConfig({ autoStartServer: e.target.checked } as any)}
-                    />
-                    <span>Auto Start</span>
-                  </label>
+                    <label className="checkbox_label expander" htmlFor="auto_start_server" style={{ margin: 0 }}>
+                      <input id="auto_start_server" type="checkbox" className="checkbox"
+                        checked={pluginConfig?.autoStartServer === true}
+                        onChange={event => updatePluginConfig({ autoStartServer: event.target.checked })} />
+                      <span>Auto Start</span>
+                    </label>
                 </div>
-                ) : null}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <label>Server path</label>
@@ -843,12 +830,11 @@ export default function App() {
                   const healthy = !!serverCtl?.healthy;
                   const running = !!serverCtl?.running;
                   const baseUrl = serverCtl?.baseUrl;
-                  const autoStart = (pluginConfig as any)?.autoStartServer !== false;
                   const statusText = !serverCtl ? 'checking…' : !serverCtl.ok ? 'unavailable' : healthy
                     ? 'running'
                     : running
                       ? 'starting…'
-                      : (serverCtl.managedByLauncher || autoStart ? 'stopped' : 'stopped (auto-start off)');
+                      : 'stopped';
 
                   return (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' }}>
@@ -874,20 +860,28 @@ export default function App() {
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
 
-                <label className="checkbox_label" htmlFor="use_claude_code">
-                  <input id="use_claude_code" type="checkbox" checked={mappings?.claude_code === true} disabled={!mappings} onChange={event => changeModelMappings({ claude_code: event.target.checked })} />
+                <label className="checkbox_label expander" htmlFor="use_claude_code">
+                  <input id="use_claude_code" type="checkbox" className="checkbox" checked={mappings?.claude_code === true} disabled={!mappings} onChange={event => changeModelMappings({ claude_code: event.target.checked })} />
                   <span>Use Claude Code</span>
                   <span className="memu-runtime-info"><button type="button" className="menu_button" aria-label="Scheduled agentic turn settings" aria-describedby="memu-agentic-settings-info"><i className="fa-solid fa-info-circle" /></button><span id="memu-agentic-settings-info" role="tooltip">The Soul's scheduled agentic turns use mcp-memu-server/config.json.</span></span>
                 </label>
-                <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>)</label>
-                {renderModelPicker('reply_models', 'srmm')}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>)</label>
+                  {renderModelPicker('reply_models', 'srmm')}
+                </div>
                 {!mappings?.claude_code && <>
-                  <label>Other OpenAlma App Replies <span className="memu-runtime-info"><button type="button" className="menu_button" aria-label="About other app replies" aria-describedby="memu-iris-model-info"><i className="fa-solid fa-info-circle" /></button><span id="memu-iris-model-info" role="tooltip">Except the Iris voice model</span></span></label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>Other OpenAlma App Replies <span className="memu-runtime-info"><button type="button" className="menu_button" aria-label="About other app replies" aria-describedby="memu-iris-model-info"><i className="fa-solid fa-info-circle" /></button><span id="memu-iris-model-info" role="tooltip">Except the Iris voice model</span></span></label>
                   {renderModelPicker('reply_models', 'other_apps')}
-                  <label className="checkbox_label"><input id="advanced_mapping" type="checkbox" checked={showAdvancedMapping} onChange={event => { setShowAdvancedMapping(event.target.checked); SHOW_ADVANCED_MAPPING.set(event.target.checked); }} />Advanced Mapping</label>
-                  {showAdvancedMapping && <div id="memu-advanced-mapping" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <small>Steps may follow <span style={{ color: '#7dcaf7' }}>SRMM</span> or use their own model.</small>
-                    {Object.entries({ preprocess: 'Preprocess', memory_extract: 'Memory Extract', category_update: 'Category Update', reflection: 'Reflection', consolidation: 'Consolidation' }).map(([role, label]) => <div key={role}><label>{label}</label>{renderModelPicker('step_models', role)}</div>)}
+                  </div>
+                  <label className="checkbox_label expander" style={{ marginTop: '0.5lh', marginBottom: '0.5lh' }}><input id="advanced_mapping" type="checkbox" className="checkbox" checked={showAdvancedMapping} onChange={event => { setShowAdvancedMapping(event.target.checked); SHOW_ADVANCED_MAPPING.set(event.target.checked); }} /><span>Advanced Mapping</span></label>
+                  {showAdvancedMapping && <div id="memu-advanced-mapping" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {stepLabels.map(s => (
+                      <div key={s.step} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label>{s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span></label>
+                        {renderModelPicker('step_models', s.step)}
+                      </div>
+                    ))}
                   </div>}
                 </>}
               </div>
@@ -950,20 +944,19 @@ export default function App() {
               <label
                 className="checkbox_label expander"
                 htmlFor="mental_health_addon"
-                style={{ opacity: currentCharacter ? 1 : 0.5 }}
               >
                 <input
                   id="mental_health_addon"
                   type="checkbox"
                   className="checkbox"
-                  checked={mentalHealthAddon}
-                  onChange={handleMentalHealthAddonChange}
-                  disabled={!currentCharacter || !memuActive || copiedChat}
+                  checked={mappings?.mental_health_query === true}
+                  onChange={event => changeModelMappings({ mental_health_query: event.target.checked })}
+                  disabled={!mappings}
                 />
                 <span>Mental Health Addon</span>
                 <i
                   className="fa-solid fa-info-circle"
-                  title="Per character. Enable the mental-health sidecar: when the soul's retrieval router detects an MH theme, it pulls from a curated procedural-memory store alongside regular memories."
+                  title="Shared server setting. When the Soul's retrieval router detects a mental-health theme, it can retrieve from the curated procedural-memory store alongside regular memories."
                   style={{ opacity: 0.8 }}
                 />
               </label>

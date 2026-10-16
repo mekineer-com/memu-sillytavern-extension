@@ -1,5 +1,5 @@
 import { CategoryResponse } from "memu-js";
-import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
+import { IMPORT_LOREBOOKS, memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, conversationTurnUndo, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
 import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { postJsonWithCsrf } from "utils/csrf";
@@ -672,7 +672,6 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             history: turn.history,
             buildTurnPrompt: true,
             soul_card: retrieveSoulCard,
-            mentalHealthAddon: MENTAL_HEALTH_ADDON.get(),
         }, { signal: retrieveAbort.signal });
     } catch (err: any) {
         if (currentScope() !== scope || _pendingRetrieveTurn !== turn) return;

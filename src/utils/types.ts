@@ -24,6 +24,7 @@ export type ModelSelection = { profile_id: string; provider: string; model: stri
 export type ModelChoice = { source: 'config' | 'srmm' | 'st_native' | 'configured'; selection?: ModelSelection };
 export type ModelMappings = {
   claude_code: boolean;
+  mental_health_query: boolean;
   reply_models: Record<string, ModelChoice>;
   step_models: Record<string, ModelChoice>;
   st_selected: { selection: ModelSelection } | null;

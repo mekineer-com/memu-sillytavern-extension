@@ -32,9 +32,10 @@ const context = {
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, context);
 states[0] = true;
 states[1] = { version: 4, serverPath: '/fictional/server' };
-states[2] = { claude_code: false, reply_models: { srmm: { source: 'config' }, other_apps: { source: 'config' } }, step_models: { memory_extract: { source: 'srmm' } }, st_selected: null,
+states[2] = { claude_code: false, mental_health_query: true, reply_models: { srmm: { source: 'config' }, other_apps: { source: 'config' } }, step_models: { memory_extract: { source: 'srmm' } }, st_selected: null,
   base_model: { provider: 'openai', model: 'custom-outside-catalog' }, providers: [
     { profile_id: 'test-api', provider: 'openai', label: 'Fictional API', supported: true, models: [{ model: 'test-model' }] },
+    { profile_id: 'native:cc:openai', provider: 'openai', label: 'openai', supported: true, models: [{ model: 'native-selection-only' }] },
     { profile_id: 'unsupported', provider: 'claude', label: 'Native Claude', supported: false, reason: 'Unsupported transport', models: [{ model: 'native-model' }] },
   ] };
 const render = () => { cursor = 0; return context.exports.default(); };
@@ -42,24 +43,27 @@ function nodes(tree) { if (!tree || typeof tree !== 'object') return []; if (Arr
 const find = (tree, id) => nodes(tree).find(node => node.props?.id === id);
 let tree = render();
 const serverButtons = tree => nodes(tree).filter(node => node.type === 'button' && ['Start', 'Stop'].includes(node.props?.children));
-assert.equal(serverButtons(tree).length, 0);
+assert.equal(serverButtons(tree).length, 2);
 assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'checking…'));
+assert.equal(find(tree, 'auto_start_server').props.disabled, undefined);
 states[4] = { ok: false };
 tree = render();
-assert.equal(serverButtons(tree).length, 0);
+assert.equal(serverButtons(tree).length, 2);
 assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'unavailable'));
 states[4] = { ok: true, managedByLauncher: false, healthy: false };
 tree = render();
 assert.equal(serverButtons(tree).length, 2);
-assert(find(tree, 'auto_start_server'));
+assert.equal(find(tree, 'auto_start_server').props.checked, false);
+assert.equal(find(tree, 'auto_start_server').props.disabled, undefined);
+find(tree, 'auto_start_server').props.onChange({ target: { checked: true } });
+assert.equal(states[1].autoStartServer, true);
 states[1].autoStartServer = false;
 tree = render();
-assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'stopped (auto-start off)'));
+assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'stopped'));
 states[4] = { ok: true, managedByLauncher: true, healthy: false };
 tree = render();
-assert.equal(serverButtons(tree).length, 0);
-assert.equal(find(tree, 'auto_start_server'), undefined);
-assert(nodes(tree).some(node => node.props?.children === 'Use OpenAlma Launcher to start or stop memU Server.'));
+assert.equal(serverButtons(tree).length, 2);
+assert.equal(find(tree, 'auto_start_server').props.disabled, undefined);
 assert(nodes(tree).some(node => node.type === 'b' && node.props.children === 'stopped'));
 assert.equal(states[1].autoStartServer, false);
 states[4] = null;
@@ -73,7 +77,19 @@ assert.equal(serverPathInput(render()).props.value, '/fictional/manual/server');
 states[1] = { version: 4, serverPath: '/fictional/server' };
 assert.equal(find(tree, 'use_server_settings'), undefined);
 assert.equal(find(tree, 'use_claude_code').props.checked, false);
+assert.equal(find(tree, 'mental_health_addon').props.checked, true);
+assert.equal(find(tree, 'mental_health_addon').props.disabled, false, 'Shared setting does not require an active character');
+find(tree, 'mental_health_addon').props.onChange({ target: { checked: false } });
+assert.equal(states[2].mental_health_query, false);
+assert.equal(find(render(), 'mental_health_addon').props.checked, false);
+find(render(), 'mental_health_addon').props.onChange({ target: { checked: true } });
 assert(find(tree, 'memu-model-srmm')); assert(find(tree, 'memu-model-other_apps'));
+const picker = find(tree, 'memu-model-srmm');
+assert.equal(picker.props.onFocus, undefined, 'Opening a picker must not request provider catalogs');
+const configuredChoices = nodes(picker).filter(node => node.type === 'option')
+  .map(node => JSON.parse(node.props.value)).filter(choice => choice.source === 'configured');
+assert.deepEqual(configuredChoices.map(choice => choice.selection.profile_id), ['test-api', 'unsupported']);
+assert(!nodes(picker).some(node => node.type === 'option' && /native-selection-only/.test(node.props.children)));
 assert.equal(find(tree, 'memu-iris-model-info').props.children, 'Except the Iris voice model');
 assert(nodes(tree).some(node => node.type === 'option' && /custom-outside-catalog/.test(node.props.children)));
 assert(nodes(tree).some(node => node.type === 'option' && /Native Claude/.test(node.props.children) && node.props.disabled));
@@ -83,6 +99,9 @@ assert(source.includes('.memu-runtime-info:focus-within [role="tooltip"]'));
 const beforeRows = JSON.stringify(states[2].step_models);
 find(tree, 'advanced_mapping').props.onChange({ target: { checked: true } });
 tree = render(); assert(find(tree, 'memu-model-memory_extract')); assert.equal(JSON.stringify(states[2].step_models), beforeRows);
+assert.equal(find(tree, 'memu-advanced-mapping').props.style.gap, 8);
+assert(nodes(tree).some(node => node.type === 'span' && node.props.children?.includes?.('Raw multimodal → concise text')));
+assert(!source.includes('Steps may follow '));
 find(tree, 'use_claude_code').props.onChange({ target: { checked: true } });
 tree = render(); assert(find(tree, 'memu-model-srmm')); assert.equal(find(tree, 'memu-model-other_apps'), undefined); assert.equal(find(tree, 'advanced_mapping'), undefined);
 assert.equal(JSON.stringify(states[2].step_models), beforeRows);
@@ -116,21 +135,21 @@ assert(source.includes('st.event_types.SETTINGS_UPDATED'));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 // Character switch and copied-chat UI use the same panel, not a second settings store.
-states[9] = 'TestSoul'; states[11] = true; states[12] = true;
-states[13] = 'owner.png'; states[14] = true; states[15] = { 'owner.png': 'TestOwner' }; states[16] = false;
+states[8] = 'TestSoul'; states[10] = true; states[11] = true;
+states[12] = 'owner.png'; states[13] = true; states[14] = { 'owner.png': 'TestOwner' }; states[15] = false;
 tree = render();
 assert.equal(find(tree, 'memu_character_enabled').props['aria-checked'], false);
 assert.equal(find(tree, 'memu_character_enabled').props.disabled, true);
 assert.equal(find(tree, 'memu_soul_persona').props.disabled, true);
 assert.equal(find(tree, 'memu_character_enabled-info').props.children, 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.');
-states[12] = false; states[14] = false; states[13] = ''; states[11] = false;
+states[11] = false; states[13] = false; states[12] = ''; states[10] = false;
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, true);
-states[11] = true;
+states[10] = true;
 assert.equal(find(render(), 'memu_character_enabled').props['aria-checked'], true);
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, false); // missing binding must not prevent opt-out
-states[13] = 'owner.png';
+states[12] = 'owner.png';
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, false);
-states[14] = true; states[11] = false;
+states[13] = true; states[10] = false;
 assert.equal(find(render(), 'memu_soul_persona').props.disabled, true);
 assert.equal(find(render(), 'memu-persona-info').props.children, 'For memU, only one persona is allowed.');
 assert.equal(find(render(), 'memu_soul_persona').props.name, undefined);
@@ -427,7 +446,7 @@ function loadModule(file, imports, extra = {}) {
   memory.dispatchConversationTurn = async () => ({ reply: '' }); retrieveCalls = 0;
 
   const producer = loadModule('memory/memorize.ts', {
-    'memu-js': {}, 'utils/context-extra': { st, memuExtras: extras, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network,
+    'memu-js': {}, 'utils/context-extra': { st, memuExtras: extras }, 'utils/network': network,
     'utils/types': {}, 'utils/csrf': {}, '@silly-tavern/scripts/world-info.js': {}, './utils': utils, 'utils/log': log, 'ui/inspect-panel': {},
   }, { window: { setTimeout: () => 1, clearTimeout() {} }, AbortController });
   assert.equal(producer.messageRole({ is_user: true, name: 'OtherOwner' }, 'OtherOwner'), 'user');

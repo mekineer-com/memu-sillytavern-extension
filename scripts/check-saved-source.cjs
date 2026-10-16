@@ -96,7 +96,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console, fetch };
   let inspection;
   const producer = load('memory/memorize.ts', {
-    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => importLorebooks }, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network, 'utils/csrf': csrf,
+    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => importLorebooks } }, 'utils/network': network, 'utils/csrf': csrf,
     'utils/types': { MemuTaskStatus: statuses }, '@silly-tavern/scripts/world-info.js': { updateWorldInfoList: async () => {} },
     './utils': utils, 'utils/log': log, 'ui/inspect-panel': {
       getInspectData: () => inspection, stashInspectData: value => { inspection = value; }, seedInspectPromptTextarea() {},
