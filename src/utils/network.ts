@@ -1,5 +1,5 @@
 import { ConversationData } from 'utils/types';
-import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings, ModelMappingPatch, SrmmRequest } from 'utils/types';
+import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings, ModelMappingPatch, ModelSelection, SrmmRequest } from 'utils/types';
 import { getCsrfTokenCached } from 'utils/csrf';
 
 const ROUTER_BASE_URL = '/api/plugins/memu';
@@ -148,12 +148,12 @@ export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return request<MemuPluginConfigV1>('/config', undefined, 'GET');
 }
 
-export async function getModelMappings(): Promise<ModelMappings> {
-  return request('/modelMappings', undefined, 'GET');
+export async function getModelMappings(native?: ModelSelection | null): Promise<ModelMappings> {
+  return request(`/modelMappings${native ? `?native=${encodeURIComponent(JSON.stringify(native))}` : ''}`, undefined, 'GET');
 }
 
-export async function setModelMappings(patch: ModelMappingPatch): Promise<ModelMappings> {
-  return request('/modelMappings', patch);
+export async function setModelMappings(patch: ModelMappingPatch, native?: ModelSelection | null): Promise<ModelMappings> {
+  return request('/modelMappings', { ...patch, ...(native ? { native } : {}) });
 }
 
 export async function serverStatus(): Promise<any> {

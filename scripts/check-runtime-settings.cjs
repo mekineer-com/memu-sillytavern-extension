@@ -200,9 +200,11 @@ assert(source.includes('st.event_types.SETTINGS_UPDATED'));
 
 (async () => {
   let starts = 0, reads = 0, loaded, busy;
-  const ready = { mappingState: { current: null }, serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
+  const ready = { mappingState: { current: null }, nativeModelSelection: () => null, serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
+    nativeTransition: { current: false }, pendingMappings: { current: {} }, setAdvancedOpen() {}, setConfigStatus() {},
     getModelMappings: async () => { reads++; return { claude_code: false, step_models: {}, providers: [] }; },
     setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => { if (value) assert.fail(value); } };
+  loadFunctions(source, ['loadModelMappings'], ready);
   vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStart('), source.indexOf('  async function doServerStop(')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, ready);
@@ -998,7 +1000,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     setConfigStatus: () => {}, setSwitchError: error => assert.fail(error),
   };
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
-  loadFunctions(source, ['choiceForConnection', 'stepRequest', 'toggleAdvancedMapping'], env);
+  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
   const before = JSON.stringify(env.extension_settings);
   await env.toggleAdvancedMapping(false);
   assert.equal(calls.length, 0); assert.equal(order.length, 0);
@@ -1022,13 +1024,13 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.equal(calls.length, 0, 'Changing SRMM cannot update a copied step');
 
   const effectStart = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
-  const events = new Map(); let modelReads = 0;
-  const eventEnv = { useEffect: fn => fn(), mappings: {},
+  const events = new Map(); let modelReads = 0, onNativeChange;
+  const eventEnv = { useEffect: fn => fn(), mappings: {}, mappingState: { current: {} }, nativeTransition: { current: false },
     st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings' },
       eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
     nativeModelSelection: () => { modelReads++; return null; }, setNativeSelection() {},
     refreshProfiles: async () => {},
-    window: { addEventListener() {}, removeEventListener() {} },
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout: fn => { onNativeChange = fn; return 1; }, clearTimeout() {} },
     document: { addEventListener() {}, removeEventListener() {} },
     changeModelMappings: () => assert.fail('Native events must never write mappings'),
   };
@@ -1036,6 +1038,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, eventEnv);
   for (const fn of events.values()) fn();
+  onNativeChange();
   assert(modelReads > 1);
   const utilsEnv = { exports: {}, extension_settings: { memu: { srmm: { source: 'configured', profile_id: 'chosen' } } },
     nativeModelSelection: () => ({ model: 'live-native', provider: 'custom', profile_id: 'native:cc:custom' }) };
@@ -1043,7 +1046,90 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.equal(utilsEnv.exports.srmmRequest().native.model, 'live-native');
   assert(!JSON.stringify(utilsEnv.exports.srmmRequest()).includes('api_key'));
   assert(/srmm: srmmRequest\(\)/.test(fs.readFileSync(`${__dirname}/../src/memory/memorize.ts`, 'utf8')));
-  console.log('Advanced confirmation cancel/accept, retain-before-delete, re-enable transfer, copy-once SRMM and read-only native events pass.');
+  console.log('Advanced confirmation cancel/accept, retain-before-delete, re-enable transfer and copy-once SRMM pass.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
+(async () => {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  let native = { profile_id: 'native:cc:custom', provider: 'custom', model: 'model-a', base_url: 'https://native.invalid/v1' };
+  const patches = [], events = new Map(), timers = new Map();
+  let timerId = 0, cleanup;
+  const connection = { provider: 'openai', base_url: native.base_url, chat_model: native.model, native_match: true };
+  const env = {
+    exports: {}, require: () => jsx, mappings: {}, nativeSelection: native,
+    nativeTransition: { current: false }, mappingState: { current: { base_model: { ...connection }, step_models: {
+      reflection: { ...connection }, memory_extract: { ...connection }, category_update: { ...connection, native_match: false },
+    } } }, pendingMappings: { current: {} },
+    extension_settings: { memu: { base_model: { source: 'st_native' }, advancedMapping: {
+      reflection: { source: 'st_native' }, memory_extract: { source: 'configured', profile_id: 'fixed' },
+      category_update: { source: 'st_native' }, preprocess: { source: 'st_native' },
+    } } },
+    nativeModelSelection: () => native,
+    changeModelMappings: patch => { patches.push(copy(patch)); return Promise.resolve(); },
+    setNativeSelection: value => { env.nativeSelection = value; }, refreshProfiles: async () => {},
+    setMappings: value => { env.mappings = value; }, getModelMappings: async () => copy(env.mappingState.current),
+    useEffect: fn => { cleanup = fn(); },
+    st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings', CONNECTION_PROFILE_LOADED: 'profile' },
+      eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
+    window: { addEventListener() {}, removeEventListener() {}, setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id), confirm: () => true },
+    document: { addEventListener() {}, removeEventListener() {} }, setAdvancedOpen() {}, setConfigStatus() {}, setSwitchError: assert.fail,
+  };
+  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'syncNativeMappings', 'stepRequest', 'toggleAdvancedMapping', 'loadModelMappings'], env);
+  const start = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
+  const end = source.indexOf('  }, [!!mappings]);', start) + '  }, [!!mappings]);'.length;
+  vm.runInNewContext(ts.transpileModule(source.slice(start, end), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, env);
+  assert.equal(patches.length, 0, 'Mount must not write ST choices over config');
+  const flush = () => { const queued = [...timers.values()]; timers.clear(); for (const fn of queued) fn(); };
+  events.get('settings')(); flush();
+  assert.equal(patches.length, 0, 'Settings-save feedback is not a model change');
+  native = { ...native, model: 'intermediate' }; events.get('api')();
+  native = { ...native, model: 'model-b' }; events.get('profile')();
+  assert.equal(timers.size, 1, 'A profile-application burst is coalesced'); flush();
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].base_model.native.model, 'model-b');
+  assert.deepEqual(Object.keys(patches[0].step_models), ['reflection'], 'Fixed, hand-edited and disabled rows stay untouched');
+  assert.equal(patches[0].step_models.reflection.native.model, 'model-b');
+  events.get('settings')(); flush(); assert.equal(patches.length, 1);
+  env.mappingState.current.base_model.native_match = false;
+  env.mappingState.current.step_models.reflection.native_match = false;
+  native = { ...native, model: 'model-c' }; events.get('settings')(); flush();
+  assert.equal(patches.length, 1, 'Loaded hand edits disarm native synchronization');
+  env.mappingState.current.step_models.reflection.native_match = true;
+  env.pendingMappings.current.step_models = { reflection: null };
+  native = { ...native, model: 'model-d' }; events.get('profile')(); flush();
+  assert.equal(patches.length, 1, 'A pending disable must not be overwritten by a native change');
+  env.pendingMappings.current = {};
+  assert.deepEqual(copy(env.mappingChoice('reflection', { ...connection })), { source: 'st_native' });
+  assert.equal(env.mappingChoice('reflection', { ...connection, native_match: false }), undefined);
+  env.extension_settings.memu.advancedMapping.memory_extract.profile_id = 'second';
+  assert.deepEqual(copy(env.mappingChoice('memory_extract', { ...connection, profile_id: 'first', profile_ids: ['first', 'second'] })),
+    { source: 'configured', profile_id: 'second' }, 'Identical connections must preserve the explicitly chosen profile ID');
+  env.mappings = env.mappingState.current;
+  env.mappings.step_models = { reflection: { ...connection } };
+  env.hasAdvancedMapping = true;
+  Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
+  await env.toggleAdvancedMapping(false);
+  assert.deepEqual(copy(env.extension_settings.memu.advancedMapping.reflection), { source: 'st_native' });
+  env.mappings.step_models = {}; env.hasAdvancedMapping = false;
+  delete env.extension_settings.memu.advancedMapping.memory_extract;
+  delete env.extension_settings.memu.advancedMapping.category_update;
+  delete env.extension_settings.memu.advancedMapping.preprocess;
+  await env.toggleAdvancedMapping(true);
+  assert.equal(patches.at(-1).step_models.reflection.native.model, 'model-d', 'Re-enable uses today\'s ST model, not an old copy');
+  env.mappings.step_models = { reflection: { ...connection } };
+  const beforeGet = env.mappingState.current;
+  let finishGet;
+  env.getModelMappings = () => new Promise(resolve => { finishGet = resolve; });
+  const reading = env.loadModelMappings();
+  native = { ...native, model: 'model-e' }; events.get('profile')();
+  finishGet({ base_model: {}, step_models: { reflection: { ...connection, native_match: false } } });
+  await reading;
+  assert.equal(env.mappingState.current, beforeGet, 'A GET started before an ST change must not disarm that change during coalescing');
+  flush();
+  assert.equal(patches.at(-1).step_models.reflection.native.model, 'model-e');
+  assert(!JSON.stringify(env.extension_settings).includes('api_key'));
+  cleanup(); assert.equal(timers.size, 0);
+  console.log('ST-selected changes follow through the existing save path; mount, hand edits, disabled rows, feedback, profile identity and re-enable pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 (async () => {
@@ -1057,7 +1143,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
       profile_id: 'new-profile', provider: 'openai', label: 'New profile', supported: true,
       models: [{ model: 'new-model' }],
     }], base_model: { provider: 'openai', chat_model: 'base-model' } },
-    pendingMappings: { current: {} }, mappingSave: { current: Promise.resolve() }, mappingState: { current: null },
+    pendingMappings: { current: {} }, mappingSave: { current: Promise.resolve() }, mappingState: { current: null }, nativeTransition: { current: false },
     extension_settings: { memu: { advancedMapping: {} } }, srmm: { source: 'config' }, nativeSelection: null,
     nativeModelSelection: () => null,
     window: { confirm: () => true },
@@ -1084,7 +1170,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   env.mappingState.current = env.mappings;
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
   Object.defineProperty(env, 'hasAdvancedMapping', { get: () => Object.values(env.activeSteps).some(Boolean) });
-  loadFunctions(source, ['changeModelMappings', 'choiceForConnection', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles'], env);
+  loadFunctions(source, ['changeModelMappings', 'choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles'], env);
   const choice = { source: 'configured', profile_id: 'new-profile' };
   const changing = env.renderModelPicker('memory_extract').props.onChange({ target: { value: JSON.stringify(choice) } });
   assert.deepEqual(JSON.parse(env.renderModelPicker('memory_extract').props.value), choice, 'Selection displays immediately');
@@ -1144,7 +1230,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     setConfigStatus() {}, setSwitchError: assert.fail,
   };
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
-  loadFunctions(source, ['choiceForConnection', 'stepRequest', 'toggleAdvancedMapping'], env);
+  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
   assert.equal(env.choiceForConnection(hand), undefined, 'Browser must not guess a profile from URL/model');
   await env.toggleAdvancedMapping(false);
   assert.deepEqual(Object.keys(settings.memu.advancedMapping), []);
@@ -1153,6 +1239,8 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   await env.toggleAdvancedMapping(true);
   assert.equal(patches.length, 0, 'Unmatched independent connection must not turn into a base-model choice');
   env.configStatus = 'idle'; env.mappingState = { current: null };
+  env.nativeTransition = { current: false };
+  env.nativeModelSelection = () => null;
   env.getModelMappings = async () => ({ step_models: { reflection: hand } });
   env.setMappings = value => { env.loaded = value; };
   loadFunctions(source, ['loadModelMappings'], env);

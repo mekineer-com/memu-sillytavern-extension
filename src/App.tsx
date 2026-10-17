@@ -231,6 +231,7 @@ export default function App() {
   const pendingMappings = useRef<ModelMappingPatch>({});
   const mappingSave = useRef<Promise<void>>(Promise.resolve());
   const mappingState = useRef(mappings);
+  const nativeTransition = useRef(false);
 
   useEffect(() => {
     const onChatChanged = () => {
@@ -276,9 +277,11 @@ export default function App() {
   }, []);
 
   async function loadModelMappings() {
-    if (configStatus === 'saving') return;
+    if (nativeTransition.current || Object.keys(pendingMappings.current).length) return;
+    const current = mappingState.current;
     try {
-      const result = await getModelMappings();
+      const result = await getModelMappings(nativeModelSelection());
+      if (nativeTransition.current || mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
       mappingState.current = result;
       setMappings(result);
       setAdvancedOpen(false);
@@ -287,10 +290,10 @@ export default function App() {
 
   async function refreshProfiles(): Promise<void> {
     const current = mappingState.current;
-    if (!current || Object.keys(pendingMappings.current).length) return;
+    if (!current || nativeTransition.current || Object.keys(pendingMappings.current).length) return;
     try {
-      const result = await getModelMappings();
-      if (mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
+      const result = await getModelMappings(nativeModelSelection());
+      if (nativeTransition.current || mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
       mappingState.current = result; setMappings(result);
     } catch {
       // A background catalog refresh must not clear usable choices while offline.
@@ -302,14 +305,15 @@ export default function App() {
     const merge = (base: ModelMappingPatch, update: ModelMappingPatch): ModelMappingPatch => ({ ...base, ...update,
       ...(base.step_models || update.step_models ? { step_models: { ...base.step_models, ...update.step_models } } : {}) });
     const pending = pendingMappings.current = merge(pendingMappings.current, patch);
+    const native = nativeModelSelection();
     const display = () => setMappings({ ...mappingState.current!,
       ...(pendingMappings.current.claude_code !== undefined ? { claude_code: pendingMappings.current.claude_code } : {}) });
     display();
     setConfigStatus('saving');
     mappingSave.current = mappingSave.current.catch(() => {}).then(async () => {
       try {
-        if (patch.step_models) await saveSettings();
-        const result = await setModelMappings(patch);
+        if (patch.step_models || patch.base_model) await saveSettings();
+        const result = await setModelMappings(patch, native);
         mappingState.current = result;
         if (pendingMappings.current === pending) pendingMappings.current = {};
         display();
@@ -395,23 +399,34 @@ export default function App() {
 
   useEffect(() => {
     const events = [st.event_types.MAIN_API_CHANGED, st.event_types.CHATCOMPLETION_SOURCE_CHANGED, st.event_types.CHATCOMPLETION_MODEL_CHANGED, st.event_types.CONNECTION_PROFILE_LOADED, st.event_types.OAI_PRESET_CHANGED_AFTER, st.event_types.PRESET_CHANGED, st.event_types.SETTINGS_UPDATED];
+    let previous = nativeModelSelection();
+    let timer: number | undefined;
+    const identity = (selection: ModelSelection | null) => selection && JSON.stringify([selection.profile_id, selection.provider, selection.model, selection.base_url]);
     const changed = () => {
-      const selection = nativeModelSelection();
-      setNativeSelection(selection);
+      const observed = nativeModelSelection();
+      if (observed && identity(observed) !== identity(previous)) nativeTransition.current = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const selection = nativeModelSelection();
+        setNativeSelection(selection);
+        let saving;
+        if (selection && identity(selection) !== identity(previous)) {
+          previous = selection;
+          saving = syncNativeMappings(selection);
+        }
+        nativeTransition.current = false;
+        if (!saving) void (mappingState.current ? refreshProfiles() : loadModelMappings());
+      }, 200);
     };
-    const refresh = () => { void refreshProfiles(); };
-    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const visible = () => { if (document.visibilityState === 'visible') changed(); };
     for (const event of events) st.eventSource.on(event, changed);
-    st.eventSource.on(st.event_types.SETTINGS_UPDATED, refresh);
-    st.eventSource.on(st.event_types.CONNECTION_PROFILE_LOADED, refresh);
-    window.addEventListener('focus', refresh);
+    window.addEventListener('focus', changed);
     document.addEventListener('visibilitychange', visible);
-    if (mappings) changed();
     return () => {
+      window.clearTimeout(timer);
+      nativeTransition.current = false;
       for (const event of events) st.eventSource.removeListener(event, changed);
-      st.eventSource.removeListener(st.event_types.SETTINGS_UPDATED, refresh);
-      st.eventSource.removeListener(st.event_types.CONNECTION_PROFILE_LOADED, refresh);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', changed);
       document.removeEventListener('visibilitychange', visible);
     };
   }, [!!mappings]);
@@ -423,9 +438,7 @@ export default function App() {
       const r = await serverStart();
       setServerCtl(r?.status ?? r);
       if (!r?.ok) throw new Error(r?.message || 'memU Server could not start.');
-      const current = await getModelMappings();
-      mappingState.current = current;
-      setMappings(current);
+      await loadModelMappings();
       setServerCtlBusy('idle');
     } catch (error) {
       setServerCtlBusy('error');
@@ -502,6 +515,35 @@ export default function App() {
     return value.profile_id ? { source: 'configured', profile_id: value.profile_id } : undefined;
   }
 
+  function mappingChoice(role: string, value: string | ModelMappings['base_model'] | undefined): StepChoice | undefined {
+    const remembered = role === 'other_apps' ? extension_settings.memu?.base_model : extension_settings.memu?.advancedMapping?.[role];
+    if (role === 'other_apps' && remembered?.source === 'config') return remembered;
+    if (value && typeof value === 'object' && remembered) {
+      if (remembered.source === 'st_native' && value.native_match) return remembered;
+      if (remembered.source === 'configured' && value.profile_ids?.includes(remembered.profile_id)) return remembered;
+    }
+    return choiceForConnection(value);
+  }
+
+  function syncNativeMappings(selection: ModelSelection) {
+    const current = mappingState.current;
+    if (!current) return;
+    const patch: ModelMappingPatch = {};
+    const pending = pendingMappings.current;
+    if (extension_settings.memu?.base_model?.source === 'st_native'
+      && (pending.base_model?.source === 'st_native' || current.base_model.native_match)) {
+      patch.base_model = { source: 'st_native', native: selection };
+    }
+    for (const [step, value] of Object.entries({ ...current.step_models, ...pending.step_models })) {
+      if (!value || typeof value !== 'object' || extension_settings.memu?.advancedMapping?.[step]?.source !== 'st_native') continue;
+      const choice = pending.step_models?.[step];
+      if ((choice && 'source' in choice && choice.source === 'st_native') || ('native_match' in value && value.native_match)) {
+        (patch.step_models ??= {})[step] = { source: 'st_native', native: selection };
+      }
+    }
+    if (patch.base_model || patch.step_models) return changeModelMappings(patch);
+  }
+
   function stepRequest(choice: StepChoice): NonNullable<ModelMappingPatch['step_models']>[string] {
     if (!('source' in choice)) return choice;
     if (choice.source === 'srmm') return { source: 'srmm', srmm: srmmRequest() };
@@ -525,7 +567,7 @@ export default function App() {
           const retained = { ...extension_settings.memu.advancedMapping };
           for (const [step, value] of Object.entries(mappings.step_models)) {
             if (step in (pendingMappings.current.step_models || {})) continue;
-            const choice = choiceForConnection(value);
+            const choice = mappingChoice(step, value);
             if (choice) retained[step] = choice; else delete retained[step];
           }
           extension_settings.memu.advancedMapping = retained;
@@ -544,7 +586,7 @@ export default function App() {
       ? srmm.source === 'configured' && mappings && !mappings.providers.some(profile => profile.profile_id === srmm.profile_id)
         ? { source: 'st_native' } : srmm
       : pending ? 'source' in pending ? { source: pending.source, ...('profile_id' in pending ? { profile_id: pending.profile_id } : {}) } : pending
-      : choiceForConnection(active) ?? (role === 'other_apps' ? { source: 'config' } : undefined);
+      : mappingChoice(role, active) ?? (role === 'other_apps' ? { source: 'config' } : undefined);
     const value = current ? JSON.stringify(current) : 'hand-configured';
     const choices = [{ value: JSON.stringify({ source: 'config' }), label: `default (config.json: ${mappings?.base_model?.chat_model || 'unconfigured'})`, disabled: false }];
     if (!['srmm', 'other_apps'].includes(role)) choices.push({ value: JSON.stringify({ source: 'srmm' }), label: 'default (SRMM)', disabled: false });
@@ -568,6 +610,7 @@ export default function App() {
           setSrmm(choice as SrmmChoice);
           await saveSettings();
         } else if (role === 'other_apps') {
+          extension_settings.memu.base_model = choice;
           if ('source' in choice && choice.source !== 'srmm') changeModelMappings({ base_model: { ...choice, native: nativeModelSelection() } });
         } else {
           extension_settings.memu.advancedMapping ??= {};
@@ -950,7 +993,7 @@ export default function App() {
                 {!mappings?.claude_code && <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>Other OpenAlma App Replies <i id="memu-iris-model-info" className="fa-solid fa-info-circle" title="Except the Iris voice model" style={{ opacity: 0.8 }} />
-                    {mappings?.base_model.chat_model && !mappings.base_model.profile_id && <i id="memu-other-apps-config-info" className="fa-solid fa-info-circle" title="Hand configured config.json" style={{ opacity: 0.8, color: '#ef4444' }} />}
+                    {mappings?.base_model.chat_model && !mappings.base_model.profile_id && !mappings.base_model.native_match && <i id="memu-other-apps-config-info" className="fa-solid fa-info-circle" title="Hand configured config.json" style={{ opacity: 0.8, color: '#ef4444' }} />}
                   </label>
                   {renderModelPicker('other_apps')}
                   </div>

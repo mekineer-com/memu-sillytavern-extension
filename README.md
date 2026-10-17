@@ -65,8 +65,11 @@ Requires a server plugin to function: [MemU-Plugin](https://github.com/mekineer-
 
 Opening the panel reads the actual server config, including hand edits.
 SRMM stays in ST settings and applies only to ST replies, Narrative Suggestions
-and ST APImw synthesis. Selecting SRMM or ST selected for a memory step copies
-that connection once; later SRMM changes do not update the copy.
+and ST APImw synthesis. "ST selected" keeps Other App Replies and active memory
+steps synchronized with explicit ST model/profile changes. Its source choice
+stays in ST settings, not config.json. Opening the panel never overwrites hand
+edits; disabled steps do not follow. Selecting SRMM for a memory step retains
+its independent copied connection.
 
 Advanced Mapping is checked when server step overrides exist. Disabling asks
 before removing them and their matching capacities from config.json. ST retains
