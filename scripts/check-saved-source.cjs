@@ -22,6 +22,28 @@ assert.deepEqual(plain.map(row => row.role), ['user', 'soul', 'unknown', 'unknow
 assert.deepEqual(plain.map(row => row.source_conversation_index), [0, 3, 4, 5, 6]);
 assert.deepEqual(plain.map(row => row.source_message_id), ['0', '3', '4', '5', '6']);
 assert.equal(plain[1].ts_ms, 2000);
+assert.equal(plain[0].content, 'hello');
+for (const [dates, expected] of [
+  [{ send_date: 1700000000123 }, 1700000000123],
+  [{ sendDate: 1700000000456 }, 1700000000456],
+  [{ sendDate: '1970-01-01T00:00:03.000Z' }, 3000],
+  [{ send_date: null, sendDate: 4000 }, 4000],
+  [{ send_date: 0, sendDate: 4000 }, 0],
+  [{ ts_ms: 0, timestamp: 1000, send_date: 2000 }, 0],
+  [{ ts_ms: '1234.9', timestamp: 2000, send_date: 3000 }, 1234],
+  [{ ts_ms: NaN, timestamp: '2345.9', send_date: 3000 }, 2345],
+  [{ ts_ms: null, timestamp: '', send_date: 5000 }, 5000],
+  [{ ts_ms: ' ', timestamp: null, send_date: 6000 }, 6000],
+  [{ ts_ms: Infinity, timestamp: 'invalid', send_date: 7000 }, 7000],
+  [{ send_date: 'invalid', sendDate: 8000 }, undefined],
+  [{ send_date: Infinity }, undefined],
+  [{ sendDate: NaN }, undefined],
+  [{ send_date: '' }, undefined],
+  [{}, undefined],
+]) {
+  const [message] = sandbox.buildTurnHistory([{ name: 'TestSoul', mes: 'dated reply', ...dates }], 1);
+  assert.equal(message.ts_ms, expected, JSON.stringify(dates));
+}
 assert.equal(plain[2].name, 'OtherPersona');
 assert.deepEqual(JSON.parse(JSON.stringify(sandbox.buildTurnHistory([], 0))), []);
 console.log('Plain ST history keeps original source IDs, hidden exclusions, timestamps and speaker attribution.');
@@ -64,9 +86,11 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
       if (proxyWait) await proxyWait();
       result = admission;
     } else if (url === '/api/plugins/memu/conversationRetrieve') {
+      assert.equal(Object.hasOwn(JSON.parse(options.body), 'srmm'), false);
       result = { turn_system_prompt: 'Fictional system', turn_user_prompt: 'Fictional human message' };
     } else if (url === '/api/plugins/memu/conversationTurn') {
       assert.equal(Object.hasOwn(JSON.parse(options.body), 'soul_card'), false);
+      assert.deepEqual(JSON.parse(options.body).srmm, { source: 'config', native: null });
       if (turnWait) await turnWait();
       result = listenResponse;
     } else if (url === '/api/plugins/memu/conversationTurnUndo') {
@@ -89,14 +113,14 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   const network = load('utils/network.ts', { 'utils/csrf': csrf }, { fetch });
   await network.getPluginConfig();
   const st = { getContext: () => ctx, saveChat: async () => { saves++; } };
-  const utils = { currentScope: () => scope, initChatExtraInfo: async () => {},
+  const utils = { srmmRequest: () => ({ source: 'config', native: null }), currentScope: () => scope, initChatExtraInfo: async () => {},
     refreshSoulCard: async () => { cardRefreshes++; }, cardText: card => Object.fromEntries(['description', 'personality', 'scenario', 'mes_example'].map(field => [field, String(card[field] ?? '')])),
     isMemuActive: async () => !ctx.chatMetadata.main_chat && !ctx.groupId && !ctx.disabled };
   const log = { warn() {}, error() {}, onceWarn() {}, onceError() {}, info() {} };
   const globals = { window: { alert: value => alerts.push(value), setTimeout, clearTimeout }, AbortController, console, fetch };
   let inspection;
   const producer = load('memory/memorize.ts', {
-    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => importLorebooks } }, 'utils/network': network, 'utils/csrf': csrf,
+    'utils/context-extra': { st, memuExtras: extras, IMPORT_LOREBOOKS: { get: () => importLorebooks }, MENTAL_HEALTH_ADDON: { get: () => false } }, 'utils/network': network, 'utils/csrf': csrf,
     'utils/types': { MemuTaskStatus: statuses }, '@silly-tavern/scripts/world-info.js': { updateWorldInfoList: async () => {} },
     './utils': utils, 'utils/log': log, 'ui/inspect-panel': {
       getInspectData: () => inspection, stashInspectData: value => { inspection = value; }, seedInspectPromptTextarea() {},

@@ -21,15 +21,20 @@ export interface MemuPluginConfigV1 {
 }
 
 export type ModelSelection = { profile_id: string; provider: string; model: string; base_url?: string; context_window_tokens?: number; max_tokens?: number };
-export type ModelChoice = { source: 'config' | 'srmm' | 'st_native' | 'configured'; selection?: ModelSelection };
+export type SrmmChoice = { source: 'config' | 'st_native' | 'configured'; profile_id?: string };
+export type SrmmRequest = SrmmChoice & { native: ModelSelection | null };
+export type StepChoice = SrmmChoice | { source: 'srmm' } | { model: string };
+export type ModelConnection = { provider: string; base_url: string; chat_model: string; context_window_tokens?: number; max_tokens?: number; profile_id?: string };
+export type ModelMappingPatch = {
+  claude_code?: boolean;
+  base_model?: SrmmRequest;
+  step_models?: Record<string, SrmmRequest | { source: 'srmm'; srmm: SrmmRequest } | ModelSelection | { model: string } | null>;
+};
 export type ModelMappings = {
   claude_code: boolean;
-  mental_health_query: boolean;
-  reply_models: Record<string, ModelChoice>;
-  step_models: Record<string, ModelChoice>;
-  st_selected: { selection: ModelSelection } | null;
-  base_model: { provider: string; model: string };
-  providers: Array<{ profile_id: string; provider: string; label: string; supported: boolean; reason?: string;
+  step_models: Record<string, string | ModelConnection>;
+  base_model: ModelConnection;
+  providers: Array<{ profile_id: string; provider: string; label: string; base_url?: string; supported: boolean; reason?: string;
     models: Array<{ model: string; context_window_tokens?: number }> }>;
 };
 

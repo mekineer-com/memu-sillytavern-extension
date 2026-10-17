@@ -1,9 +1,39 @@
+import { main_api } from '@silly-tavern/script.js';
+import { getChatCompletionModel, model_list, oai_settings } from '@silly-tavern/scripts/openai.js';
+import { getTextGenModel, getTextGenServer, textgenerationwebui_settings } from '@silly-tavern/scripts/textgen-settings.js';
+import { ModelSelection, SrmmChoice, SrmmRequest } from 'utils/types';
 import { memuExtras, st } from "utils/context-extra";
 import { createOwner, createSoul, getOwner, getSoul, getSouls } from "utils/network";
 import { power_user } from "@silly-tavern/scripts/power-user.js";
 import { extension_settings, writeExtensionFieldBulk } from "@silly-tavern/scripts/extensions.js";
 import { saveSettings } from "@silly-tavern/script.js";
 import { getCsrfTokenCached, postJsonWithCsrf } from "utils/csrf";
+
+export function nativeModelSelection(): ModelSelection | null {
+  const cc = main_api === 'openai';
+  if (!cc && main_api !== 'textgenerationwebui') return null;
+  const provider = cc ? oai_settings.chat_completion_source : textgenerationwebui_settings.type;
+  if (!cc && provider === 'ollama' && !textgenerationwebui_settings.ollama_model) return null;
+  const model = cc ? getChatCompletionModel() : getTextGenModel();
+  if (!provider || !model) return null;
+  const manager = extension_settings.connectionManager;
+  const profile = (manager?.profiles || []).find((p: any) => p.id === manager?.selectedProfile && p.api === provider && p.mode === (cc ? 'cc' : 'tc'));
+  const metadata = cc ? model_list?.find((row: any) => row.id === model) : null;
+  const capacity = metadata?.context_length ?? metadata?.context_window_tokens ?? metadata?.context_window;
+  return { profile_id: profile?.id || `native:${cc ? 'cc' : 'tc'}:${provider}`, provider, model,
+    ...(Number.isInteger(capacity) && capacity > 0 ? { context_window_tokens: capacity } : {}),
+    ...(cc && Number.isInteger(oai_settings.openai_max_tokens) && oai_settings.openai_max_tokens > 0 ? { max_tokens: oai_settings.openai_max_tokens } : {}),
+    ...(!cc ? { base_url: getTextGenServer() } : provider === 'custom' ? { base_url: oai_settings.custom_url }
+      : ['openai', 'mistralai', 'deepseek', 'xai'].includes(provider) && oai_settings.reverse_proxy ? { base_url: oai_settings.reverse_proxy } : {}) };
+}
+
+export function srmmChoice(): SrmmChoice {
+    return (extension_settings as any).memu?.srmm ?? { source: 'config' };
+}
+
+export function srmmRequest(): SrmmRequest {
+    return { ...srmmChoice(), native: nativeModelSelection() };
+}
 
 export const appReady = new Promise<void>(resolve => st.eventSource.once(st.event_types.APP_READY, resolve));
 let discovery: { scope: string; promise: ReturnType<typeof getSouls> } | undefined;

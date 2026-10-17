@@ -25,6 +25,7 @@ const st = { getContext: () => ctx, event_types: { APP_READY: 'ready' }, eventSo
 const imports = {
   'utils/context-extra': { st }, 'utils/network': network, '@silly-tavern/scripts/power-user.js': {},
   '@silly-tavern/script.js': {},
+  '@silly-tavern/scripts/openai.js': {}, '@silly-tavern/scripts/textgen-settings.js': {},
   'utils/csrf': { getCsrfTokenCached: async () => { edit(); return 'test-token'; } },
   '@silly-tavern/scripts/extensions.js': { extension_settings: { memu: { soulCards: { TestSoul: 'test.png' } } },
     writeExtensionFieldBulk: async (avatars, key, metadata) => {
@@ -191,7 +192,7 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   vm.runInNewContext(ts.transpileModule(transportCode, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText, transport);
   await transport.exports.getSoul('Test Soul', true); assert.equal(wire.route, '/souls/Test%20Soul?include_narrative=true');
   await transport.exports.getSoul('Test Soul'); assert.equal(wire.route, '/souls/Test%20Soul');
-  const sending = transport.exports.sendNarrativeSuggestion('TestOwner', 'TestSoul', 'Fictional request');
+  const sending = transport.exports.sendNarrativeSuggestion('TestOwner', 'TestSoul', 'Fictional request', { source: 'config', native: null });
   settings.defaultProfileId = 'later'; settings.stepProfileId.reflection = 'later-step';
   await sending;
   assert.equal(Object.hasOwn(wire.payload, 'runtimeSettings'), false);
@@ -207,7 +208,7 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
     react: { useState: initial => { const index = cursor++; return [state[index] ?? initial, value => { state[index] = value; }]; } },
     'react/jsx-runtime': jsx, 'utils/context-extra': { st: { getContext: () => uiCtx },
       memuExtras: { baseInfo: { userId: 'TestOwner', characterName: 'OldHeaderSoul' } } },
-    'memory/utils': { isMemuActive: async () => true, currentScope: () => uiScope, refreshSoulCard: async () => {
+    'memory/utils': { srmmRequest: () => ({ source: 'config', native: null }), isMemuActive: async () => true, currentScope: () => uiScope, refreshSoulCard: async () => {
       refreshed++; if (refreshWait) await refreshWait();
       if (refreshFails) throw new Error('Fictional card refresh failure');
     } },
@@ -224,7 +225,7 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   assert.equal(button.props.disabled, false); await button.props.onClick();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent, 1); assert.equal(refreshed, 1); assert.equal(state[1], 'ok');
-  assert.deepEqual(suggestionCalls.at(-1), ['TestOwner', 'TestSoul', 'A fictional suggestion']);
+  assert.deepEqual(suggestionCalls.at(-1), ['TestOwner', 'TestSoul', 'A fictional suggestion', { source: 'config', native: null }]);
   const flush = () => new Promise(resolve => setImmediate(resolve));
   function sendAgain() {
     cursor = 0; state[0] = 'Another fictional suggestion'; state[1] = 'idle'; storage.clear();

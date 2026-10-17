@@ -1,10 +1,10 @@
 import { CategoryResponse } from "memu-js";
-import { IMPORT_LOREBOOKS, memuExtras, st } from "utils/context-extra";
+import { IMPORT_LOREBOOKS, MENTAL_HEALTH_ADDON, memuExtras, st } from "utils/context-extra";
 import { conversationRetrieve, conversationTurn, conversationTurnUndo, memorizeConversation, MemorizeIntent, retrieveDefaultCategories } from "utils/network";
 import { ConversationData, ConversationMessage, MemuSummary, MemuTaskStatus } from "utils/types";
 import { postJsonWithCsrf } from "utils/csrf";
 import { createWorldInfoEntry, saveWorldInfo, updateWorldInfoList } from "@silly-tavern/scripts/world-info.js";
-import { cardText, currentScope, initChatExtraInfo, isMemuActive, refreshSoulCard } from "./utils";
+import { srmmRequest, cardText, currentScope, initChatExtraInfo, isMemuActive, refreshSoulCard } from "./utils";
 import { warn, error as logError, onceWarn, onceError } from "utils/log";
 import {
     getInspectData,
@@ -408,6 +408,7 @@ function resolveSoulCard(ctx: any): string {
 
 function resolveMessageTsMs(row: any): number | undefined {
     const numeric = (v: any): number | undefined => {
+        if (v == null || (typeof v === 'string' && !v.trim())) return undefined;
         const n = typeof v === 'number' ? v : Number(v);
         if (!Number.isFinite(n)) return undefined;
         return Math.trunc(n);
@@ -419,11 +420,13 @@ function resolveMessageTsMs(row: any): number | undefined {
     const fromTimestamp = numeric(row?.timestamp);
     if (fromTimestamp !== undefined) return fromTimestamp;
 
-    const sendDate = String(row?.send_date ?? '').trim();
-    if (!sendDate) return undefined;
-    const parsed = Date.parse(sendDate);
-    if (!Number.isFinite(parsed)) return undefined;
-    return Math.trunc(parsed);
+    const raw: any = row?.send_date ?? row?.sendDate;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+    if (typeof raw === 'string') {
+        const ms = Date.parse(raw);
+        return Number.isFinite(ms) ? ms : undefined;
+    }
+    return undefined;
 }
 
 export function messageRole(row: any, ownerName: string, soulName: string = memuExtras.baseInfo?.characterName): 'user' | 'soul' | 'unknown' {
@@ -672,6 +675,7 @@ export async function addPendingRetrieveToPrompt(eventData: any, replaceSystem: 
             history: turn.history,
             buildTurnPrompt: true,
             soul_card: retrieveSoulCard,
+            mentalHealthAddon: MENTAL_HEALTH_ADDON.get(),
         }, { signal: retrieveAbort.signal });
     } catch (err: any) {
         if (currentScope() !== scope || _pendingRetrieveTurn !== turn) return;
@@ -879,6 +883,7 @@ export async function dispatchConversationTurn(
     if (!(await isMemuActive()) || currentScope() !== turn.scope) return { reply: '' };
 
     const resp = await conversationTurn({
+      srmm: srmmRequest(),
         userId: turn.userId,
         soulId: turn.soulId,
         conversationId: turn.conversationId,

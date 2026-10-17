@@ -1,7 +1,7 @@
 import { CSSProperties, useState } from 'react';
 import { sendNarrativeSuggestion } from 'utils/network';
 import { memuExtras, st } from 'utils/context-extra';
-import { currentScope, isMemuActive, refreshSoulCard } from 'memory/utils';
+import { srmmRequest, currentScope, isMemuActive, refreshSoulCard } from 'memory/utils';
 
 const LS_LAST_SENT = 'memu-narrative-suggestion-last';
 const LS_COOLDOWN_UNTIL = 'memu-narrative-suggestion-cooldown-until';
@@ -33,7 +33,7 @@ export default function NarrativeSuggestion({ enabled = false }: { enabled?: boo
       if (!userId || !soulId) throw new Error('Select a soul before sending a suggestion.');
       setStatus('pending');
       setError('');
-      await sendNarrativeSuggestion(userId, soulId, suggestion);
+      await sendNarrativeSuggestion(userId, soulId, suggestion, srmmRequest());
       localStorage.setItem(LS_LAST_SENT, suggestion);
       localStorage.setItem(LS_COOLDOWN_UNTIL, String(Date.now() + COOLDOWN_MS));
       setLastSent(suggestion);

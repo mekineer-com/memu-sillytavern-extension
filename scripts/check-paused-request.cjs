@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const babel = require('@babel/core');
 const ts = require('typescript');
 
 // Run the actual request decoder with a refused send, without a live ST session.
@@ -12,9 +11,7 @@ const context = {
   ROUTER_BASE_URL: '/api/plugins/memu', AbortSignal, getCsrfTokenCached: async () => 'fake',
   fetch: async () => ({ status: 409, text: async () => JSON.stringify({ error: { code: 'soul_paused', message } }) }),
 };
-vm.runInNewContext(babel.transformSync(code, {
-  filename: 'request.ts', configFile: false, babelrc: false, presets: ['@babel/preset-typescript'],
-}).code, context);
+vm.runInNewContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText, context);
 (async () => {
   await assert.rejects(context.request('/conversationTurn', {}), error => error.code === 'soul_paused' && error.message === message);
   const component = fs.readFileSync(`${__dirname}/../src/component/MemorizeProgress.tsx`, 'utf8');
@@ -30,9 +27,7 @@ vm.runInNewContext(babel.transformSync(code, {
   cancel.setCancelling = cancel.setCancelling.bind(cancel);
   cancel.setRefusedTask = cancel.setRefusedTask.bind(cancel);
   const taskKeyFunction = component.slice(component.indexOf('function currentTaskKey()'), component.indexOf('export default function'));
-  vm.runInNewContext(babel.transformSync(taskKeyFunction, {
-    filename: 'task.ts', configFile: false, babelrc: false, presets: ['@babel/preset-typescript'],
-  }).code, cancel);
+  vm.runInNewContext(ts.transpileModule(taskKeyFunction, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText, cancel);
   vm.runInNewContext(component.slice(component.indexOf('async function handleCancel()'), component.indexOf('\n  return createPortal(')), cancel);
   await cancel.handleCancel();
   assert.equal(cancel.memuExtras.summary, summary);

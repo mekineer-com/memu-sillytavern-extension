@@ -60,3 +60,18 @@ A seamless, powerful memory plugin powered by MemU!
 Requires a server plugin to function: [MemU-Plugin](https://github.com/mekineer-com/memu-sillytavern-plugin).
 
 </div>
+
+### Model Mapping
+
+Opening the panel reads the actual server config, including hand edits.
+SRMM stays in ST settings and applies only to ST replies, Narrative Suggestions
+and ST APImw synthesis. Selecting SRMM or ST selected for a memory step copies
+that connection once; later SRMM changes do not update the copy.
+
+Advanced Mapping is checked when server step overrides exist. Disabling asks
+before removing them and their matching capacities from config.json. ST retains
+profile/model choices for re-enabling. Hand-configured independent connections
+without an exact saved-profile match are removed, not retained as model-only choices.
+Hiding the controls with Use Claude Code
+does not disable or delete mappings. Other OpenAlma App Replies edits the ordinary
+shared base connection. Keys are resolved by the plugin, never sent to the page.

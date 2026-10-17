@@ -2,7 +2,7 @@ import { event_types, eventSource, getMaxContextSize, saveChat } from "@silly-ta
 import { debounce_timeout } from "@silly-tavern/scripts/constants.js";
 import { getContext } from "@silly-tavern/scripts/st-context.js";
 import { debounce } from "@silly-tavern/scripts/utils.js";
-import { MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS } from "./consts";
+import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON } from "./consts";
 import { MemuBaseInfo, MemuExtras, MemuRetrieve, MemuSummary } from "./types";
 
 const originExtras: MemuExtras = {}
@@ -19,11 +19,6 @@ export const st = {
     event_types: event_types,
     eventSource: eventSource,
 
-}
-
-export const SHOW_ADVANCED_MAPPING = {
-    get: () => localStorage.getItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING),
-    set: (value: boolean) => localStorage.setItem(MEMU_LOCAL_STORAGE_SHOW_ADVANCED_MAPPING, value.toString()),
 }
 
 // Per-soul prefs: stored as a JSON map { "<characterName>": boolean, ... }
@@ -99,6 +94,11 @@ export const OVERRIDE_SUMMARIZER = {
 export const IMPORT_LOREBOOKS = {
     get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, true),
     set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_IMPORT_LOREBOOKS, value),
+}
+
+export const MENTAL_HEALTH_ADDON = {
+    get: () => _getPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, false),
+    set: (value: boolean) => _setPerSoulBool(MEMU_LOCAL_STORAGE_MENTAL_HEALTH_ADDON, value),
 }
 
 export const memuExtras = new Proxy<MemuExtras>(originExtras, {

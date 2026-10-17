@@ -7,6 +7,30 @@ const jsx = require('react/jsx-runtime');
 
 // Render real App JSX with isolated hooks; don't initialize ST or run effects.
 const source = fs.readFileSync(process.env.MEMU_APP_SOURCE || `${__dirname}/../src/App.tsx`, 'utf8');
+{
+  const prefsSource = fs.readFileSync(`${__dirname}/../src/utils/context-extra.ts`, 'utf8');
+  const constants = fs.readFileSync(`${__dirname}/../src/utils/consts.ts`, 'utf8');
+  const saved = new Map();
+  const ctx = { characters: [{ name: 'TestSoul' }, { name: 'OtherSoul' }], characterId: 0 };
+  const prefs = { exports: {}, st: { getContext: () => ctx }, localStorage: {
+    getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value),
+  } };
+  const code = constants + prefsSource.slice(prefsSource.indexOf('export function currentSelectedCharacterName('), prefsSource.indexOf('export const memuExtras'));
+  vm.runInNewContext(ts.transpileModule(code, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, prefs);
+  const toggle = prefs.exports.MENTAL_HEALTH_ADDON;
+  toggle.set(true);
+  assert.equal(toggle.get(), true);
+  ctx.characterId = 1;
+  assert.equal(toggle.get(), false, 'Another Soul must not inherit the first Soul preference');
+  toggle.set(false);
+  ctx.characterId = undefined;
+  const before = JSON.stringify([...saved]);
+  toggle.set(true);
+  assert.equal(JSON.stringify([...saved]), before, 'No Soul means no preference write');
+  assert.equal(toggle.get(), false);
+  ctx.characterId = 0;
+  assert.equal(toggle.get(), true, 'Switching back must recover the Soul preference');
+}
 const states = [];
 let cursor = 0;
 const react = {
@@ -21,19 +45,21 @@ let formMode = 'editcharacter';
 const uiCtx = { characters: [{ name: 'TestSoul', avatar: 'test.png' }], characterId: 0 };
 const editor = { value: 'test.png' };
 const cardHost = {};
+const extensionSettingsForUi = {};
+const mentalHealthWrites = [];
 const context = {
   exports: {}, localStorage: { getItem: () => null, setItem() {} }, window: { setTimeout: () => 1, clearTimeout() {} },
   document: { getElementById: id => ({ 'avatar-and-name-block': cardHost, avatar_url_pole: editor,
     form_create: { getAttribute: () => formMode } })[id] },
   require: name => name === 'react' ? react : name === 'react/jsx-runtime' ? jsx
     : name === 'react-dom' ? { createPortal: (children, target) => ({ type: 'portal', props: { children, target } }) }
-    : { default: () => null, __esModule: true, st: { getContext: () => uiCtx }, memuExtras: {}, SHOW_ADVANCED_MAPPING: { get: () => null, set() {} } },
+    : { default: () => null, __esModule: true, extension_settings: extensionSettingsForUi, saveSettings: async () => {}, nativeModelSelection: () => null, srmmChoice: () => ({ source: 'config' }), srmmRequest: () => ({ source: 'config', native: null }), st: { getContext: () => uiCtx }, memuExtras: {}, MENTAL_HEALTH_ADDON: { get: () => false, set: value => mentalHealthWrites.push(value) }, SHOW_ADVANCED_MAPPING: { get: () => null, set() {} } },
 };
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, context);
 states[0] = true;
 states[1] = { version: 4, serverPath: '/fictional/server' };
-states[2] = { claude_code: false, mental_health_query: true, reply_models: { srmm: { source: 'config' }, other_apps: { source: 'config' } }, step_models: { memory_extract: { source: 'srmm' } }, st_selected: null,
-  base_model: { provider: 'openai', model: 'custom-outside-catalog' }, providers: [
+states[2] = { claude_code: false, step_models: { memory_extract: 'hand-entered-model' },
+  base_model: { provider: 'openai', chat_model: 'custom-outside-catalog' }, providers: [
     { profile_id: 'test-api', provider: 'openai', label: 'Fictional API', supported: true, models: [{ model: 'test-model' }] },
     { profile_id: 'native:cc:openai', provider: 'openai', label: 'openai', supported: true, models: [{ model: 'native-selection-only' }] },
     { profile_id: 'unsupported', provider: 'claude', label: 'Native Claude', supported: false, reason: 'Unsupported transport', models: [{ model: 'native-model' }] },
@@ -79,25 +105,54 @@ assert.equal(serverPathInput(render()).props.value, '/fictional/manual/server');
 states[1] = { version: 4, serverPath: '/fictional/server' };
 assert.equal(find(tree, 'use_server_settings'), undefined);
 assert.equal(find(tree, 'use_claude_code').props.checked, false);
-assert.equal(find(tree, 'mental_health_addon').props.checked, true);
-assert.equal(find(tree, 'mental_health_addon').props.disabled, false, 'Shared setting does not require an active character');
-find(tree, 'mental_health_addon').props.onChange({ target: { checked: false } });
-assert.equal(states[2].mental_health_query, false);
-assert.equal(find(render(), 'mental_health_addon').props.checked, false);
+assert.equal(find(tree, 'mental_health_addon').props.disabled, true, 'Per-Soul setting requires an active Soul');
+find(tree, 'mental_health_addon').props.onChange({ target: { checked: true } });
+assert.equal(mentalHealthWrites.length, 0);
+states[8] = 'TestSoul'; states[10] = true;
 find(render(), 'mental_health_addon').props.onChange({ target: { checked: true } });
+assert.equal(find(render(), 'mental_health_addon').props.checked, true);
+assert.deepEqual(mentalHealthWrites, [true]);
+assert.equal(states[2].mental_health_query, undefined, 'Per-Soul preference must not write shared model mappings');
+states[11] = true;
+assert.equal(find(render(), 'mental_health_addon').props.disabled, true);
+find(render(), 'mental_health_addon').props.onChange({ target: { checked: false } });
+assert.deepEqual(mentalHealthWrites, [true]);
+states[8] = ''; states[10] = false; states[11] = false;
 assert(find(tree, 'memu-model-srmm')); assert(find(tree, 'memu-model-other_apps'));
 const picker = find(tree, 'memu-model-srmm');
+assert.equal(picker.props.style.colorScheme, 'dark');
+assert.equal(picker.props.style.backgroundColor, 'var(--SmartThemeBlurTintColor)');
+assert(!source.includes('select2'), 'Keep the native model dropdown');
 assert.equal(picker.props.onFocus, undefined, 'Opening a picker must not request provider catalogs');
 const configuredChoices = nodes(picker).filter(node => node.type === 'option')
   .map(node => JSON.parse(node.props.value)).filter(choice => choice.source === 'configured');
-assert.deepEqual(configuredChoices.map(choice => choice.selection.profile_id), ['test-api', 'unsupported']);
+assert.deepEqual(configuredChoices.map(choice => choice.profile_id), ['test-api', 'unsupported']);
 assert(!nodes(picker).some(node => node.type === 'option' && /native-selection-only/.test(node.props.children)));
-assert.equal(find(tree, 'memu-iris-model-info').props.children, 'Except the Iris voice model');
+assert.equal(find(tree, 'memu-iris-model-info').props.title, 'Except the Iris voice model');
+assert.deepEqual(JSON.parse(find(tree, 'memu-model-other_apps').props.value), { source: 'config' });
+assert.equal(find(tree, 'memu-other-apps-config-info').props.title, 'Hand configured config.json');
+assert(!nodes(find(tree, 'memu-model-other_apps')).some(node => node.type === 'option' && /hand.configured/i.test(node.props.children)));
+const otherAppsHeading = nodes(tree).find(node => node.type === 'label' && node.props.children?.includes?.('Other OpenAlma App Replies '));
+const infoIcons = nodes(otherAppsHeading).filter(node => node.type === 'i');
+assert.equal(infoIcons[0].props.id, 'memu-iris-model-info');
+assert.equal(infoIcons[1].props.id, 'memu-other-apps-config-info');
+assert.equal(infoIcons[1].props.style.color, '#ef4444');
+states[2].base_model.profile_id = 'test-api';
+assert.equal(find(render(), 'memu-other-apps-config-info'), undefined);
+assert.equal(JSON.parse(find(render(), 'memu-model-other_apps').props.value).profile_id, 'test-api');
+delete states[2].base_model.profile_id;
 assert(nodes(tree).some(node => node.type === 'option' && /custom-outside-catalog/.test(node.props.children)));
 assert(nodes(tree).some(node => node.type === 'option' && /Native Claude/.test(node.props.children) && node.props.disabled));
-assert.equal(find(tree, 'memu-agentic-settings-info').props.children, "The Soul's scheduled agentic turns use mcp-memu-server/config.json.");
-assert(source.includes('.memu-runtime-info:hover [role="tooltip"]'));
-assert(source.includes('.memu-runtime-info:focus-within [role="tooltip"]'));
+assert.equal(find(tree, 'memu-agentic-settings-info').props.title, "The Soul's scheduled agentic turns use mcp-memu-server/config.json.");
+assert(!source.includes('memu-runtime-info'));
+assert(!nodes(tree).some(node => node.props?.role === 'tooltip'));
+const originalInfo = nodes(tree).find(node => node.type === 'i' && node.props.title?.startsWith('Per character. If checked:'));
+for (const id of ['memu-iris-model-info', 'memu-other-apps-config-info', 'memu-agentic-settings-info', 'memu_character_enabled-info', 'memu-persona-info']) {
+  const icon = find(tree, id);
+  assert.equal(icon.type, originalInfo.type);
+  assert.equal(icon.props.className, originalInfo.props.className);
+  assert.equal(icon.props.style.opacity, originalInfo.props.style.opacity);
+}
 const beforeRows = JSON.stringify(states[2].step_models);
 find(tree, 'advanced_mapping').props.onChange({ target: { checked: true } });
 tree = render(); assert(find(tree, 'memu-model-memory_extract')); assert.equal(JSON.stringify(states[2].step_models), beforeRows);
@@ -109,26 +164,44 @@ tree = render(); assert(find(tree, 'memu-model-srmm')); assert.equal(find(tree, 
 assert.equal(JSON.stringify(states[2].step_models), beforeRows);
 find(tree, 'use_claude_code').props.onChange({ target: { checked: false } });
 assert(find(render(), 'memu-model-memory_extract'));
-console.log('Canonical defaults, configured catalog, unsupported transport, CLI collapse and visibility-only Advanced Mapping pass.');
+assert.equal(find(render(), 'advanced_mapping').props.checked, true, 'Hand-entered rows are active');
+states[3] = 'saving';
+assert.equal(find(render(), 'advanced_mapping').props.disabled, false, 'Ordered saves allow disabling without losing pending choices');
+states[3] = 'idle';
+const srmmIndex = states.findIndex(value => value?.source === 'config');
+assert(srmmIndex >= 0);
+states[srmmIndex] = { source: 'configured', profile_id: 'deleted-profile' };
+assert.equal(JSON.parse(find(render(), 'memu-model-srmm').props.value).source, 'st_native');
+assert.equal(states[srmmIndex].profile_id, 'deleted-profile', 'Fallback display must not rewrite retained settings');
+states[srmmIndex] = { source: 'configured', profile_id: 'unsupported' };
+assert.equal(JSON.parse(find(render(), 'memu-model-srmm').props.value).profile_id, 'unsupported');
+states[srmmIndex] = { source: 'config' };
+const originalStep = states[2].step_models.memory_extract;
+states[2].step_models.memory_extract = { provider: 'openai', base_url: 'https://hand.invalid/v1', chat_model: 'hand-only' };
+assert(nodes(find(render(), 'memu-model-memory_extract')).some(node => node.type === 'option' && /^config.json: hand-only/.test(node.props.children)));
+assert.equal(find(render(), 'advanced_mapping').props.checked, true);
+states[2].step_models.memory_extract = originalStep;
+console.log('Ordinary defaults, hand edits, configured catalog, unsupported transport and CLI collapse pass.');
 
-const native = { main_api: 'textgenerationwebui', textgenerationwebui_settings: { type: 'ollama' },
+const utilsSource = fs.readFileSync(`${__dirname}/../src/memory/utils.ts`, 'utf8');
+const native = { exports: {}, main_api: 'textgenerationwebui', textgenerationwebui_settings: { type: 'ollama' },
   getTextGenModel: () => assert.fail('Unconfigured Ollama must not call the throwing native getter'),
   extension_settings: {}, model_list: [], oai_settings: {}, getChatCompletionModel: () => 'fictional-model' };
-vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('function nativeModelSelection('), source.indexOf('type RelationshipEditorState')), {
+vm.runInNewContext(ts.transpileModule(utilsSource.slice(utilsSource.indexOf('export function nativeModelSelection('), utilsSource.indexOf('export function srmmChoice(')), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText, native);
-assert.equal(native.nativeModelSelection(), null);
+assert.equal(native.exports.nativeModelSelection(), null);
 native.main_api = 'openai';
 native.oai_settings = { chat_completion_source: 'openrouter', reverse_proxy: 'https://proxy.invalid/v1' };
-assert.equal(native.nativeModelSelection().base_url, undefined);
+assert.equal(native.exports.nativeModelSelection().base_url, undefined);
 native.oai_settings.chat_completion_source = 'openai';
-assert.equal(native.nativeModelSelection().base_url, 'https://proxy.invalid/v1');
+assert.equal(native.exports.nativeModelSelection().base_url, 'https://proxy.invalid/v1');
 assert(source.includes('st.event_types.SETTINGS_UPDATED'));
 
 (async () => {
   let starts = 0, reads = 0, loaded, busy;
   const ready = { mappingState: { current: null }, serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
-    getModelMappings: async () => { reads++; return { claude_code: false, reply_models: {}, step_models: {}, providers: [] }; },
+    getModelMappings: async () => { reads++; return { claude_code: false, step_models: {}, providers: [] }; },
     setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => { if (value) assert.fail(value); } };
   vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStart('), source.indexOf('  async function doServerStop(')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
@@ -160,7 +233,7 @@ tree = render();
 assert.equal(find(tree, 'memu_character_enabled').props['aria-checked'], false);
 assert.equal(find(tree, 'memu_character_enabled').props.disabled, true);
 assert.equal(find(tree, 'memu_soul_persona').props.disabled, true);
-assert.equal(find(tree, 'memu_character_enabled-info').props.children, 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.');
+assert.equal(find(tree, 'memu_character_enabled-info').props.title, 'memU is off in checkpoints and branches. Return to the main chat to talk with the Soul.');
 states[11] = false; states[13] = false; states[12] = ''; states[10] = false;
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, true);
 states[10] = true;
@@ -170,7 +243,7 @@ states[12] = 'owner.png';
 assert.equal(find(render(), 'memu_character_enabled').props.disabled, false);
 states[13] = true; states[10] = false;
 assert.equal(find(render(), 'memu_soul_persona').props.disabled, true);
-assert.equal(find(render(), 'memu-persona-info').props.children, 'For memU, only one persona is allowed.');
+assert.equal(find(render(), 'memu-persona-info').props.title, 'For memU, only one persona is allowed.');
 assert.equal(find(render(), 'memu_soul_persona').props.name, undefined);
 const portal = nodes(render()).find(node => node.type === 'portal');
 assert.equal(portal.props.target, cardHost);
@@ -178,7 +251,7 @@ const row = portal.props.children;
 assert.equal(row.props.style.minWidth, 0);
 assert.equal(row.props.children[0].props.id, 'memu_card_panel');
 assert.equal(row.props.children[1].props.id, 'memu_soul_persona');
-assert.equal(row.props.children[2].props.className, 'memu-runtime-info');
+assert.equal(row.props.children[2].props.className, 'fa-solid fa-info-circle');
 assert.equal(row.props.children[3].props.children[0].props.children, 'Enable memU:');
 assert.equal(find(render(), 'memu_soul_persona').props.style.minWidth, 0);
 assert.equal(find(render(), 'memu_card_enabled').props.type, 'button');
@@ -218,7 +291,7 @@ vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  function op
 opening.openMemuPanel(); opening.openMemuPanel();
 assert.equal(opened, 1); assert.equal(expanded, true); assert.equal(scrolled, 2);
 states[0] = false;
-assert(nodes(render()).some(node => node.type === 'style' && node.props.children.includes('.memu-runtime-info')));
+assert(nodes(render()).some(node => node.type === 'style' && node.props.children.includes('.memu-toggle')));
 
 const personaCallbacks = new Map();
 let seenPersonas, cleanup;
@@ -295,6 +368,7 @@ function loadModule(file, imports, extra = {}) {
   const utils = loadModule('memory/utils.ts', {
     'utils/context-extra': { st, memuExtras: extras }, 'utils/network': network,
     '@silly-tavern/scripts/power-user.js': native,
+    '@silly-tavern/scripts/openai.js': {}, '@silly-tavern/scripts/textgen-settings.js': {},
     '@silly-tavern/script.js': { saveSettings: async () => {
       settingsWrites++;
       if (pendingSettings) await pendingSettings;
@@ -465,7 +539,7 @@ function loadModule(file, imports, extra = {}) {
   memory.dispatchConversationTurn = async () => ({ reply: '' }); retrieveCalls = 0;
 
   const producer = loadModule('memory/memorize.ts', {
-    'memu-js': {}, 'utils/context-extra': { st, memuExtras: extras }, 'utils/network': network,
+    'memu-js': {}, 'utils/context-extra': { st, memuExtras: extras, MENTAL_HEALTH_ADDON: { get: () => true } }, 'utils/network': network,
     'utils/types': {}, 'utils/csrf': {}, '@silly-tavern/scripts/world-info.js': {}, './utils': utils, 'utils/log': log, 'ui/inspect-panel': {},
   }, { window: { setTimeout: () => 1, clearTimeout() {} }, AbortController });
   assert.equal(producer.messageRole({ is_user: true, name: 'OtherOwner' }, 'OtherOwner'), 'user');
@@ -481,7 +555,8 @@ function loadModule(file, imports, extra = {}) {
   assert.equal(await dispatch.runGenerationInterceptors([], 0, 'continue'), true);
   assert.equal(retrieveCalls, 0);
   let resolveRetrieve, signal;
-  network.conversationRetrieve = (_, options) => {
+  network.conversationRetrieve = (body, options) => {
+    assert.equal(body.mentalHealthAddon, true);
     signal = options.signal;
     return new Promise(resolve => { resolveRetrieve = resolve; });
   };
@@ -796,7 +871,7 @@ function loadFunctions(text, names, env) {
   }
   visit(file);
   vm.runInNewContext(ts.transpileModule(functions.join('\n'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, env);
 }
 const flushPanel = () => new Promise(resolve => setImmediate(resolve));
@@ -904,3 +979,185 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   }
   console.log('Relationship scope/identity, retained draft, stale response, and writer/panel/delete/pruning naming checks pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => clearTimeout(panelCheckTimeout));
+
+(async () => {
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const calls = [], order = [];
+  const env = {
+    exports: {}, mappings: { step_models: { reflection: 'hand-model', memory_extract: {
+      provider: 'openai', base_url: 'https://fake.invalid/v1', chat_model: 'same-name', profile_id: 'chosen' } },
+      providers: [{ profile_id: 'chosen', base_url: 'https://fake.invalid/v1', models: [{ model: 'same-name' }] }] },
+    hasAdvancedMapping: true, extension_settings: { memu: { advancedMapping: {} } },
+    pendingMappings: { current: {} },
+    window: { confirm: text => { assert.equal(text, 'Remove Advanced Mapping settings from config.json, including any hand edits?'); return false; } },
+    saveSettings: async () => order.push('retain'),
+    setAdvancedOpen: value => { env.open = value; },
+    changeModelMappings: async patch => { await env.saveSettings(); order.push('patch'); calls.push(clone(patch)); },
+    nativeModelSelection: () => ({ profile_id: 'native:cc:custom', provider: 'custom', model: 'current-native' }),
+    srmmRequest: () => ({ source: 'configured', profile_id: 'chosen', native: null }),
+    setConfigStatus: () => {}, setSwitchError: error => assert.fail(error),
+  };
+  Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
+  loadFunctions(source, ['choiceForConnection', 'stepRequest', 'toggleAdvancedMapping'], env);
+  const before = JSON.stringify(env.extension_settings);
+  await env.toggleAdvancedMapping(false);
+  assert.equal(calls.length, 0); assert.equal(order.length, 0);
+  assert.equal(JSON.stringify(env.extension_settings), before);
+  env.window.confirm = () => true;
+  await env.toggleAdvancedMapping(false);
+  assert.deepEqual(order, ['retain', 'patch']);
+  assert.deepEqual(calls.pop(), { step_models: { reflection: null, memory_extract: null } });
+  assert.deepEqual(clone(env.extension_settings.memu.advancedMapping), {
+    reflection: { model: 'hand-model' }, memory_extract: { source: 'configured', profile_id: 'chosen' } });
+  assert(!JSON.stringify(env.extension_settings).includes('api_key'));
+  env.mappings.step_models = {}; env.hasAdvancedMapping = false;
+  await env.toggleAdvancedMapping(true);
+  assert.deepEqual(calls.pop(), { step_models: { reflection: { model: 'hand-model' },
+    memory_extract: { source: 'configured', profile_id: 'chosen', native: env.nativeModelSelection() } } });
+  const copy = clone(env.stepRequest({ source: 'srmm' }));
+  env.srmmRequest = () => ({ source: 'config', native: null });
+  assert.equal(copy.srmm.profile_id, 'chosen');
+  assert.deepEqual(clone(env.stepRequest({ source: 'srmm' })), { source: 'srmm', srmm: { source: 'config', native: null } });
+  assert.equal(env.stepRequest({ source: 'config' }), null);
+  assert.equal(calls.length, 0, 'Changing SRMM cannot update a copied step');
+
+  const effectStart = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
+  const events = new Map(); let modelReads = 0;
+  const eventEnv = { useEffect: fn => fn(), mappings: {},
+    st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings' },
+      eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
+    nativeModelSelection: () => { modelReads++; return null; }, setNativeSelection() {},
+    refreshProfiles: async () => {},
+    window: { addEventListener() {}, removeEventListener() {} },
+    document: { addEventListener() {}, removeEventListener() {} },
+    changeModelMappings: () => assert.fail('Native events must never write mappings'),
+  };
+  vm.runInNewContext(ts.transpileModule(source.slice(effectStart, source.indexOf('  }, [!!mappings]);', effectStart) + '  }, [!!mappings]);'.length), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText, eventEnv);
+  for (const fn of events.values()) fn();
+  assert(modelReads > 1);
+  const utilsEnv = { exports: {}, extension_settings: { memu: { srmm: { source: 'configured', profile_id: 'chosen' } } },
+    nativeModelSelection: () => ({ model: 'live-native', provider: 'custom', profile_id: 'native:cc:custom' }) };
+  loadFunctions(utilsSource, ['srmmChoice', 'srmmRequest'], utilsEnv);
+  assert.equal(utilsEnv.exports.srmmRequest().native.model, 'live-native');
+  assert(!JSON.stringify(utilsEnv.exports.srmmRequest()).includes('api_key'));
+  assert(/srmm: srmmRequest\(\)/.test(fs.readFileSync(`${__dirname}/../src/memory/memorize.ts`, 'utf8')));
+  console.log('Advanced confirmation cancel/accept, retain-before-delete, re-enable transfer, copy-once SRMM and read-only native events pass.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
+(async () => {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  let releaseRetain, retainCalls = 0, catalogReads = 0;
+  const retainGate = new Promise(resolve => { releaseRetain = resolve; });
+  const requests = [], order = [];
+  const env = {
+    exports: {}, require: () => jsx,
+    mappings: { step_models: { memory_extract: 'old-model' }, providers: [{
+      profile_id: 'new-profile', provider: 'openai', label: 'New profile', supported: true,
+      models: [{ model: 'new-model' }],
+    }], base_model: { provider: 'openai', chat_model: 'base-model' } },
+    pendingMappings: { current: {} }, mappingSave: { current: Promise.resolve() }, mappingState: { current: null },
+    extension_settings: { memu: { advancedMapping: {} } }, srmm: { source: 'config' }, nativeSelection: null,
+    nativeModelSelection: () => null,
+    window: { confirm: () => true },
+    setMappings: value => { env.mappings = value; }, setAdvancedOpen: value => { env.open = value; }, setConfigStatus() {}, setSwitchError: assert.fail,
+    saveSettings: async () => { order.push('retain'); if (++retainCalls === 1) await retainGate; },
+    setModelMappings: async patch => {
+      order.push('patch'); requests.push(copy(patch));
+      const steps = { ...env.mappings.step_models };
+      for (const [step, value] of Object.entries(patch.step_models || {})) {
+        if (value === null) delete steps[step];
+        else steps[step] = { provider: 'openai', base_url: 'https://new.invalid/v1', chat_model: 'new-model', profile_id: value.profile_id };
+      }
+      return { ...env.mappings, step_models: steps };
+    },
+    getModelMappings: async () => {
+      catalogReads++;
+      const fresh = copy(env.mappingState.current);
+      delete fresh.step_models.memory_extract.profile_id;
+      fresh.providers = [{ profile_id: 'new-profile', provider: 'openai', label: 'Edited profile', supported: true,
+        models: [{ model: 'profile-edited-model' }] }];
+      return fresh;
+    },
+  };
+  env.mappingState.current = env.mappings;
+  Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
+  Object.defineProperty(env, 'hasAdvancedMapping', { get: () => Object.values(env.activeSteps).some(Boolean) });
+  loadFunctions(source, ['changeModelMappings', 'choiceForConnection', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles'], env);
+  const choice = { source: 'configured', profile_id: 'new-profile' };
+  const changing = env.renderModelPicker('memory_extract').props.onChange({ target: { value: JSON.stringify(choice) } });
+  assert.deepEqual(JSON.parse(env.renderModelPicker('memory_extract').props.value), choice, 'Selection displays immediately');
+  await env.refreshProfiles();
+  assert.equal(catalogReads, 0, 'Catalog refresh must not overwrite pending mapping work');
+  const disabling = env.toggleAdvancedMapping(false);
+  assert.deepEqual(copy(env.extension_settings.memu.advancedMapping.memory_extract), choice, 'Disable retains newest choice, not old file state');
+  releaseRetain();
+  await Promise.all([changing, disabling]);
+  assert.deepEqual(order, ['retain', 'patch', 'retain', 'patch']);
+  assert.equal(requests[0].step_models.memory_extract.profile_id, 'new-profile');
+  assert.equal(requests[1].step_models.memory_extract, null);
+  assert.deepEqual(Object.keys(env.mappings.step_models), []);
+  assert.deepEqual(Object.keys(env.pendingMappings.current), []);
+  await env.toggleAdvancedMapping(true);
+  await env.mappingSave.current;
+  assert.equal(requests[2].step_models.memory_extract.profile_id, 'new-profile', 'Re-enable restores the newest retained profile');
+  const active = copy(env.mappings.step_models.memory_extract);
+  await env.refreshProfiles();
+  assert.equal(catalogReads, 1);
+  assert.equal(env.mappings.step_models.memory_extract.chat_model, active.chat_model);
+  assert.equal(env.mappings.step_models.memory_extract.profile_id, undefined, 'Edited profile must not mislabel an older copied connection');
+  assert.equal(env.renderModelPicker('memory_extract').props.value, 'hand-configured');
+  assert.equal(env.mappings.providers[0].models[0].model, 'profile-edited-model');
+
+  const saving = env.setModelMappings;
+  let failures = 0;
+  env.setSwitchError = value => { env.error = value; };
+  env.setModelMappings = async patch => {
+    if (patch.step_models?.memory_extract === null || patch.claude_code !== undefined) { failures++; throw Error('Fictional save refused'); }
+    return saving(patch);
+  };
+  env.mappings = env.mappingState.current = { ...env.mappings, claude_code: false, step_models: { memory_extract: 'before-failure' } };
+  const selectedAgain = env.renderModelPicker('memory_extract').props.onChange({ target: { value: JSON.stringify(choice) } });
+  const failedDisable = env.toggleAdvancedMapping(false);
+  await Promise.all([selectedAgain, failedDisable]);
+  assert.match(env.error, /Fictional save refused/);
+  assert.equal(env.hasAdvancedMapping, true, 'Failed disable must keep active overrides visible');
+  assert.equal(env.mappings.step_models.memory_extract.chat_model, 'new-model', 'Earlier acknowledged save must not be lost on later failure');
+  assert.deepEqual(Object.keys(env.pendingMappings.current), []);
+  await env.refreshProfiles();
+  assert.equal(catalogReads, 2, 'Failed work must not block later reads');
+  await env.toggleAdvancedMapping(false);
+  assert.equal(failures, 2, 'The user can retry a failed disable');
+  await env.changeModelMappings({ claude_code: true });
+  assert.equal(env.mappings.claude_code, false, 'Failed Boolean save must show the last confirmed setting');
+  console.log('Immediate picker state, ordered saves, failed-disable truthfulness, copied-profile labels and read-only refresh pass.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
+(async () => {
+  const patches = [], settings = { memu: { advancedMapping: { reflection: { source: 'configured', profile_id: 'old-profile' } } } };
+  const hand = { provider: 'openai', base_url: 'https://hand.invalid/v1', chat_model: 'hand-only' };
+  const env = { exports: {}, mappings: { step_models: { reflection: hand } }, hasAdvancedMapping: true,
+    pendingMappings: { current: {} },
+    extension_settings: settings, window: { confirm: () => true }, saveSettings: async () => {},
+    setAdvancedOpen() {}, changeModelMappings: patch => patches.push(JSON.parse(JSON.stringify(patch))),
+    setConfigStatus() {}, setSwitchError: assert.fail,
+  };
+  Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
+  loadFunctions(source, ['choiceForConnection', 'stepRequest', 'toggleAdvancedMapping'], env);
+  assert.equal(env.choiceForConnection(hand), undefined, 'Browser must not guess a profile from URL/model');
+  await env.toggleAdvancedMapping(false);
+  assert.deepEqual(Object.keys(settings.memu.advancedMapping), []);
+  assert.deepEqual(patches.pop(), { step_models: { reflection: null } });
+  env.mappings.step_models = {}; env.hasAdvancedMapping = false;
+  await env.toggleAdvancedMapping(true);
+  assert.equal(patches.length, 0, 'Unmatched independent connection must not turn into a base-model choice');
+  env.configStatus = 'idle'; env.mappingState = { current: null };
+  env.getModelMappings = async () => ({ step_models: { reflection: hand } });
+  env.setMappings = value => { env.loaded = value; };
+  loadFunctions(source, ['loadModelMappings'], env);
+  await env.loadModelMappings();
+  assert.equal(env.loaded.step_models.reflection, hand);
+  assert.equal(patches.length, 0, 'Loading hand edits must never echo a save');
+  console.log('Hand-configured objects load without echo and are dropped, never guessed or converted, on confirmed disable.');
+})().catch(error => { console.error(error); process.exitCode = 1; });

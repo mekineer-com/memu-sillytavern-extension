@@ -1,9 +1,8 @@
 import { ConversationData } from 'utils/types';
-import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings } from 'utils/types';
+import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings, ModelMappingPatch, SrmmRequest } from 'utils/types';
 import { getCsrfTokenCached } from 'utils/csrf';
 
 const ROUTER_BASE_URL = '/api/plugins/memu';
-let pluginConfig: MemuPluginConfigV1 | undefined;
 
 export type PluginPing = {
   ok: boolean;
@@ -34,6 +33,7 @@ export type ConversationRetrieveRequest = {
   history?: Array<Record<string, any>>;
   buildTurnPrompt?: boolean;
   soul_card?: string;
+  mentalHealthAddon?: boolean;
 };
 type RequestOptions = {
   signal?: AbortSignal;
@@ -55,6 +55,7 @@ export type ConversationRetrieveResponse = {
   retrieve_ms?: number;
 };
 export type ConversationTurnRequest = {
+  srmm: SrmmRequest;
   userId: string;
   soulId: string;
   conversationId: string;
@@ -144,15 +145,14 @@ export async function getSoul(soulId: string, includeNarrative = false): Promise
 }
 
 export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
-  pluginConfig = await request<MemuPluginConfigV1>('/config', undefined, 'GET');
-  return pluginConfig;
+  return request<MemuPluginConfigV1>('/config', undefined, 'GET');
 }
 
 export async function getModelMappings(): Promise<ModelMappings> {
   return request('/modelMappings', undefined, 'GET');
 }
 
-export async function setModelMappings(patch: Partial<Pick<ModelMappings, 'claude_code' | 'mental_health_query' | 'reply_models' | 'step_models' | 'st_selected'>>): Promise<ModelMappings> {
+export async function setModelMappings(patch: ModelMappingPatch): Promise<ModelMappings> {
   return request('/modelMappings', patch);
 }
 
@@ -169,9 +169,7 @@ export async function serverStop(confirmUnknown = false): Promise<any> {
 }
 
 export async function setPluginConfig(config: Partial<MemuPluginConfigV1>): Promise<{ ok: boolean; config?: MemuPluginConfigV1 }> {
-  const response = await request<{ ok: boolean; config?: MemuPluginConfigV1 }>('/config', config, 'POST');
-  if (response.ok && response.config) pluginConfig = response.config;
-  return response;
+  return request<{ ok: boolean; config?: MemuPluginConfigV1 }>('/config', config, 'POST');
 }
 
 export async function getConnectionProfiles(): Promise<{ ok: boolean; profiles: ConnectionProfileSummary[]; message?: string }> {
@@ -240,8 +238,8 @@ export async function memorizeConversation(
   });
 }
 
-export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string): Promise<{ narrative_self?: string }> {
-  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion });
+export async function sendNarrativeSuggestion(userId: string, soulId: string, suggestion: string, srmm: SrmmRequest): Promise<{ narrative_self?: string }> {
+  return request<{ narrative_self?: string }>('/narrativeSuggestion', { userId, soulId, suggestion, srmm });
 }
 
 export async function listRelationships(userId: string, soulId: string): Promise<{ relationships: RelationshipRecord[] }> {
