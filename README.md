@@ -24,62 +24,46 @@ License: see LICENSE (upstream license applies).
 
 ### MemU Extension for SillyTavern
 
-Enabling memU creates the Soul using the character's name. Choose an ST persona
-first; its name is stored once for that Soul and the picker then locks. Existing
-Souls reuse or create a matching persona and keep its native ST selection,
-description, chat lock and sole character connection aligned, even with memU
-off. Conflicting native persona controls are disabled for bound Souls; ordinary
-ST cards keep their controls. Older dev DBs without a stored name are not
-automatically upgraded.
+Enabling memU gives the character a Soul with lasting memories. Choose an ST
+persona first: that persona stays attached to the Soul, even when memU is off.
+Conflicting persona controls are locked; ordinary ST characters are unaffected.
 
-Relationship drafts stay bound to the chat/card where they were opened. Switching
-keeps the draft but disables its Save; close that editor before editing the new
-selection. Refreshing the same selection does not discard the draft.
+The saved main chat supplies her memories. Branches and checkpoints keep the
+persona but do not use memU. With memU on, replies come from OpenAlma; if the
+server is unavailable, the reply stops rather than switching providers.
+Continue is currently unavailable in memU chats.
 
-Branches and checkpoints have no memU activity, but retain their owning Soul's
-fixed persona. In memU-active main chats, replies use MCP only: a
-server error blocks the reply rather than switching APIs. Continue is temporarily
-unavailable there; it still works normally with memU off.
+The progress banner follows the Soul's memory processing, not just the open
+chat. Cancel waits for server confirmation. If processing fails, use **Retry**
+in the OpenAlma launcher. Use one active browser tab per chat.
 
-Deleting or regenerating a reply only undoes Soul state when that exact reply
-came from memU. Plain ST replies made while off leave earlier memU state intact.
+**Narrative Suggestion** lets you suggest a change to her self-description,
+with a ten-minute cooldown between successful sends.
 
-Memorize reads plain text from the saved main chat, including the newest saved
-reply. Automatic admission runs after saving; the server owns size/sleep gates
-and failure pause. Delete publication updates the saved source without starting
-paid work. Failed work requires explicit Retry in OpenAlma. Use one active browser
-tab per chat; checkpoints and branches never publish to memU.
+Relationship drafts stay with the chat where you opened them. Return there to
+save, or close the editor before editing a different relationship.
 
-Manual Memorize first flushes ST's native save. The progress banner observes the
-Soul's current run, including after navigation or an ST restart; it is not a
-receipt for one chat. Polling outages preserve known progress. Cancel remains
-visible as requested until MCP confirms the terminal outcome; a network failure
-does not disable another Cancel attempt. Paid failures still require Launcher
-Retry rather than automatic re-extraction.
-
-**Narrative Suggestion** — The Send button is rate-limited to one request per 10 minutes (enforced client-side via localStorage). After a successful send the button stays disabled for 10 minutes; reload the page to see the remaining cooldown reset on next page load only if the 10 minutes have elapsed.
-
-A seamless, powerful memory plugin powered by MemU!
 Requires a server plugin to function: [MemU-Plugin](https://github.com/mekineer-com/memu-sillytavern-plugin).
 
 </div>
 
 ### Model Mapping
 
-Opening the panel reads the actual server config, including hand edits.
-SRMM stays in ST settings and supplies ST replies, Narrative Suggestions and
-ST APImw synthesis. Other App Replies and active memory steps can follow SRMM,
-ST selected, or a named profile. Named profiles stay independent of other
-selections; their own saved updates apply. Source markers stay in ST, not config.
-Choosing config.json keeps its existing values and changes only the marker.
-Config-backed fields follow hand edits silently. Hand changes to ST-owned values
-switch the field to config.json with a red info icon; explicitly choosing
-config.json clears that icon. Loading never writes values back. Disabled steps
-do not follow source changes.
+Choose the connection for SillyTavern replies separately from **Other OpenAlma
+App Replies** and the memory operations in **Advanced Mapping**.
 
-Advanced Mapping is checked when server step overrides exist. Disabling asks
-before removing them and their matching capacities from config.json. ST retains
-source choices for re-enabling; config-owned values are not duplicated in ST.
-Hiding the controls with Use Claude Code
-does not disable or delete mappings. Other OpenAlma App Replies edits the ordinary
-shared base connection. Keys are resolved by the plugin, never sent to the page.
+- **config.json** keeps the server's configured values.
+- **ST selected** follows your current SillyTavern connection.
+- **default (SRMM)** follows the SillyTavern Replies selection.
+- A named profile follows that profile's saved changes, independently of other selections.
+
+Other App Replies and Advanced Mapping update the shared server configuration.
+A red info icon marks a hand-edited value that was previously controlled here;
+choosing config.json clears the icon without changing that value.
+
+Disabling Advanced Mapping asks before removing its overrides. Selecting
+**Use Claude Code** hides the mapping controls without deleting their settings.
+
+### Development
+
+See [AGENTS.md](AGENTS.md) for integration contracts and checks.
