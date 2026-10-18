@@ -1,4 +1,5 @@
-import { main_api } from '@silly-tavern/script.js';
+import { main_api, setUserName } from '@silly-tavern/script.js';
+import { initUserAvatar, user_avatar, setPersonaDescription, setPersonaLockState, persona_description_positions } from '@silly-tavern/scripts/personas.js';
 import { getChatCompletionModel, model_list, oai_settings } from '@silly-tavern/scripts/openai.js';
 import { getTextGenModel, getTextGenServer, textgenerationwebui_settings } from '@silly-tavern/scripts/textgen-settings.js';
 import { ModelSelection, SrmmChoice, SrmmRequest } from 'utils/types';
@@ -201,6 +202,63 @@ export async function ensurePersona(personaName: string): Promise<string> {
     );
 }
 
+export async function syncSoulPersona(personaName: string, scope = currentScope()): Promise<string | undefined> {
+    if (currentScope() !== scope) return;
+    const avatar = await ensurePersona(personaName);
+    if (currentScope() !== scope) return;
+    const ctx: any = st.getContext();
+    const character = ctx.characters?.[ctx.characterId];
+    if (!character || ctx.groupId) return;
+    const descriptor = power_user.persona_descriptions[avatar] ??= {
+        description: '', position: persona_description_positions.IN_PROMPT,
+        depth: 2, role: 0, lorebook: '', connections: [], title: '',
+    };
+    // Hunked from ST's selectCurrentPersona, without its greeting regeneration.
+    const fields = {
+        persona_description: descriptor.description ?? '',
+        persona_description_position: descriptor.position === persona_description_positions.AFTER_CHAR
+            ? persona_description_positions.IN_PROMPT : descriptor.position ?? persona_description_positions.IN_PROMPT,
+        persona_description_depth: descriptor.depth ?? 2,
+        persona_description_role: descriptor.role ?? 0,
+        persona_description_lorebook: descriptor.lorebook ?? '',
+    };
+    const selected = user_avatar !== avatar;
+    const descriptionChanged = Object.entries(fields).some(([key, value]) => power_user[key] !== value);
+    let changed = selected || descriptionChanged;
+    for (const [id, other] of Object.entries(power_user.persona_descriptions) as [string, any][]) {
+        if (id === avatar || !other.connections) continue;
+        const retained = other.connections.filter((link: any) => link.type !== 'character' || link.id !== character.avatar);
+        if (retained.length !== other.connections.length) {
+            other.connections = retained;
+            changed = true;
+        }
+    }
+    if (selected) initUserAvatar(avatar);
+    if (ctx.name1 !== personaName) setUserName(personaName, { toastPersonaNameChange: false });
+    if (selected || descriptionChanged) {
+        Object.assign(power_user, fields);
+        setPersonaDescription();
+    }
+    const locks: Promise<void>[] = [];
+    // Existing-persona lock branches mutate synchronously; do not yield between them.
+    if (ctx.getCurrentChatId?.() !== undefined && ctx.chatMetadata.persona !== avatar) locks.push(setPersonaLockState(true, 'chat'));
+    if (!descriptor.connections?.some((link: any) => link.type === 'character' && link.id === character.avatar)) {
+        locks.push(setPersonaLockState(true, 'character'));
+    }
+    if (changed) locks.push(saveSettings());
+    await Promise.all(locks);
+    return currentScope() === scope ? avatar : undefined;
+}
+
+export async function syncCurrentSoulPersona(): Promise<void> {
+    const scope = currentScope();
+    const ctx: any = st.getContext();
+    const character = ctx.characters?.[ctx.characterId];
+    if (!character || ctx.groupId || !canUseSoulCard(character)) return;
+    const name = await soulPersonaName(String(character.name || '').trim());
+    if (name && currentScope() === scope) await syncSoulPersona(name, scope);
+}
+
 export async function writeMemuDisabled(character: any, disabled: boolean): Promise<void> {
     const avatar = character.avatar;
     const name = String(character.name || '').trim();
@@ -397,8 +455,6 @@ export async function initChatExtraInfo(ctx: any, selectedName?: string): Promis
     let userName = await resolveSoulPersonaName(desiredCharacterName, !!selectedName, first) ?? selectedName;
     if (currentScope() !== scope) return;
     if (!userName) throw new Error('Select a persona before enabling memU');
-    await ensurePersona(userName);
-    if (currentScope() !== scope) return;
     const { userId, soulId, createSoul: shouldCreateSoul } = await resolveIdentity(userName, desiredCharacterName);
     if (currentScope() !== scope) return;
     if (shouldCreateSoul) {
@@ -413,6 +469,9 @@ export async function initChatExtraInfo(ctx: any, selectedName?: string): Promis
         if (!userName) throw new Error(`Soul ${soulId} has no user-name binding`);
         if (currentScope() !== scope) return;
     }
+
+    await syncSoulPersona(userName, scope);
+    if (currentScope() !== scope) return;
 
     // Update if missing or stale (chat switching can fire before ctx.characterId updates).
     if (!existing || existing.userId !== userId || existing.characterId !== soulId || existing.characterName !== soulId || existing.userName !== userName) {

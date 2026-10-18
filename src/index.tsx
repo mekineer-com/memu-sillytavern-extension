@@ -18,7 +18,7 @@ import { MEMU_LOCAL_STORAGE_OVERRIDE_SUMMARIZER, MEMU_LOCAL_STORAGE_IMPORT_LOREB
 import { info, warn, error as logError } from './utils/log';
 import { startInspectObserver } from './ui/inspect-panel';
 import { installAutomationHooks } from './ui/automation-hooks';
-import { currentScope, isMemuActive, onCharacterDuplicated, onCharacterRenamed, onSoulCardEdited, onSoulCardInput } from './memory/utils';
+import { appReady, currentScope, isMemuActive, onCharacterDuplicated, onCharacterRenamed, onSoulCardEdited, onSoulCardInput, syncCurrentSoulPersona } from './memory/utils';
 import { installSourceLifecycle } from './memory/source-lifecycle';
 
 (globalThis as any).memuGenerationInterceptor = memuGenerationInterceptor;
@@ -79,6 +79,12 @@ function installHooksWithRetry(): void {
 }
 
 installHooksWithRetry();
+
+void appReady.then(() => {
+    const sync = () => syncCurrentSoulPersona().catch(error => window.alert(`memU persona: ${String(error)}`));
+    st.eventSource.makeFirst(st.event_types.CHAT_CHANGED, sync);
+    void sync();
+});
 
 let mounted = false;
 

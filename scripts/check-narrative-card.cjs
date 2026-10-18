@@ -25,6 +25,7 @@ const st = { getContext: () => ctx, event_types: { APP_READY: 'ready' }, eventSo
 const imports = {
   'utils/context-extra': { st }, 'utils/network': network, '@silly-tavern/scripts/power-user.js': {},
   '@silly-tavern/script.js': {},
+  '@silly-tavern/scripts/personas.js': {},
   '@silly-tavern/scripts/openai.js': {}, '@silly-tavern/scripts/textgen-settings.js': {},
   'utils/csrf': { getCsrfTokenCached: async () => { edit(); return 'test-token'; } },
   '@silly-tavern/scripts/extensions.js': { extension_settings: { memu: { soulCards: { TestSoul: 'test.png' } } },
@@ -169,9 +170,13 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   // Exercise the real installer so dropping either manual-edit listener breaks this check.
   const indexSource = fs.readFileSync(`${__dirname}/../src/index.tsx`, 'utf8');
   const editHooks = new Map(), inputHooks = new Map();
+  let personaSyncs = 0;
   const noOp = () => {};
   const installer = { window: {}, document: { addEventListener: (name, callback) => inputHooks.set(name, callback) },
-    st: { event_types: { CHARACTER_EDITED: 'card-edited' }, eventSource: { on: (name, callback) => editHooks.set(name, callback) } },
+    appReady: Promise.resolve(), syncCurrentSoulPersona: async () => { personaSyncs++; },
+    st: { event_types: { CHARACTER_EDITED: 'card-edited', CHAT_CHANGED: 'chat' }, eventSource: {
+      on: (name, callback) => editHooks.set(name, callback), makeFirst: (name, callback) => editHooks.set(name, callback),
+    } },
     onChatChanged: noOp, onGenerationStopped: noOp, onUserMessageSent: noOp, onMessageReceived: noOp,
     onMessageEdited: noOp, onMessageSwiped: noOp, onMessageSwipeDeleted: noOp, onMessageDeleted: noOp,
     onCharacterDuplicated: noOp, onCharacterRenamed: noOp,
@@ -179,6 +184,12 @@ vm.runInNewContext(ts.transpileModule(producer.slice(producer.indexOf('function 
   };
   vm.runInNewContext(ts.transpileModule(indexSource.slice(indexSource.indexOf('function installHooksWithRetry()'),
     indexSource.indexOf('\nlet mounted')), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, installer);
+  await Promise.resolve();
+  assert.equal(personaSyncs, 1, 'Ready hook repairs the current Soul');
+  const sync = editHooks.get('chat')();
+  assert.equal(typeof sync.then, 'function', 'Chat-change binding returns a promise for native ordering');
+  await sync;
+  assert.equal(personaSyncs, 2);
   assert.equal(editHooks.get('card-edited'), utils.onSoulCardEdited);
   assert.equal(inputHooks.get('input'), utils.onSoulCardInput);
 

@@ -129,7 +129,7 @@ const configuredChoices = nodes(picker).filter(node => node.type === 'option')
 assert.deepEqual(configuredChoices.map(choice => choice.profile_id), ['test-api', 'unsupported']);
 assert(!nodes(picker).some(node => node.type === 'option' && /native-selection-only/.test(node.props.children)));
 assert.equal(find(tree, 'memu-iris-model-info'), undefined);
-assert.equal(find(tree, 'memu-srmm-config-info').props.title, 'No effect on config.json');
+assert.equal(find(tree, 'memu-srmm-config-info').props.title, 'This box has no effect on config.json');
 assert.deepEqual(JSON.parse(find(tree, 'memu-model-other_apps').props.value), { source: 'config' });
 assert.equal(find(tree, 'memu-other-apps-config-info').props.title, 'Hand configured config.json');
 assert(!nodes(find(tree, 'memu-model-other_apps')).some(node => node.type === 'option' && /hand.configured/i.test(node.props.children)));
@@ -330,7 +330,8 @@ assert(nodes(render()).some(node => node.type === 'style' && node.props.children
 const personaCallbacks = new Map();
 let seenPersonas, cleanup;
 const personaEffect = {
-  useEffect: callback => { cleanup = callback(); }, reloadCharacter: async () => {},
+  useEffect: callback => { const release = callback(); if (release) cleanup = release; }, reloadCharacter: async () => {},
+  personaLocked: false, persona: '', currentCharacter: '', personaBinding: { current: null },
     st: { event_types: { CHAT_CHANGED: 'chat', CHARACTER_EDITED: 'edited-card', CHARACTER_EDITOR_OPENED: 'editor-opened', PERSONA_CREATED: 'created', PERSONA_UPDATED: 'updated', PERSONA_DELETED: 'deleted' },
     eventSource: { on: (event, callback) => personaCallbacks.set(event, callback), removeListener: event => personaCallbacks.delete(event) } },
   power_user: { personas: {} }, setPersonas: value => { seenPersonas = value; },
@@ -382,7 +383,20 @@ function loadModule(file, imports, extra = {}) {
   let settingsWrites = 0, settingsReads = 0, saveMode = 'ok', readMode = 'ok', pendingSettings;
   const cardFiles = new Map(), cardUpdates = [], hookAlerts = [];
   let ready;
-  const native = { power_user: { personas: { 'owner.png': 'TestOwner' } } };
+  const native = { power_user: { personas: { 'owner.png': 'TestOwner' }, persona_descriptions: {} } };
+  const nativePersonas = {
+    user_avatar: '', persona_description_positions: { IN_PROMPT: 0 },
+    initUserAvatar: avatar => { nativePersonas.user_avatar = avatar; }, setPersonaDescription() {},
+    setPersonaLockState: async (state, type) => {
+      assert.equal(state, true);
+      if (type === 'chat') ctx.chatMetadata.persona = nativePersonas.user_avatar;
+      else {
+        assert.equal(type, 'character');
+        const descriptor = native.power_user.persona_descriptions[nativePersonas.user_avatar];
+        descriptor.connections = [...(descriptor.connections || []), { type: 'character', id: ctx.characters[ctx.characterId].avatar }];
+      }
+    },
+  };
   ctx.SlashCommandParser = { commands: { 'persona-create': { callback: async (args, value) => {
     nativeCreates++; assert.equal(args.select, 'false'); assert.equal(value, '');
     native.power_user.personas['created.png'] = args.name;
@@ -402,8 +416,9 @@ function loadModule(file, imports, extra = {}) {
   const utils = loadModule('memory/utils.ts', {
     'utils/context-extra': { st, memuExtras: extras }, 'utils/network': network,
     '@silly-tavern/scripts/power-user.js': native,
+    '@silly-tavern/scripts/personas.js': nativePersonas,
     '@silly-tavern/scripts/openai.js': {}, '@silly-tavern/scripts/textgen-settings.js': {},
-    '@silly-tavern/script.js': { saveSettings: async () => {
+    '@silly-tavern/script.js': { setUserName: name => { ctx.name1 = name; }, saveSettings: async () => {
       settingsWrites++;
       if (pendingSettings) await pendingSettings;
       if (saveMode === 'throw') throw Error('settings write refused');
@@ -908,6 +923,242 @@ function loadFunctions(text, names, env) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText, env);
 }
+
+// Exercise the real binding helpers and native synchronous selection/lock branches.
+(async () => {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const cards = [
+    { name: 'Fable', avatar: 'fable.png', data: { extensions: { memu: { disabled: true } } } },
+    { name: 'Quill', avatar: 'quill.png', data: { extensions: { memu: { disabled: true } } } },
+    { name: 'Ordinary', avatar: 'ordinary.png' },
+  ];
+  const names = { Fable: 'Rowan', Quill: 'Birch' };
+  const ctx = { characters: cards, characterId: 0, chatMetadata: {}, name1: 'Wrong',
+    chat: [{ is_user: false, mes: 'Untouched greeting' }], getCurrentChatId: () => 'binding-test' };
+  const prefs = { persona_auto_lock: false, default_persona: 'unrelated.png', persona_allow_multi_connections: true };
+  const power_user = { ...prefs, persona_show_notifications: false,
+    personas: { 'rowan.png': 'Rowan', 'birch.png': 'Birch', 'unrelated.png': 'Unrelated' },
+    persona_descriptions: {
+      'rowan.png': { description: 'Rowan description', position: 1, depth: 4, role: 1, lorebook: 'rowan-lore',
+        connections: [{ type: 'character', id: 'unrelated-card.png' }, { type: 'group', id: 'group-test' }] },
+      'birch.png': { description: 'Birch description', position: 4, depth: 7, role: 2, lorebook: 'birch-lore',
+        connections: [{ type: 'character', id: 'fable.png' }, { type: 'group', id: 'fable.png' }] },
+      'unrelated.png': { connections: [{ type: 'character', id: 'fable.png' }, { type: 'character', id: 'unrelated-card.png' }] },
+    },
+  };
+  let settingsSaves = 0, metadataSaves = 0, networkReads = 0, nativeMutations = 0, greetingRewrites = 0;
+  let pendingCreation, pendingName;
+  const callbacks = new Map();
+  const st = { getContext: () => ctx, event_types: { APP_READY: 'ready', PERSONA_CHANGED: 'persona', SETTINGS_UPDATED: 'settings' },
+    eventSource: { once: (_, callback) => { st.ready = callback; },
+      on: (event, callback) => { assert(!callbacks.has(event)); callbacks.set(event, callback); },
+      removeListener: (event, callback) => { assert.equal(callbacks.get(event), callback); callbacks.delete(event); } } };
+  const chain = new Proxy({}, { get: () => () => chain });
+  const nativeEnv = { exports: {}, power_user, user_avatar: 'unrelated.png',
+    persona_description_positions: { IN_PROMPT: 0, AFTER_CHAR: 1, AT_DEPTH: 4 },
+    DEFAULT_DEPTH: 2, DEFAULT_ROLE: 0, default_user_name: 'Default',
+    $: () => chain, console: { log() {} },
+    saveSettingsDebounced: () => { settingsSaves++; }, saveMetadataDebounced: () => { metadataSaves++; },
+    updatePersonaUIStates() {}, updatePersonaConnectionsAvatarList() {}, countPersonaDescriptionTokens() {},
+    isPersonaPanelOpen: () => false,
+    getCurrentConnectionObj: () => ({ type: 'character', id: cards[ctx.characterId].avatar }),
+    isPersonaConnectionLocked: link => link.type === 'character' && link.id === cards[ctx.characterId].avatar,
+    retriggerFirstMessageOnEmptyChat: () => { greetingRewrites++; assert.fail('Binding must not rewrite greetings'); },
+  };
+  Object.defineProperties(nativeEnv, {
+    name1: { get: () => ctx.name1, set: value => { ctx.name1 = value; } },
+    name2: { get: () => cards[ctx.characterId].name },
+    chat_metadata: { get: () => ctx.chatMetadata },
+  });
+  const nativeSource = fs.readFileSync(path.resolve(__dirname, '../../../../../public/scripts/personas.js'), 'utf8');
+  loadFunctions(nativeSource, ['initUserAvatar', 'reloadUserAvatar', 'setPersonaDescription', 'setPersonaLockState', 'lockPersona'], nativeEnv);
+  loadFunctions(fs.readFileSync(path.resolve(__dirname, '../../../../../public/script.js'), 'utf8'), ['setUserName'], nativeEnv);
+  const nativePersonas = { persona_description_positions: nativeEnv.persona_description_positions,
+    setUserAvatar: () => { greetingRewrites++; assert.fail('Do not call native setUserAvatar'); } };
+  Object.defineProperty(nativePersonas, 'user_avatar', { get: () => nativeEnv.user_avatar });
+  for (const name of ['initUserAvatar', 'setPersonaDescription', 'setPersonaLockState']) {
+    nativePersonas[name] = (...args) => { nativeMutations++; return nativeEnv[name](...args); };
+  }
+  ctx.SlashCommandParser = { commands: { 'persona-create': { callback: async args => {
+    assert.equal(args.select, 'false');
+    if (pendingCreation) await pendingCreation.promise;
+    const key = `${args.name.toLowerCase()}.png`;
+    const avatar = Object.hasOwn(power_user.personas, key) ? `created-${key}` : key;
+    power_user.personas[avatar] = args.name;
+    power_user.persona_descriptions[avatar] = { connections: [] };
+    return avatar;
+  } } } };
+  const extras = { baseInfo: { userName: 'Stale copy identity' } };
+  const utils = loadModule('memory/utils.ts', {
+    'utils/context-extra': { st, memuExtras: extras },
+    'utils/network': { getSouls: async () => { networkReads++; return { souls: Object.keys(names) }; },
+      getSoul: async id => { networkReads++; if (pendingName) await pendingName.promise; return { soul_id: id, user_name: names[id] }; } },
+    '@silly-tavern/scripts/power-user.js': { power_user },
+    '@silly-tavern/scripts/personas.js': nativePersonas,
+    '@silly-tavern/script.js': { setUserName: (...args) => { nativeMutations++; nativeEnv.setUserName(...args); },
+      saveSettings: async () => { settingsSaves++; } },
+    '@silly-tavern/scripts/extensions.js': { extension_settings: { memu: { soulCards: { Fable: 'fable.png', Quill: 'quill.png' } } } },
+    '@silly-tavern/scripts/openai.js': {}, '@silly-tavern/scripts/textgen-settings.js': {}, 'utils/csrf': {},
+  });
+  st.ready();
+  function assertBinding(avatar) {
+    assert.equal(nativeEnv.user_avatar, avatar); assert.equal(ctx.name1, power_user.personas[avatar]);
+    assert.equal(ctx.chatMetadata.persona, avatar);
+    const descriptor = power_user.persona_descriptions[avatar];
+    for (const [field, key] of [['description', 'persona_description'], ['depth', 'persona_description_depth'],
+      ['role', 'persona_description_role'], ['lorebook', 'persona_description_lorebook']]) assert.equal(power_user[key], descriptor[field]);
+    const position = descriptor.position === 1 ? 0 : descriptor.position;
+    assert.equal(power_user.persona_description_position, position);
+    const connected = Object.entries(power_user.persona_descriptions).filter(([, value]) => value.connections?.some(link => link.type === 'character' && link.id === cards[ctx.characterId].avatar));
+    assert.deepEqual(connected.map(([key]) => key), [avatar]);
+    for (const [key, value] of Object.entries(prefs)) assert.equal(power_user[key], value, key);
+    assert.equal(greetingRewrites, 0); assert.equal(ctx.chat[0].mes, 'Untouched greeting');
+  }
+  await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  ctx.characterId = 1; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona(); assertBinding('birch.png');
+  ctx.characterId = 0; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  assert.deepEqual(copy(power_user.persona_descriptions['rowan.png'].connections), [
+    { type: 'character', id: 'unrelated-card.png' }, { type: 'group', id: 'group-test' }, { type: 'character', id: 'fable.png' },
+  ]);
+  assert.deepEqual(copy(power_user.persona_descriptions['birch.png'].connections), [
+    { type: 'group', id: 'fable.png' }, { type: 'character', id: 'quill.png' },
+  ]);
+  assert.deepEqual(copy(power_user.persona_descriptions['unrelated.png'].connections), [{ type: 'character', id: 'unrelated-card.png' }]);
+  ctx.name1 = 'Wrong same-avatar name'; ctx.chatMetadata.persona = 'birch.png';
+  await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  power_user.persona_descriptions['birch.png'].connections.push({ type: 'character', id: 'fable.png' });
+  const savesBeforeFilter = settingsSaves;
+  await utils.syncSoulPersona('Rowan'); assertBinding('rowan.png');
+  assert(settingsSaves > savesBeforeFilter, 'Competitor-only repair must persist');
+  const stable = [settingsSaves, metadataSaves, nativeMutations];
+  await utils.syncSoulPersona('Rowan');
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations], stable, 'Stable repair must not save or mutate');
+  assert.equal(power_user.persona_descriptions['rowan.png'].position, 1, 'Legacy descriptor position stays untouched');
+  assert.equal(power_user.persona_description_position, 0, 'Legacy position projects to IN_PROMPT');
+
+  const getChatId = ctx.getCurrentChatId;
+  ctx.getCurrentChatId = () => undefined; ctx.chatMetadata = {}; ctx.name1 = 'Wrong before first chat';
+  nativeEnv.user_avatar = 'birch.png';
+  power_user.persona_descriptions['rowan.png'].connections = power_user.persona_descriptions['rowan.png'].connections.filter(link => link.id !== 'fable.png');
+  const beforeNoChat = metadataSaves;
+  await utils.syncCurrentSoulPersona();
+  assert.equal(nativeEnv.user_avatar, 'rowan.png'); assert.equal(ctx.name1, 'Rowan');
+  assert(power_user.persona_descriptions['rowan.png'].connections.some(link => link.type === 'character' && link.id === 'fable.png'));
+  assert.equal(ctx.chatMetadata.persona, undefined); assert.equal(metadataSaves, beforeNoChat, 'Editor without chat must not save chat metadata');
+  ctx.getCurrentChatId = getChatId;
+
+  names.Quill = 'Rowan'; ctx.characterId = 1; ctx.chatMetadata = {};
+  await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  ctx.characterId = 0; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  assert(power_user.persona_descriptions['rowan.png'].connections.some(link => link.type === 'character' && link.id === 'quill.png'), 'Shared persona retains the other Soul link');
+  names.Quill = 'Birch'; ctx.characterId = 1; ctx.chatMetadata = {};
+  await utils.syncCurrentSoulPersona(); assertBinding('birch.png');
+  ctx.characterId = 0;
+
+  ctx.chatMetadata = { main_chat: 'original', persona: 'birch.png' };
+  await utils.syncCurrentSoulPersona(); assertBinding('rowan.png');
+  assert.equal(extras.baseInfo.userName, 'Stale copy identity', 'Copy binding must not trust or rewrite inherited identity');
+  const beforeOrdinary = [settingsSaves, metadataSaves, nativeMutations];
+  ctx.characterId = 2; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona();
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations], beforeOrdinary);
+  ctx.characterId = 0; ctx.groupId = 'group-test'; await utils.syncCurrentSoulPersona();
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations], beforeOrdinary); delete ctx.groupId;
+
+  // A pending creation/name lookup must not apply A's native state to B.
+  pendingCreation = deferred();
+  const oldSelection = utils.syncSoulPersona('DeferredOwner'); await tick();
+  ctx.characterId = 1; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona(); assertBinding('birch.png');
+  const beforeRelease = [settingsSaves, metadataSaves, nativeMutations, JSON.stringify(ctx.chatMetadata)];
+  pendingCreation.resolve(); assert.equal(await oldSelection, undefined); pendingCreation = null;
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations, JSON.stringify(ctx.chatMetadata)], beforeRelease);
+  const staleScope = utils.currentScope(); ctx.chatMetadata = {};
+  const beforeStaleEntry = [settingsSaves, metadataSaves, nativeMutations, JSON.stringify(power_user.personas)];
+  assert.equal(await utils.syncSoulPersona('MustNotCreate', staleScope), undefined);
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations, JSON.stringify(power_user.personas)], beforeStaleEntry);
+  ctx.characterId = 0; ctx.chatMetadata = {}; pendingName = deferred();
+  const oldName = utils.syncCurrentSoulPersona(); await tick();
+  ctx.characterId = 1; ctx.chatMetadata = {}; const nameGate = pendingName; pendingName = null;
+  await utils.syncCurrentSoulPersona(); assertBinding('birch.png');
+  const beforeNameRelease = [settingsSaves, metadataSaves, nativeMutations];
+  nameGate.resolve(); await oldName;
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations], beforeNameRelease);
+
+  // Reload the real App handler without React or live ST effects.
+  let uiPersona, uiLocked, uiActive, uiCopy;
+  const reloadEnv = { appReady: Promise.resolve(), st, power_user, memuExtras: extras,
+    currentScope: utils.currentScope, currentSelectedCharacterName: () => cards[ctx.characterId].name,
+    canUseSoulCard: utils.canUseSoulCard, isMemuActive: utils.isMemuActive,
+    soulPersonaName: utils.soulPersonaName, syncSoulPersona: utils.syncSoulPersona,
+    refreshSoulCard: () => assert.fail('memU-off/copy must not refresh narrative'), personaBinding: { current: null },
+    setSwitchBusy() {}, setRelationships() {}, setSwitchError: value => { if (value) assert.fail(value); },
+    setCurrentCharacter() {}, setCurrentUserId() {}, setPersonas() {},
+    setMemuActive: value => { uiActive = value; }, setCopiedChat: value => { uiCopy = value; },
+    setPersona: value => { uiPersona = value; }, setPersonaLocked: value => { uiLocked = value; } };
+  loadFunctions(source, ['reloadCharacter'], reloadEnv);
+  ctx.characterId = 0; ctx.chatMetadata = {}; await reloadEnv.reloadCharacter();
+  assertBinding('rowan.png'); assert.equal(uiPersona, 'rowan.png'); assert.equal(uiLocked, true); assert.equal(uiActive, false);
+  ctx.chatMetadata = { main_chat: 'original', persona: 'birch.png' }; await reloadEnv.reloadCharacter();
+  assertBinding('rowan.png'); assert.equal(uiCopy, true); assert.equal(uiLocked, true);
+  ctx.characterId = 2; ctx.chatMetadata = {}; await reloadEnv.reloadCharacter();
+  assert.equal(uiLocked, false); assert.equal(uiPersona, ''); assert.equal(reloadEnv.personaBinding.current, null);
+
+  const effectStart = source.indexOf('  useEffect(() => {\n    if (!personaLocked');
+  assert(effectStart >= 0);
+  const effectCode = ts.transpileModule(source.slice(effectStart, source.indexOf('  async function changeMemu(', effectStart)), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS },
+  }).outputText;
+  const ids = ['char_connections_button', 'user_avatar_block', 'lock_user_name', 'lock_persona_to_char', 'persona_rename_button', 'persona_delete_button', 'personas_restore'];
+  const controls = ids.map((id, index) => {
+    const attributes = new Map(index % 2 ? [['aria-disabled', 'false']] : []), classes = new Set(['unrelated-class']);
+    return { id, inert: index === 0, title: `Original ${id}`, attributes, classes,
+      getAttribute: key => attributes.get(key) ?? null, setAttribute: (key, value) => attributes.set(key, value),
+      removeAttribute: key => attributes.delete(key), classList: { add: key => classes.add(key), remove: key => classes.delete(key) } };
+  });
+  const controlSnapshot = () => controls.map(node => [node.inert, node.title, [...node.attributes], [...node.classes]]);
+  const originals = controlSnapshot();
+  let releaseEffect, selections = 0, effectError;
+  const effectEnv = { personaLocked: true, persona: 'rowan.png', currentCharacter: 'Fable',
+    currentSelectedCharacterName: () => cards[ctx.characterId].name, currentScope: utils.currentScope,
+    personaBinding: { current: null }, st, power_user, syncSoulPersona: utils.syncSoulPersona,
+    document: { querySelectorAll: selector => { assert.deepEqual(selector.split(', ').map(value => value.slice(1)), ids); return controls; } },
+    useEffect: fn => { releaseEffect = fn(); }, setPersonas() {}, setPersona: avatar => { selections++; effectEnv.persona = avatar; },
+    setSwitchError: value => { effectError = value; } };
+  ctx.characterId = 0; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona();
+  effectEnv.personaBinding.current = { scope: utils.currentScope(), name: 'Rowan' };
+  vm.runInNewContext(effectCode, effectEnv);
+  assert.equal(callbacks.size, 2); assert(controls.every(node => node.inert && node.getAttribute('aria-disabled') === 'true' && node.classes.has('memu-persona-fixed')));
+  const beforeEvent = [settingsSaves, metadataSaves, nativeMutations, networkReads];
+  assert.equal(callbacks.get('settings')(), undefined); await tick();
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations, networkReads], beforeEvent, 'Stable event repair does not read server or save');
+  power_user.personas['rowan.png'] = 'User-edited name';
+  callbacks.get('settings')(); await tick();
+  assert.equal(ctx.name1, 'Rowan', 'Repair must retain canonical server name, not editable native label');
+  assert.equal(selections, 1); assert.equal(effectEnv.persona, 'created-rowan.png');
+  power_user.personas['rowan.png'] = 'Rowan';
+  const oldRepair = callbacks.get('persona');
+  const lateSuccess = deferred(), lateFailure = deferred(); let repairsStarted = 0;
+  effectEnv.syncSoulPersona = (name, scope) => {
+    assert.equal(name, 'Rowan'); assert.equal(scope, utils.currentScope());
+    return ++repairsStarted === 1 ? lateSuccess.promise : lateFailure.promise;
+  };
+  assert.equal(oldRepair(), undefined); assert.equal(callbacks.get('settings')(), undefined);
+  assert.equal(repairsStarted, 2);
+  ctx.characterId = 1; ctx.chatMetadata = {}; await utils.syncCurrentSoulPersona();
+  const oldScopeSnapshot = [settingsSaves, metadataSaves, nativeMutations, networkReads, JSON.stringify(controlSnapshot())];
+  lateSuccess.resolve('must-not-select.png'); lateFailure.resolve(Promise.reject(new Error('Stale repair failure')));
+  await tick(); assert.equal(selections, 1); assert.equal(effectError, undefined);
+  oldRepair(); await tick();
+  assert.equal(repairsStarted, 2, 'Old-scope event must not start another repair');
+  assert.deepEqual([settingsSaves, metadataSaves, nativeMutations, networkReads, JSON.stringify(controlSnapshot())], oldScopeSnapshot);
+  releaseEffect(); assert.equal(callbacks.size, 0); assert.deepEqual(controlSnapshot(), originals);
+  effectEnv.personaLocked = false; releaseEffect = null;
+  vm.runInNewContext(effectCode, effectEnv); assert.equal(releaseEffect, undefined); assert.deepEqual(controlSnapshot(), originals);
+  assert.equal(effectError, undefined);
+  console.log('Native binding: two Souls, descriptors, scoped links, locks, unchanged preferences, off/copy/ordinary, stale awaits, no greetings, stable events and control cleanup pass.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
 const flushPanel = () => new Promise(resolve => setImmediate(resolve));
 const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not finish'); process.exitCode = 1; }, 10000);
 (async () => {
@@ -973,6 +1224,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   ready.memuExtras.baseInfo.characterName = ready.currentCharacter;
   await ready.saveRelationshipEditor(); assert.equal(ready.writes.length, 1);
   const reload = panel(), retainedDraft = reload.relationshipEditor;
+  reload.personaBinding = { current: null };
   reload.appReady = Promise.reject(new Error('Fictional reload failure'));
   for (const setter of ['setSwitchBusy', 'setMemuActive', 'setPersona', 'setPersonaLocked', 'setSwitchError']) reload[setter] = () => {};
   loadFunctions(source, ['reloadCharacter'], reload);

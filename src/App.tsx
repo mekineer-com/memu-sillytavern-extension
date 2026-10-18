@@ -33,7 +33,7 @@ import { saveSettings } from '@silly-tavern/script.js';
 import { extension_settings } from '@silly-tavern/scripts/extensions.js';
 import { postJsonWithCsrf } from 'utils/csrf';
 import { power_user } from '@silly-tavern/scripts/power-user.js';
-import { nativeModelSelection, srmmChoice, srmmRequest, appReady, canUseSoulCard, currentScope, ensurePersona, initChatExtraInfo, isMemuActive, refreshSoulCard, soulPersonaName, writeMemuDisabled } from 'memory/utils';
+import { nativeModelSelection, srmmChoice, srmmRequest, appReady, canUseSoulCard, currentScope, syncSoulPersona, initChatExtraInfo, isMemuActive, refreshSoulCard, soulPersonaName, writeMemuDisabled } from 'memory/utils';
 import { onChatChanged } from 'memory/exports';
 
 const buttonStyle: CSSProperties = {
@@ -106,6 +106,7 @@ export default function App() {
   const [persona, setPersona] = useState('');
   const [personaLocked, setPersonaLocked] = useState(false);
   const [personas, setPersonas] = useState<Record<string, string>>({});
+  const personaBinding = useRef<{ scope: string; name: string } | null>(null);
   const [switchBusy, setSwitchBusy] = useState(true);
   const [switchError, setSwitchError] = useState('');
 
@@ -115,6 +116,7 @@ export default function App() {
     setMemuActive(false);
     setPersona('');
     setPersonaLocked(false);
+    personaBinding.current = null;
     setSwitchError('');
     const scope = currentScope();
     try {
@@ -125,29 +127,24 @@ export default function App() {
       const copy = !!ctx.chatMetadata?.main_chat;
       setCopiedChat(copy);
       setPersonas({ ...power_user.personas });
-      if (copy) {
-        const name = memuExtras.baseInfo?.userName;
-        setPersona(Object.keys(power_user.personas).find(key => power_user.personas[key] === name) || '');
-        setPersonaLocked(!!name);
-        return;
-      }
       const character = ctx.characters?.[ctx.characterId];
       if (!character || ctx.groupId) return;
       if (!canUseSoulCard(character, true)) {
         setSwitchError('This Soul belongs to its first ST card. Give this card a different name.');
         return;
       }
-      const active = await isMemuActive();
+      const active = !copy && await isMemuActive();
       if (currentScope() !== scope) return;
       setMemuActive(active);
       if (active) await refreshSoulCard();
       if (currentScope() !== scope) return;
       const name = await soulPersonaName(String(character.name || '').trim());
       if (currentScope() !== scope) return;
-      const avatar = name ? await ensurePersona(name) : '';
+      personaBinding.current = name ? { scope, name } : null;
+      const avatar = name ? await syncSoulPersona(name, scope) : '';
       if (currentScope() !== scope) return;
       setPersonas({ ...power_user.personas });
-      setPersona(avatar);
+      setPersona(avatar || '');
       setPersonaLocked(!!name);
       setCurrentUserId(String(memuExtras.baseInfo?.userId || ''));
     } catch (error) {
@@ -175,6 +172,44 @@ export default function App() {
       window.removeEventListener('memu:server-ready', reload);
     };
   }, []);
+
+  useEffect(() => {
+    if (!personaLocked || !persona || currentSelectedCharacterName() !== currentCharacter) return;
+    const binding = personaBinding.current;
+    if (!binding || binding.scope !== currentScope()) return;
+    const { scope, name } = binding;
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(
+      '#char_connections_button, #user_avatar_block, #lock_user_name, #lock_persona_to_char, #persona_rename_button, #persona_delete_button, #personas_restore',
+    )).map(node => {
+      const previous = { node, inert: node.inert, disabled: node.getAttribute('aria-disabled'), title: node.title };
+      node.inert = true;
+      node.setAttribute('aria-disabled', 'true');
+      node.title = "This Soul's persona is fixed.";
+      node.classList.add('memu-persona-fixed');
+      return previous;
+    });
+    const repair = () => {
+      if (currentScope() !== scope) return;
+      void syncSoulPersona(name, scope).then(avatar => {
+        if (currentScope() === scope && avatar && avatar !== persona) {
+          setPersonas({ ...power_user.personas });
+          setPersona(avatar);
+        }
+      }).catch(error => { if (currentScope() === scope) setSwitchError(String(error)); });
+    };
+    st.eventSource.on(st.event_types.PERSONA_CHANGED, repair);
+    st.eventSource.on(st.event_types.SETTINGS_UPDATED, repair);
+    return () => {
+      st.eventSource.removeListener(st.event_types.PERSONA_CHANGED, repair);
+      st.eventSource.removeListener(st.event_types.SETTINGS_UPDATED, repair);
+      for (const { node, inert, disabled, title } of controls) {
+        node.inert = inert;
+        if (disabled === null) node.removeAttribute('aria-disabled'); else node.setAttribute('aria-disabled', disabled);
+        node.title = title;
+        node.classList.remove('memu-persona-fixed');
+      }
+    };
+  }, [personaLocked, persona, currentCharacter, personaBinding.current?.scope]);
 
   async function changeMemu(enabled: boolean): Promise<void> {
     const ctx: any = st.getContext();
@@ -892,6 +927,7 @@ export default function App() {
                 <style>{`
                   .memu-ext-settings .fa-info-circle, .memu-card-controls .fa-info-circle { position: relative; top: -0.12em; }
                   .memu-checkbox-target { display: inline-flex; flex: 0 0 auto; width: auto; padding: 3px; margin: -3px; cursor: pointer; }
+                  .memu-persona-fixed { opacity: 0.5; }
                   .memu-toggle { width: 44px; height: 24px; padding: 3px; border: 0; border-radius: 20px; background: #52616c; cursor: pointer; }
                   .memu-toggle span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #eef8ff; }
                   .memu-toggle[aria-checked="true"] { background: #5bb5e8; }
@@ -1044,7 +1080,7 @@ export default function App() {
                   <i id="memu-agentic-settings-info" className="fa-solid fa-info-circle" title="Agentic turns more limited without Claude Code" style={{ opacity: 0.8 }} />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>) <i id="memu-srmm-config-info" className="fa-solid fa-info-circle" title="No effect on config.json" style={{ opacity: 0.8 }} /></label>
+                  <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>) <i id="memu-srmm-config-info" className="fa-solid fa-info-circle" title="This box has no effect on config.json" style={{ opacity: 0.8 }} /></label>
                   {renderModelPicker('srmm')}
                 </div>
                 {!mappings?.claude_code && <>

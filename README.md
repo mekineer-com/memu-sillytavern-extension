@@ -26,15 +26,18 @@ License: see LICENSE (upstream license applies).
 
 Enabling memU creates the Soul using the character's name. Choose an ST persona
 first; its name is stored once for that Soul and the picker then locks. Existing
-Souls reuse or create a matching persona. Older dev DBs without a stored name
-are not automatically upgraded.
+Souls reuse or create a matching persona and keep its native ST selection,
+description, chat lock and sole character connection aligned, even with memU
+off. Conflicting native persona controls are disabled for bound Souls; ordinary
+ST cards keep their controls. Older dev DBs without a stored name are not
+automatically upgraded.
 
 Relationship drafts stay bound to the chat/card where they were opened. Switching
 keeps the draft but disables its Save; close that editor before editing the new
 selection. Refreshing the same selection does not discard the draft.
 
-Branches and checkpoints remain plain ST chats with no memU activity. ST's
-controls stay unchanged. In memU-active main chats, replies use MCP only: a
+Branches and checkpoints have no memU activity, but retain their owning Soul's
+fixed persona. In memU-active main chats, replies use MCP only: a
 server error blocks the reply rather than switching APIs. Continue is temporarily
 unavailable there; it still works normally with memU off.
 
