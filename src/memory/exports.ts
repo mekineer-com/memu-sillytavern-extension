@@ -11,7 +11,7 @@ import {
     SavedSource,
 } from "./memorize";
 import { setIsTerminated, startSummaryPolling, stopSummaryPolling } from "./summary-poller";
-import { appReady, currentScope, initChatExtraInfo, isMemuActive, refreshMemuGate } from "./utils";
+import { appReady, currentScope, hasSoulCardBinding, initChatExtraInfo, isMemuActive, refreshMemuGate } from "./utils";
 import { getPluginPing, scopeStorageProbe, conversationTurnUndo } from "utils/network";
 import { info, error as logError } from "utils/log";
 import { getInspectData, stashInspectData } from "ui/inspect-panel";
@@ -385,5 +385,9 @@ export function onChatChanged(): void {
         await maybeClearStaleLocalState();
         refreshChatSnapshot();
     }
-    void init().catch((error) => window.alert(`memU: ${error instanceof Error ? error.message : String(error)}`));
+    void init().catch((error) => {
+        if (currentScope() === scope && hasSoulCardBinding(ctx.characters?.[ctx.characterId])) {
+            window.alert(`memU: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    });
 }

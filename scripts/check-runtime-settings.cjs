@@ -451,7 +451,7 @@ function loadModule(file, imports, extra = {}) {
     'utils/context-extra': { st, memuExtras: extras, OVERRIDE_SUMMARIZER: { get: () => true } },
     './memorize': memory, './utils': utils, './summary-poller': { setIsTerminated() {}, startSummaryPolling() {}, stopSummaryPolling() {} },
     'utils/network': network, 'utils/log': log, 'ui/inspect-panel': { getInspectData: () => null, stashInspectData() {} },
-  }, { window: { alert: () => { alerts++; }, dispatchEvent() {} }, Event: class {} });
+  }, { window: { alert: message => { alerts++; hookAlerts.push(message); }, dispatchEvent() {} }, Event: class {} });
   // Use the real native dispatcher: it catches interceptor exceptions.
   const nativeSource = fs.readFileSync(path.resolve(__dirname, '../../../../../public/scripts/extensions.js'), 'utf8');
   const dispatcher = nativeSource.slice(nativeSource.indexOf('export async function runGenerationInterceptors('), nativeSource.indexOf('\n/**', nativeSource.indexOf('export async function runGenerationInterceptors(')));
@@ -907,6 +907,56 @@ function loadModule(file, imports, extra = {}) {
   assert.equal(settingsWrites, beforeNameEdit);
   assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, 'PendingNameSoul'), false);
   assert.equal(Object.hasOwn(extensionSettings.memu.soulCards, pendingCard.name), false);
+  // Opening an ordinary card must not wait for discovery or show a background popup.
+  const previousContext = ctx;
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  ctx = { ...ctx, characters: [{ name: 'Unbound', avatar: 'unbound.png' }], characterId: 0,
+    chatMetadata: {}, getCurrentChatId: () => 'ordinary-offline' };
+  for (const outage of ['reject', 'pending']) {
+    failDiscovery = outage === 'reject';
+    pendingDiscovery = outage === 'pending' ? new Promise(() => {}) : null;
+    utils.refreshMemuGate();
+    const before = [reads, settingsWrites, settingsReads, nativeCreates, saves];
+    const settled = await Promise.race([utils.syncCurrentSoulPersona().then(() => true), tick().then(() => false)]);
+    assert.equal(settled, true, 'Unbound pre-native hook settles without a server');
+    assert.deepEqual([reads, settingsWrites, settingsReads, nativeCreates, saves], before);
+    const beforeAlerts = alerts;
+    assert.equal(hooks.onChatChanged(), undefined, 'Background discovery never holds native chat events');
+    await tick();
+    assert.equal(alerts, beforeAlerts, 'Unbound discovery failure is not an unsolicited popup');
+  }
+  pendingDiscovery = null; failDiscovery = true;
+  extensionSettings.memu.soulCards.BindingProbe = 'binding-probe.png';
+  ctx.characters = [{ name: 'BindingProbe', avatar: 'wrong-card.png' }];
+  ctx.chatMetadata = {}; utils.refreshMemuGate();
+  const wrongCardReads = reads;
+  await utils.syncCurrentSoulPersona(); assert.equal(reads, wrongCardReads);
+
+  ctx.characters[0].avatar = 'binding-probe.png';
+  ctx.chatMetadata = {}; utils.refreshMemuGate();
+  await assert.rejects(utils.syncCurrentSoulPersona(), /discovery refused/, 'Bound persona errors remain visible');
+  const boundAlerts = alerts;
+  hooks.onChatChanged(); await tick();
+  assert.equal(alerts, boundAlerts + 1, 'Current bound initialization failures still alert');
+
+  failDiscovery = false;
+  let rejectOldDiscovery;
+  pendingDiscovery = new Promise((_resolve, reject) => { rejectOldDiscovery = reject; });
+  hooks.onChatChanged(); await tick();
+  const staleAlerts = alerts;
+  ctx.chatMetadata = {};
+  rejectOldDiscovery(new Error('Stale discovery outage')); await tick();
+  assert.equal(alerts, staleAlerts, 'An abandoned chat must not show a discovery popup');
+
+  pendingDiscovery = null;
+  ctx.characters = [{ name: 'FirstDiscovery', avatar: 'first-discovery.png' }];
+  ctx.chatMetadata = {}; souls.push('FirstDiscovery');
+  const firstUseAlerts = alerts;
+  hooks.onChatChanged(); await tick();
+  assert.equal(extensionSettings.memu.soulCards.FirstDiscovery, 'first-discovery.png', 'First-use discovery still claims the card');
+  assert.equal(alerts, firstUseAlerts + 1, 'A failure after first-use claim is a bound-Soul error');
+  assert.match(hookAlerts.at(-1), /missing binding/);
+  ctx = previousContext; utils.refreshMemuGate();
   console.log('Character gate, canonical cards, native rename/duplicate, confirmed claims, persona binding, producer roles and branch polling pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 

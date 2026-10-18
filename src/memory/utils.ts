@@ -47,6 +47,12 @@ function soulCards(): Record<string, string> {
     return (extension_settings as any).memu?.soulCards ?? {};
 }
 
+export function hasSoulCardBinding(character: any): boolean {
+    const name = String(character?.name || '').trim();
+    const cards = soulCards();
+    return !!character?.avatar && Object.hasOwn(cards, name) && cards[name] === character.avatar;
+}
+
 function firstSoulCard(character: any): boolean {
     const name = String(character?.name || '').trim();
     const matches = st.getContext().characters.filter((card: any) => String(card.name || '').trim() === name);
@@ -254,7 +260,7 @@ export async function syncCurrentSoulPersona(): Promise<void> {
     const scope = currentScope();
     const ctx: any = st.getContext();
     const character = ctx.characters?.[ctx.characterId];
-    if (!character || ctx.groupId || !canUseSoulCard(character)) return;
+    if (!character || ctx.groupId || !hasSoulCardBinding(character) || !canUseSoulCard(character)) return;
     const name = await soulPersonaName(String(character.name || '').trim());
     if (name && currentScope() === scope) await syncSoulPersona(name, scope);
 }
