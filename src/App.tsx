@@ -287,18 +287,6 @@ export default function App() {
     } catch (error) { setConfigStatus('error'); setSwitchError(String(error)); }
   }
 
-  async function refreshProfiles(): Promise<void> {
-    const current = mappingState.current;
-    if (!current || nativeTransition.current || Object.keys(pendingMappings.current).length) return;
-    try {
-      const result = await getModelMappings(nativeModelSelection(), srmmChoice());
-      if (nativeTransition.current || mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
-      applyLoadedMappings(result);
-    } catch {
-      // A background catalog refresh must not clear usable choices while offline.
-    }
-  }
-
   function changeModelMappings(patch: ModelMappingPatch) {
     if (!mappingState.current) return;
     const merge = (base: ModelMappingPatch, update: ModelMappingPatch): ModelMappingPatch => ({ ...base, ...update,
@@ -428,13 +416,11 @@ export default function App() {
       timer = window.setTimeout(() => {
         const selection = nativeModelSelection();
         setNativeSelection(selection);
-        let saving;
         if (selection && identity(selection) !== identity(previous)) {
           previous = selection;
-          saving = syncModelMappings('st_native');
+          void syncModelMappings('st_native');
         }
         nativeTransition.current = false;
-        if (!saving) void (mappingState.current ? refreshProfiles() : loadModelMappings());
       }, 200);
     };
     const profileUpdated = (_old: unknown, profile: { id: string }) => {
@@ -457,14 +443,11 @@ export default function App() {
       } else await saveSettings();
       changed();
     };
-    const visible = () => { if (document.visibilityState === 'visible') changed(); };
     for (const event of events) st.eventSource.on(event, changed);
     st.eventSource.on(st.event_types.CONNECTION_PROFILE_UPDATED, profileUpdated);
     st.eventSource.on(st.event_types.CONNECTION_PROFILE_DELETED, profileDeleted);
     const credentialEvents = [st.event_types.SECRET_WRITTEN, st.event_types.SECRET_EDITED, st.event_types.SECRET_ROTATED, st.event_types.SECRET_DELETED];
     for (const event of credentialEvents) st.eventSource.on(event, credentialsChanged);
-    window.addEventListener('focus', changed);
-    document.addEventListener('visibilitychange', visible);
     return () => {
       window.clearTimeout(timer);
       nativeTransition.current = false;
@@ -472,8 +455,6 @@ export default function App() {
       st.eventSource.removeListener(st.event_types.CONNECTION_PROFILE_UPDATED, profileUpdated);
       st.eventSource.removeListener(st.event_types.CONNECTION_PROFILE_DELETED, profileDeleted);
       for (const event of credentialEvents) st.eventSource.removeListener(event, credentialsChanged);
-      window.removeEventListener('focus', changed);
-      document.removeEventListener('visibilitychange', visible);
     };
   }, [!!mappings]);
 
@@ -614,12 +595,21 @@ export default function App() {
       if (enabled) {
         const retained: Record<string, StepChoice> = extension_settings.memu.advancedMapping || {};
         const rows: NonNullable<ModelMappingPatch['step_models']> = {};
+        const missing: string[] = [];
         for (const [step, choice] of Object.entries(retained)) {
+          if ('source' in choice && choice.source === 'configured'
+            && !mappings.providers.some(profile => profile.profile_id === choice.profile_id)) {
+            missing.push(stepLabels.find(row => row.step === step)?.label || step);
+            delete retained[step];
+            continue;
+          }
           const request = stepRequest(choice);
           if (request !== undefined) rows[step] = request;
         }
         setAdvancedOpen(true);
-        if (Object.keys(rows).length) changeModelMappings({ step_models: rows });
+        if (missing.length) setSwitchError(`Skipped deleted profiles for: ${missing.join(', ')}. Choose another profile for those rows.`);
+        if (Object.keys(rows).length) await changeModelMappings({ step_models: rows });
+        else if (missing.length) await saveSettings();
       } else {
         if (hasAdvancedMapping) {
           const retained = { ...extension_settings.memu.advancedMapping };

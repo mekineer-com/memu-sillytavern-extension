@@ -1054,6 +1054,21 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.deepEqual(clone(env.stepRequest({ source: 'srmm' })), { source: 'srmm', srmm: { source: 'config', native: null } });
   assert.equal(env.stepRequest({ source: 'config' }), undefined);
   assert.equal(calls.length, 0, 'Building a request does not itself write settings');
+  const notices = [];
+  env.setSwitchError = text => notices.push(text);
+  env.stepLabels = [{ step: 'preprocess', label: 'multimodal memory' }, { step: 'memory_extract', label: 'memory atom' }];
+  env.extension_settings.memu.advancedMapping.preprocess = { source: 'configured', profile_id: 'deleted-profile' };
+  await env.toggleAdvancedMapping(true);
+  assert.deepEqual(Object.keys(calls.pop().step_models), ['memory_extract'], 'A deleted profile must not block valid restored rows');
+  assert.equal(env.extension_settings.memu.advancedMapping.preprocess, undefined);
+  assert.match(notices.pop(), /Skipped deleted profiles for: multimodal memory/);
+  env.mappings.providers = [];
+  const savesBeforeMissing = order.length;
+  await env.toggleAdvancedMapping(true);
+  assert.equal(calls.length, 0, 'No empty config write when all saved profiles were deleted');
+  assert.equal(order.length, savesBeforeMissing + 1, 'Pruned markers still save when no valid rows remain');
+  assert.equal(env.extension_settings.memu.advancedMapping.memory_extract, undefined);
+  assert.match(notices.pop(), /memory atom/);
 
   const effectStart = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
   const events = new Map(); let modelReads = 0, onNativeChange;
@@ -1061,9 +1076,9 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings' },
       eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
     nativeModelSelection: () => { modelReads++; return null; }, setNativeSelection() {},
-    refreshProfiles: async () => {},
-    window: { addEventListener() {}, removeEventListener() {}, setTimeout: fn => { onNativeChange = fn; return 1; }, clearTimeout() {} },
-    document: { addEventListener() {}, removeEventListener() {} },
+    loadModelMappings: () => assert.fail('Unchanged settings must not reload MCP'),
+    window: { addEventListener: () => assert.fail('Focus must not trigger mapping reloads'), removeEventListener() {}, setTimeout: fn => { onNativeChange = fn; return 1; }, clearTimeout() {} },
+    document: { addEventListener: () => assert.fail('Visibility must not trigger mapping reloads'), removeEventListener() {} },
     changeModelMappings: () => assert.fail('Native events must never write mappings'),
   };
   vm.runInNewContext(ts.transpileModule(source.slice(effectStart, source.indexOf('  }, [!!mappings]);', effectStart) + '  }, [!!mappings]);'.length), {
@@ -1098,7 +1113,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     } } },
     nativeModelSelection: () => native, srmmChoice: () => env.extension_settings.memu.srmm || { source: 'config' },
     changeModelMappings: patch => { patches.push(copy(patch)); return Promise.resolve(); },
-    setNativeSelection: value => { env.nativeSelection = value; }, refreshProfiles: async () => {},
+    setNativeSelection: value => { env.nativeSelection = value; },
     setMappings: value => { env.mappings = value; }, getModelMappings: async () => copy(env.mappingState.current),
     useEffect: fn => { cleanup = fn(); },
     st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings', CONNECTION_PROFILE_LOADED: 'profile' },
@@ -1202,11 +1217,11 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   env.mappingState.current = env.mappings;
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
   Object.defineProperty(env, 'hasAdvancedMapping', { get: () => Object.values(env.activeSteps).some(Boolean) });
-  loadFunctions(source, ['changeModelMappings', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles', 'applyLoadedMappings'], env);
+  loadFunctions(source, ['changeModelMappings', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'loadModelMappings', 'applyLoadedMappings'], env);
   const choice = { source: 'configured', profile_id: 'new-profile' };
   const changing = env.renderModelPicker('memory_extract').props.onChange({ target: { value: JSON.stringify(choice) } });
   assert.deepEqual(JSON.parse(env.renderModelPicker('memory_extract').props.value), choice, 'Selection displays immediately');
-  await env.refreshProfiles();
+  await env.loadModelMappings();
   assert.equal(catalogReads, 0, 'Catalog refresh must not overwrite pending mapping work');
   const disabling = env.toggleAdvancedMapping(false);
   assert.deepEqual(copy(env.extension_settings.memu.advancedMapping.memory_extract), choice, 'Disable retains newest choice, not old file state');
@@ -1221,7 +1236,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   await env.mappingSave.current;
   assert.equal(requests[2].step_models.memory_extract.profile_id, 'new-profile', 'Re-enable restores the newest retained profile');
   const active = copy(env.mappings.step_models.memory_extract);
-  await env.refreshProfiles();
+  await env.loadModelMappings();
   assert.equal(catalogReads, 1);
   assert.equal(env.mappings.step_models.memory_extract.chat_model, active.chat_model);
   assert.equal(env.mappings.step_models.memory_extract.profile_ids, undefined, 'Changed config must not keep a stale profile marker');
@@ -1243,7 +1258,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.equal(env.hasAdvancedMapping, true, 'Failed disable must keep active overrides visible');
   assert.equal(env.mappings.step_models.memory_extract.chat_model, 'new-model', 'Earlier acknowledged save must not be lost on later failure');
   assert.deepEqual(Object.keys(env.pendingMappings.current), []);
-  await env.refreshProfiles();
+  await env.loadModelMappings();
   assert.equal(catalogReads, 2, 'Failed work must not block later reads');
   await env.toggleAdvancedMapping(false);
   assert.equal(failures, 2, 'The user can retry a failed disable');
@@ -1301,7 +1316,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
       srmmChoice: () => settings.memu.srmm, srmmRequest: () => ({ ...settings.memu.srmm, native }),
       saveSettings: async () => { saved++; }, changeModelMappings: async patch => { requests.push(copy(patch)); await env.saveSettings(); },
       setMappings: value => { env.mappings = value; }, setSrmm: value => { env.srmm = value; }, setNativeSelection() {}, setSwitchError: assert.fail, setConfigStatus() {},
-      refreshProfiles: async () => {}, loadModelMappings: async () => {}, useEffect: fn => { cleanup = fn(); },
+      loadModelMappings: async () => {}, useEffect: fn => { cleanup = fn(); },
       st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings', CONNECTION_PROFILE_UPDATED: 'updated', CONNECTION_PROFILE_DELETED: 'deleted',
         SECRET_WRITTEN: 'key-write', SECRET_EDITED: 'key-edit', SECRET_ROTATED: 'key-rotate', SECRET_DELETED: 'key-delete' },
         eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
