@@ -1,5 +1,5 @@
 import { ConversationData } from 'utils/types';
-import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings, ModelMappingPatch, ModelSelection, SrmmRequest } from 'utils/types';
+import { ConnectionProfileSummary, MemuPluginConfigV1, ModelMappings, ModelMappingPatch, ModelSelection, SrmmChoice, SrmmRequest } from 'utils/types';
 import { getCsrfTokenCached } from 'utils/csrf';
 
 const ROUTER_BASE_URL = '/api/plugins/memu';
@@ -148,12 +148,13 @@ export async function getPluginConfig(): Promise<MemuPluginConfigV1> {
   return request<MemuPluginConfigV1>('/config', undefined, 'GET');
 }
 
-export async function getModelMappings(native?: ModelSelection | null): Promise<ModelMappings> {
-  return request(`/modelMappings${native ? `?native=${encodeURIComponent(JSON.stringify(native))}` : ''}`, undefined, 'GET');
+export async function getModelMappings(native?: ModelSelection | null, srmm?: SrmmChoice): Promise<ModelMappings> {
+  const query = [native && `native=${encodeURIComponent(JSON.stringify(native))}`, srmm && `srmm=${encodeURIComponent(JSON.stringify(srmm))}`].filter(Boolean).join('&');
+  return request(`/modelMappings${query ? `?${query}` : ''}`, undefined, 'GET');
 }
 
-export async function setModelMappings(patch: ModelMappingPatch, native?: ModelSelection | null): Promise<ModelMappings> {
-  return request('/modelMappings', { ...patch, ...(native ? { native } : {}) });
+export async function setModelMappings(patch: ModelMappingPatch, native?: ModelSelection | null, srmm?: SrmmChoice): Promise<ModelMappings> {
+  return request('/modelMappings', { ...patch, ...(native ? { native } : {}), ...(srmm ? { srmm } : {}) });
 }
 
 export async function serverStatus(): Promise<any> {

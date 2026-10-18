@@ -128,36 +128,66 @@ const configuredChoices = nodes(picker).filter(node => node.type === 'option')
   .map(node => JSON.parse(node.props.value)).filter(choice => choice.source === 'configured');
 assert.deepEqual(configuredChoices.map(choice => choice.profile_id), ['test-api', 'unsupported']);
 assert(!nodes(picker).some(node => node.type === 'option' && /native-selection-only/.test(node.props.children)));
-assert.equal(find(tree, 'memu-iris-model-info').props.title, 'Except the Iris voice model');
+assert.equal(find(tree, 'memu-iris-model-info'), undefined);
+assert.equal(find(tree, 'memu-srmm-config-info').props.title, 'No effect on config.json');
 assert.deepEqual(JSON.parse(find(tree, 'memu-model-other_apps').props.value), { source: 'config' });
 assert.equal(find(tree, 'memu-other-apps-config-info').props.title, 'Hand configured config.json');
 assert(!nodes(find(tree, 'memu-model-other_apps')).some(node => node.type === 'option' && /hand.configured/i.test(node.props.children)));
-const otherAppsHeading = nodes(tree).find(node => node.type === 'label' && node.props.children?.includes?.('Other OpenAlma App Replies '));
+const otherAppsHeading = nodes(tree).find(node => node.type === 'label' && node.props.children?.includes?.('Other OpenAlma App Replies'));
 const infoIcons = nodes(otherAppsHeading).filter(node => node.type === 'i');
-assert.equal(infoIcons[0].props.id, 'memu-iris-model-info');
-assert.equal(infoIcons[1].props.id, 'memu-other-apps-config-info');
-assert.equal(infoIcons[1].props.style.color, '#ef4444');
-states[2].base_model.profile_id = 'test-api';
+assert.equal(infoIcons.length, 1);
+assert.equal(infoIcons[0].props.id, 'memu-other-apps-config-info');
+assert.equal(infoIcons[0].props.style.color, '#ef4444');
+states[2].base_model.profile_ids = ['test-api'];
+assert(find(render(), 'memu-other-apps-config-info'), 'A matching profile without its marker is still config-owned');
+extensionSettingsForUi.memu = { ...extensionSettingsForUi.memu, base_model: { source: 'configured', profile_id: 'test-api' } };
 assert.equal(find(render(), 'memu-other-apps-config-info'), undefined);
 assert.equal(JSON.parse(find(render(), 'memu-model-other_apps').props.value).profile_id, 'test-api');
-delete states[2].base_model.profile_id;
+extensionSettingsForUi.memu.base_model = { source: 'config' };
+extensionSettingsForUi.memu.advancedMapping = { memory_extract: { source: 'config' } };
+assert.equal(find(render(), 'memu-other-apps-config-info'), undefined, 'Explicit config source is silent');
+assert.equal(find(render(), 'memu-memory_extract-config-info'), undefined);
+states[2].base_model.chat_model = 'hand-changed-config-source';
+assert.equal(find(render(), 'memu-other-apps-config-info'), undefined, 'Config followers accept hand edits silently');
+extensionSettingsForUi.memu.base_model.hand_edited = true;
+assert(find(render(), 'memu-other-apps-config-info'), 'Detected edits to ST-owned values retain the red icon');
+extensionSettingsForUi.memu.advancedMapping.memory_extract.hand_edited = true;
+assert(find(render(), 'memu-memory_extract-config-info'));
+delete extensionSettingsForUi.memu.advancedMapping;
+delete states[2].base_model.profile_ids;
+delete extensionSettingsForUi.memu.base_model;
 assert(nodes(tree).some(node => node.type === 'option' && /custom-outside-catalog/.test(node.props.children)));
 assert(nodes(tree).some(node => node.type === 'option' && /Native Claude/.test(node.props.children) && node.props.disabled));
-assert.equal(find(tree, 'memu-agentic-settings-info').props.title, "The Soul's scheduled agentic turns use mcp-memu-server/config.json.");
+assert.equal(find(tree, 'memu-agentic-settings-info').props.title, 'Agentic turns more limited without Claude Code');
 assert(!source.includes('memu-runtime-info'));
 assert(!nodes(tree).some(node => node.props?.role === 'tooltip'));
 const originalInfo = nodes(tree).find(node => node.type === 'i' && node.props.title?.startsWith('Per character. If checked:'));
-for (const id of ['memu-iris-model-info', 'memu-other-apps-config-info', 'memu-agentic-settings-info', 'memu_character_enabled-info', 'memu-persona-info']) {
+for (const id of ['memu-srmm-config-info', 'memu-other-apps-config-info', 'memu-agentic-settings-info', 'memu_character_enabled-info', 'memu-persona-info']) {
   const icon = find(tree, id);
   assert.equal(icon.type, originalInfo.type);
   assert.equal(icon.props.className, originalInfo.props.className);
   assert.equal(icon.props.style.opacity, originalInfo.props.style.opacity);
 }
 const beforeRows = JSON.stringify(states[2].step_models);
+const advancedRow = nodes(tree).find(node => node.type === 'div' && node.props.className === 'checkbox_label expander' && find(node, 'advanced_mapping'));
+assert.equal(advancedRow.type, 'div', 'Clicking the row or text must not toggle AMM');
+assert.equal(advancedRow.props.onClick, undefined);
+assert.equal(find(tree, 'advanced_mapping').props['aria-label'], 'Advanced Mapping');
+for (const checkbox of nodes(tree).filter(node => node.type === 'input' && node.props.type === 'checkbox')) {
+  const target = nodes(tree).find(node => node.props?.children === checkbox);
+  assert.equal(target.type, 'label');
+  assert.equal(target.props.className, 'memu-checkbox-target');
+  const row = nodes(tree).find(node => node.props?.children?.includes?.(target));
+  assert(row && row.type !== 'label', `${checkbox.props.id}: the padded box, not the row, toggles the setting`);
+  assert.equal(row.props.onClick, undefined);
+  assert(checkbox.props['aria-label'], `${checkbox.props.id}: retain an accessible name`);
+}
 find(tree, 'advanced_mapping').props.onChange({ target: { checked: true } });
 tree = render(); assert(find(tree, 'memu-model-memory_extract')); assert.equal(JSON.stringify(states[2].step_models), beforeRows);
 assert.equal(find(tree, 'memu-advanced-mapping').props.style.gap, 8);
-assert(nodes(tree).some(node => node.type === 'span' && node.props.children?.includes?.('Raw multimodal → concise text')));
+for (const label of ['multimodal memory', 'memory atom', 'category dossiers', 'memory retrieval', 'weekly reflection']) {
+  assert(nodes(tree).some(node => node.type === 'label' && node.props.children?.includes?.(label)));
+}
 assert(!source.includes('Steps may follow '));
 find(tree, 'use_claude_code').props.onChange({ target: { checked: true } });
 tree = render(); assert(find(tree, 'memu-model-srmm')); assert.equal(find(tree, 'memu-model-other_apps'), undefined); assert.equal(find(tree, 'advanced_mapping'), undefined);
@@ -178,7 +208,9 @@ assert.equal(JSON.parse(find(render(), 'memu-model-srmm').props.value).profile_i
 states[srmmIndex] = { source: 'config' };
 const originalStep = states[2].step_models.memory_extract;
 states[2].step_models.memory_extract = { provider: 'openai', base_url: 'https://hand.invalid/v1', chat_model: 'hand-only' };
-assert(nodes(find(render(), 'memu-model-memory_extract')).some(node => node.type === 'option' && /^config.json: hand-only/.test(node.props.children)));
+assert.deepEqual(JSON.parse(find(render(), 'memu-model-memory_extract').props.value), { source: 'config' });
+assert(nodes(find(render(), 'memu-model-memory_extract')).some(node => node.type === 'option' && /default \(config.json: hand-only/.test(node.props.children)));
+assert.equal(find(render(), 'memu-memory_extract-config-info').props.title, 'Hand configured config.json');
 assert.equal(find(render(), 'advanced_mapping').props.checked, true);
 states[2].step_models.memory_extract = originalStep;
 console.log('Ordinary defaults, hand edits, configured catalog, unsupported transport and CLI collapse pass.');
@@ -200,11 +232,11 @@ assert(source.includes('st.event_types.SETTINGS_UPDATED'));
 
 (async () => {
   let starts = 0, reads = 0, loaded, busy;
-  const ready = { mappingState: { current: null }, nativeModelSelection: () => null, serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
+  const ready = { mappingState: { current: null }, extension_settings: {}, nativeModelSelection: () => null, srmmChoice: () => ({ source: 'config' }), serverStart: async () => { starts++; return { ok: true, status: { healthy: true } }; },
     nativeTransition: { current: false }, pendingMappings: { current: {} }, setAdvancedOpen() {}, setConfigStatus() {},
     getModelMappings: async () => { reads++; return { claude_code: false, step_models: {}, providers: [] }; },
     setServerCtl() {}, setServerCtlBusy: value => { busy = value; }, setMappings: value => { loaded = value; }, setSwitchError: value => { if (value) assert.fail(value); } };
-  loadFunctions(source, ['loadModelMappings'], ready);
+  loadFunctions(source, ['loadModelMappings', 'applyLoadedMappings'], ready);
   vm.runInNewContext(ts.transpileModule(source.slice(source.indexOf('  async function doServerStart('), source.indexOf('  async function doServerStop(')), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, ready);
@@ -987,9 +1019,9 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   const calls = [], order = [];
   const env = {
     exports: {}, mappings: { step_models: { reflection: 'hand-model', memory_extract: {
-      provider: 'openai', base_url: 'https://fake.invalid/v1', chat_model: 'same-name', profile_id: 'chosen' } },
+      provider: 'openai', base_url: 'https://fake.invalid/v1', chat_model: 'same-name', profile_ids: ['chosen'] } },
       providers: [{ profile_id: 'chosen', base_url: 'https://fake.invalid/v1', models: [{ model: 'same-name' }] }] },
-    hasAdvancedMapping: true, extension_settings: { memu: { advancedMapping: {} } },
+    hasAdvancedMapping: true, extension_settings: { memu: { advancedMapping: { memory_extract: { source: 'configured', profile_id: 'chosen' } } } },
     pendingMappings: { current: {} },
     window: { confirm: text => { assert.equal(text, 'Remove Advanced Mapping settings from config.json, including any hand edits?'); return false; } },
     saveSettings: async () => order.push('retain'),
@@ -1000,7 +1032,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     setConfigStatus: () => {}, setSwitchError: error => assert.fail(error),
   };
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
-  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
+  loadFunctions(source, ['mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
   const before = JSON.stringify(env.extension_settings);
   await env.toggleAdvancedMapping(false);
   assert.equal(calls.length, 0); assert.equal(order.length, 0);
@@ -1010,18 +1042,18 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.deepEqual(order, ['retain', 'patch']);
   assert.deepEqual(calls.pop(), { step_models: { reflection: null, memory_extract: null } });
   assert.deepEqual(clone(env.extension_settings.memu.advancedMapping), {
-    reflection: { model: 'hand-model' }, memory_extract: { source: 'configured', profile_id: 'chosen' } });
+    reflection: { source: 'config' }, memory_extract: { source: 'configured', profile_id: 'chosen' } });
   assert(!JSON.stringify(env.extension_settings).includes('api_key'));
   env.mappings.step_models = {}; env.hasAdvancedMapping = false;
   await env.toggleAdvancedMapping(true);
-  assert.deepEqual(calls.pop(), { step_models: { reflection: { model: 'hand-model' },
+  assert.deepEqual(calls.pop(), { step_models: {
     memory_extract: { source: 'configured', profile_id: 'chosen', native: env.nativeModelSelection() } } });
   const copy = clone(env.stepRequest({ source: 'srmm' }));
   env.srmmRequest = () => ({ source: 'config', native: null });
   assert.equal(copy.srmm.profile_id, 'chosen');
   assert.deepEqual(clone(env.stepRequest({ source: 'srmm' })), { source: 'srmm', srmm: { source: 'config', native: null } });
-  assert.equal(env.stepRequest({ source: 'config' }), null);
-  assert.equal(calls.length, 0, 'Changing SRMM cannot update a copied step');
+  assert.equal(env.stepRequest({ source: 'config' }), undefined);
+  assert.equal(calls.length, 0, 'Building a request does not itself write settings');
 
   const effectStart = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
   const events = new Map(); let modelReads = 0, onNativeChange;
@@ -1037,7 +1069,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   vm.runInNewContext(ts.transpileModule(source.slice(effectStart, source.indexOf('  }, [!!mappings]);', effectStart) + '  }, [!!mappings]);'.length), {
     compilerOptions: { module: ts.ModuleKind.CommonJS },
   }).outputText, eventEnv);
-  for (const fn of events.values()) fn();
+  events.get('settings')();
   onNativeChange();
   assert(modelReads > 1);
   const utilsEnv = { exports: {}, extension_settings: { memu: { srmm: { source: 'configured', profile_id: 'chosen' } } },
@@ -1046,7 +1078,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.equal(utilsEnv.exports.srmmRequest().native.model, 'live-native');
   assert(!JSON.stringify(utilsEnv.exports.srmmRequest()).includes('api_key'));
   assert(/srmm: srmmRequest\(\)/.test(fs.readFileSync(`${__dirname}/../src/memory/memorize.ts`, 'utf8')));
-  console.log('Advanced confirmation cancel/accept, retain-before-delete, re-enable transfer and copy-once SRMM pass.');
+  console.log('Advanced confirmation cancel/accept, retain-before-delete, marker-only config and re-enable transfer pass.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 (async () => {
@@ -1064,7 +1096,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
       reflection: { source: 'st_native' }, memory_extract: { source: 'configured', profile_id: 'fixed' },
       category_update: { source: 'st_native' }, preprocess: { source: 'st_native' },
     } } },
-    nativeModelSelection: () => native,
+    nativeModelSelection: () => native, srmmChoice: () => env.extension_settings.memu.srmm || { source: 'config' },
     changeModelMappings: patch => { patches.push(copy(patch)); return Promise.resolve(); },
     setNativeSelection: value => { env.nativeSelection = value; }, refreshProfiles: async () => {},
     setMappings: value => { env.mappings = value; }, getModelMappings: async () => copy(env.mappingState.current),
@@ -1074,7 +1106,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     window: { addEventListener() {}, removeEventListener() {}, setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id), confirm: () => true },
     document: { addEventListener() {}, removeEventListener() {} }, setAdvancedOpen() {}, setConfigStatus() {}, setSwitchError: assert.fail,
   };
-  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'syncNativeMappings', 'stepRequest', 'toggleAdvancedMapping', 'loadModelMappings'], env);
+  loadFunctions(source, ['mappingChoice', 'syncModelMappings', 'stepRequest', 'toggleAdvancedMapping', 'loadModelMappings', 'applyLoadedMappings'], env);
   const start = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
   const end = source.indexOf('  }, [!!mappings]);', start) + '  }, [!!mappings]);'.length;
   vm.runInNewContext(ts.transpileModule(source.slice(start, end), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, env);
@@ -1100,7 +1132,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   assert.equal(patches.length, 1, 'A pending disable must not be overwritten by a native change');
   env.pendingMappings.current = {};
   assert.deepEqual(copy(env.mappingChoice('reflection', { ...connection })), { source: 'st_native' });
-  assert.equal(env.mappingChoice('reflection', { ...connection, native_match: false }), undefined);
+  assert.equal(env.mappingChoice('reflection', { ...connection, native_match: false }).source, 'config');
   env.extension_settings.memu.advancedMapping.memory_extract.profile_id = 'second';
   assert.deepEqual(copy(env.mappingChoice('memory_extract', { ...connection, profile_id: 'first', profile_ids: ['first', 'second'] })),
     { source: 'configured', profile_id: 'second' }, 'Identical connections must preserve the explicitly chosen profile ID');
@@ -1145,7 +1177,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     }], base_model: { provider: 'openai', chat_model: 'base-model' } },
     pendingMappings: { current: {} }, mappingSave: { current: Promise.resolve() }, mappingState: { current: null }, nativeTransition: { current: false },
     extension_settings: { memu: { advancedMapping: {} } }, srmm: { source: 'config' }, nativeSelection: null,
-    nativeModelSelection: () => null,
+    nativeModelSelection: () => null, srmmChoice: () => ({ source: 'config' }),
     window: { confirm: () => true },
     setMappings: value => { env.mappings = value; }, setAdvancedOpen: value => { env.open = value; }, setConfigStatus() {}, setSwitchError: assert.fail,
     saveSettings: async () => { order.push('retain'); if (++retainCalls === 1) await retainGate; },
@@ -1154,14 +1186,14 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
       const steps = { ...env.mappings.step_models };
       for (const [step, value] of Object.entries(patch.step_models || {})) {
         if (value === null) delete steps[step];
-        else steps[step] = { provider: 'openai', base_url: 'https://new.invalid/v1', chat_model: 'new-model', profile_id: value.profile_id };
+        else steps[step] = { provider: 'openai', base_url: 'https://new.invalid/v1', chat_model: 'new-model', profile_ids: [value.profile_id] };
       }
       return { ...env.mappings, step_models: steps };
     },
     getModelMappings: async () => {
       catalogReads++;
       const fresh = copy(env.mappingState.current);
-      delete fresh.step_models.memory_extract.profile_id;
+      delete fresh.step_models.memory_extract.profile_ids;
       fresh.providers = [{ profile_id: 'new-profile', provider: 'openai', label: 'Edited profile', supported: true,
         models: [{ model: 'profile-edited-model' }] }];
       return fresh;
@@ -1170,7 +1202,7 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   env.mappingState.current = env.mappings;
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
   Object.defineProperty(env, 'hasAdvancedMapping', { get: () => Object.values(env.activeSteps).some(Boolean) });
-  loadFunctions(source, ['changeModelMappings', 'choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles'], env);
+  loadFunctions(source, ['changeModelMappings', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping', 'renderModelPicker', 'refreshProfiles', 'applyLoadedMappings'], env);
   const choice = { source: 'configured', profile_id: 'new-profile' };
   const changing = env.renderModelPicker('memory_extract').props.onChange({ target: { value: JSON.stringify(choice) } });
   assert.deepEqual(JSON.parse(env.renderModelPicker('memory_extract').props.value), choice, 'Selection displays immediately');
@@ -1192,8 +1224,8 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   await env.refreshProfiles();
   assert.equal(catalogReads, 1);
   assert.equal(env.mappings.step_models.memory_extract.chat_model, active.chat_model);
-  assert.equal(env.mappings.step_models.memory_extract.profile_id, undefined, 'Edited profile must not mislabel an older copied connection');
-  assert.equal(env.renderModelPicker('memory_extract').props.value, 'hand-configured');
+  assert.equal(env.mappings.step_models.memory_extract.profile_ids, undefined, 'Changed config must not keep a stale profile marker');
+  assert.deepEqual(JSON.parse(env.renderModelPicker('memory_extract').props.value), { source: 'config' });
   assert.equal(env.mappings.providers[0].models[0].model, 'profile-edited-model');
 
   const saving = env.setModelMappings;
@@ -1230,10 +1262,10 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
     setConfigStatus() {}, setSwitchError: assert.fail,
   };
   Object.defineProperty(env, 'activeSteps', { get: () => ({ ...env.mappings.step_models, ...env.pendingMappings.current.step_models }) });
-  loadFunctions(source, ['choiceForConnection', 'mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
-  assert.equal(env.choiceForConnection(hand), undefined, 'Browser must not guess a profile from URL/model');
+  loadFunctions(source, ['mappingChoice', 'stepRequest', 'toggleAdvancedMapping'], env);
+  assert.equal(env.mappingChoice('reflection', hand).source, 'config', 'Browser must not guess a profile from URL/model');
   await env.toggleAdvancedMapping(false);
-  assert.deepEqual(Object.keys(settings.memu.advancedMapping), []);
+  assert.equal(settings.memu.advancedMapping.reflection.source, 'config');
   assert.deepEqual(patches.pop(), { step_models: { reflection: null } });
   env.mappings.step_models = {}; env.hasAdvancedMapping = false;
   await env.toggleAdvancedMapping(true);
@@ -1241,11 +1273,120 @@ const panelCheckTimeout = setTimeout(() => { console.error('Panel checks did not
   env.configStatus = 'idle'; env.mappingState = { current: null };
   env.nativeTransition = { current: false };
   env.nativeModelSelection = () => null;
+  env.srmmChoice = () => ({ source: 'config' });
   env.getModelMappings = async () => ({ step_models: { reflection: hand } });
   env.setMappings = value => { env.loaded = value; };
-  loadFunctions(source, ['loadModelMappings'], env);
+  loadFunctions(source, ['loadModelMappings', 'applyLoadedMappings'], env);
   await env.loadModelMappings();
   assert.equal(env.loaded.step_models.reflection, hand);
   assert.equal(patches.length, 0, 'Loading hand edits must never echo a save');
-  console.log('Hand-configured objects load without echo and are dropped, never guessed or converted, on confirmed disable.');
+  console.log('Hand-configured objects keep their values and use config markers without guessed profiles.');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+
+(async () => {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  function fixture() {
+    const requests = [], events = new Map(); let saved = 0, cleanup;
+    const native = { profile_id: 'live', provider: 'custom', model: 'live-model', base_url: 'https://live.invalid/v1' };
+    const connection = () => ({ provider: 'openai', base_url: 'https://fixed.invalid/v1', chat_model: 'fixed-model', profile_ids: ['fixed'], native_match: true, srmm_match: true });
+    const settings = { memu: { srmm: { source: 'configured', profile_id: 'fixed' }, base_model: { source: 'configured', profile_id: 'fixed' }, advancedMapping: {
+      reflection: { source: 'st_native' }, memory_extract: { source: 'configured', profile_id: 'fixed' },
+      category_update: { source: 'srmm' }, consolidation: { source: 'config' },
+    } } };
+    const current = { base_model: connection(), step_models: Object.fromEntries(['reflection', 'memory_extract', 'category_update', 'consolidation'].map(step => [step, connection()])),
+      providers: ['fixed', 'other', 'live'].map(id => ({ profile_id: id, label: id, supported: true, models: [{ model: id + '-model' }] })) };
+    const env = {
+      exports: {}, require: () => jsx, extension_settings: settings, mappings: current, mappingState: { current }, pendingMappings: { current: {} }, nativeTransition: { current: false },
+      srmm: settings.memu.srmm, nativeSelection: native, nativeModelSelection: () => native,
+      srmmChoice: () => settings.memu.srmm, srmmRequest: () => ({ ...settings.memu.srmm, native }),
+      saveSettings: async () => { saved++; }, changeModelMappings: async patch => { requests.push(copy(patch)); await env.saveSettings(); },
+      setMappings: value => { env.mappings = value; }, setSrmm: value => { env.srmm = value; }, setNativeSelection() {}, setSwitchError: assert.fail, setConfigStatus() {},
+      refreshProfiles: async () => {}, loadModelMappings: async () => {}, useEffect: fn => { cleanup = fn(); },
+      st: { event_types: { MAIN_API_CHANGED: 'api', SETTINGS_UPDATED: 'settings', CONNECTION_PROFILE_UPDATED: 'updated', CONNECTION_PROFILE_DELETED: 'deleted',
+        SECRET_WRITTEN: 'key-write', SECRET_EDITED: 'key-edit', SECRET_ROTATED: 'key-rotate', SECRET_DELETED: 'key-delete' },
+        eventSource: { on: (event, fn) => events.set(event, fn), removeListener() {} } },
+      window: { setTimeout: () => 1, clearTimeout() {}, addEventListener() {}, removeEventListener() {} }, document: { addEventListener() {}, removeEventListener() {} },
+    };
+    loadFunctions(source, ['mappingChoice', 'syncModelMappings', 'stepRequest', 'renderModelPicker', 'applyLoadedMappings'], env);
+    const start = source.indexOf('  useEffect(() => {\n    const events = [st.event_types.MAIN_API_CHANGED');
+    const end = source.indexOf('  }, [!!mappings]);', start) + '  }, [!!mappings]);'.length;
+    vm.runInNewContext(ts.transpileModule(source.slice(start, end), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, env);
+    return { env, settings, current, requests, events, saved: () => saved, cleanup: () => cleanup() };
+  }
+  const select = (f, role, choice) => f.env.renderModelPicker(role).props.onChange({ target: { value: JSON.stringify(choice) } });
+  const manual = fixture(), unchanged = JSON.stringify(manual.current);
+  await select(manual, 'other_apps', { source: 'config' });
+  await select(manual, 'memory_extract', { source: 'config' });
+  assert.equal(manual.requests.length, 0, 'Config selection is marker-only in both OOAR and AMM');
+  assert.equal(JSON.stringify(manual.current), unchanged);
+  assert.equal(manual.settings.memu.base_model.source, 'config');
+  assert.equal(manual.settings.memu.advancedMapping.memory_extract.source, 'config');
+  assert(nodes(manual.env.renderModelPicker('other_apps')).some(node => node.type === 'option' && node.props.value === JSON.stringify({ source: 'srmm' })));
+  assert(!nodes(manual.env.renderModelPicker('srmm')).some(node => node.type === 'option' && node.props.value === JSON.stringify({ source: 'srmm' })));
+
+  const named = fixture();
+  named.events.get('updated')({}, { id: 'fixed' });
+  assert.equal(named.requests[0].base_model.profile_id, 'fixed');
+  assert.deepEqual(Object.keys(named.requests[0].step_models).sort(), ['category_update', 'memory_extract']);
+  assert.equal(named.requests[0].step_models.category_update.srmm.profile_id, 'fixed');
+  named.requests.length = 0; named.env.syncModelMappings('st_native');
+  assert.equal(named.requests[0].base_model, undefined, 'ST-selected changes do not switch a named OOAR profile');
+  assert.equal(named.requests[0].step_models.memory_extract, undefined, 'Named AMM profiles remain static relative to other sources');
+  named.requests.length = 0; named.events.get('key-rotate')();
+  assert(named.requests[0].base_model, 'Same-model credential changes use the shared explicit-event path');
+
+  const srmmOnly = fixture(); srmmOnly.settings.memu.base_model = { source: 'config' }; srmmOnly.settings.memu.advancedMapping = {};
+  await select(srmmOnly, 'srmm', { source: 'configured', profile_id: 'other' });
+  assert.equal(srmmOnly.requests.length, 0, 'SRMM itself is ST-only');
+  const followers = fixture(); followers.settings.memu.base_model = { source: 'srmm' };
+  await select(followers, 'srmm', { source: 'configured', profile_id: 'other' });
+  assert.equal(followers.requests[0].base_model.source, 'srmm');
+  assert.equal(followers.requests[0].base_model.srmm.profile_id, 'other');
+  assert.deepEqual(Object.keys(followers.requests[0].step_models), ['category_update']);
+
+  const base = fixture(); base.settings.memu.srmm = { source: 'config' };
+  await select(base, 'other_apps', { source: 'configured', profile_id: 'other' });
+  assert.equal(base.requests.length, 1);
+  assert.equal(base.requests[0].base_model.profile_id, 'other');
+  assert.equal(base.requests[0].step_models.category_update.srmm.source, 'config', 'Config-backed SRMM dependents share the same base-change request');
+  const follow = fixture(); await select(follow, 'other_apps', { source: 'srmm' });
+  assert.equal(follow.requests[0].base_model.srmm.profile_id, 'fixed');
+  for (const source of ['config', 'st_native', 'configured']) {
+    follow.settings.memu.srmm = { source, ...(source === 'configured' ? { profile_id: 'fixed' } : {}) };
+    await select(follow, 'preprocess', { source: 'srmm' });
+    const loaded = copy(follow.current);
+    loaded.step_models.preprocess = { ...loaded.base_model, srmm_match: true };
+    follow.env.applyLoadedMappings(loaded);
+    const picker = follow.env.renderModelPicker('preprocess');
+    assert.equal(picker.props.value, JSON.stringify({ source: 'srmm' }), 'The selector keeps SRMM, not SRMM\'s resolved source');
+    assert.equal(nodes(picker).find(node => node.type === 'option' && node.props.value === picker.props.value).props.children, 'default (SRMM)');
+    assert.equal(follow.settings.memu.advancedMapping.preprocess.source, 'srmm');
+  }
+
+  const hand = fixture(), loaded = copy(hand.current);
+  for (const value of [loaded.base_model, loaded.step_models.memory_extract]) Object.assign(value, { chat_model: 'hand-model', profile_ids: [], native_match: false, srmm_match: false });
+  hand.env.applyLoadedMappings(loaded);
+  assert.equal(hand.requests.length, 0, 'Loading hand changes never writes config');
+  assert.equal(hand.settings.memu.base_model.source, 'config');
+  assert.equal(hand.settings.memu.advancedMapping.memory_extract.source, 'config');
+  assert.equal(hand.settings.memu.base_model.hand_edited, true);
+  assert.equal(hand.settings.memu.advancedMapping.memory_extract.hand_edited, true);
+  assert.equal(JSON.parse(hand.env.renderModelPicker('other_apps').props.value).source, 'config');
+  await select(hand, 'other_apps', { source: 'config' });
+  await select(hand, 'memory_extract', { source: 'config' });
+  assert.equal(hand.settings.memu.base_model.hand_edited, undefined);
+  assert.equal(hand.settings.memu.advancedMapping.memory_extract.hand_edited, undefined);
+  assert.equal(hand.requests.length, 0, 'Accepting config ownership only changes the marker');
+
+  const deleted = fixture(), beforeDelete = JSON.stringify(deleted.current);
+  await deleted.events.get('deleted')({ id: 'fixed' });
+  assert.equal(deleted.settings.memu.srmm.source, 'st_native');
+  assert.equal(deleted.settings.memu.base_model.source, 'config');
+  assert.equal(JSON.stringify(deleted.current), beforeDelete, 'Deleting profiles keeps existing direct config values');
+  assert.equal(deleted.requests[0].base_model, undefined);
+  assert.equal(deleted.requests[0].step_models.category_update.srmm.source, 'st_native');
+  for (const f of [manual, named, srmmOnly, followers, base, follow, hand, deleted]) {
+    assert(!JSON.stringify(f.settings).includes('api_key')); f.cleanup();
+  }
+  console.log('Complete selector matrix passes: OOAR/SRMM/AMM, static named profiles, source followers, config-only markers, hand edits, credentials and deletion.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -64,17 +64,19 @@ Requires a server plugin to function: [MemU-Plugin](https://github.com/mekineer-
 ### Model Mapping
 
 Opening the panel reads the actual server config, including hand edits.
-SRMM stays in ST settings and applies only to ST replies, Narrative Suggestions
-and ST APImw synthesis. "ST selected" keeps Other App Replies and active memory
-steps synchronized with explicit ST model/profile changes. Its source choice
-stays in ST settings, not config.json. Opening the panel never overwrites hand
-edits; disabled steps do not follow. Selecting SRMM for a memory step retains
-its independent copied connection.
+SRMM stays in ST settings and supplies ST replies, Narrative Suggestions and
+ST APImw synthesis. Other App Replies and active memory steps can follow SRMM,
+ST selected, or a named profile. Named profiles stay independent of other
+selections; their own saved updates apply. Source markers stay in ST, not config.
+Choosing config.json keeps its existing values and changes only the marker.
+Config-backed fields follow hand edits silently. Hand changes to ST-owned values
+switch the field to config.json with a red info icon; explicitly choosing
+config.json clears that icon. Loading never writes values back. Disabled steps
+do not follow source changes.
 
 Advanced Mapping is checked when server step overrides exist. Disabling asks
 before removing them and their matching capacities from config.json. ST retains
-profile/model choices for re-enabling. Hand-configured independent connections
-without an exact saved-profile match are removed, not retained as model-only choices.
+source choices for re-enabling; config-owned values are not duplicated in ST.
 Hiding the controls with Use Claude Code
 does not disable or delete mappings. Other OpenAlma App Replies edits the ordinary
 shared base connection. Keys are resolved by the plugin, never sent to the page.

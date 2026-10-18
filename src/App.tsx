@@ -280,10 +280,9 @@ export default function App() {
     if (nativeTransition.current || Object.keys(pendingMappings.current).length) return;
     const current = mappingState.current;
     try {
-      const result = await getModelMappings(nativeModelSelection());
+      const result = await getModelMappings(nativeModelSelection(), srmmChoice());
       if (nativeTransition.current || mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
-      mappingState.current = result;
-      setMappings(result);
+      applyLoadedMappings(result);
       setAdvancedOpen(false);
     } catch (error) { setConfigStatus('error'); setSwitchError(String(error)); }
   }
@@ -292,9 +291,9 @@ export default function App() {
     const current = mappingState.current;
     if (!current || nativeTransition.current || Object.keys(pendingMappings.current).length) return;
     try {
-      const result = await getModelMappings(nativeModelSelection());
+      const result = await getModelMappings(nativeModelSelection(), srmmChoice());
       if (nativeTransition.current || mappingState.current !== current || Object.keys(pendingMappings.current).length) return;
-      mappingState.current = result; setMappings(result);
+      applyLoadedMappings(result);
     } catch {
       // A background catalog refresh must not clear usable choices while offline.
     }
@@ -306,6 +305,7 @@ export default function App() {
       ...(base.step_models || update.step_models ? { step_models: { ...base.step_models, ...update.step_models } } : {}) });
     const pending = pendingMappings.current = merge(pendingMappings.current, patch);
     const native = nativeModelSelection();
+    const replySource = srmmChoice();
     const display = () => setMappings({ ...mappingState.current!,
       ...(pendingMappings.current.claude_code !== undefined ? { claude_code: pendingMappings.current.claude_code } : {}) });
     display();
@@ -313,7 +313,7 @@ export default function App() {
     mappingSave.current = mappingSave.current.catch(() => {}).then(async () => {
       try {
         if (patch.step_models || patch.base_model) await saveSettings();
-        const result = await setModelMappings(patch, native);
+        const result = await setModelMappings(patch, native, replySource);
         mappingState.current = result;
         if (pendingMappings.current === pending) pendingMappings.current = {};
         display();
@@ -324,6 +324,25 @@ export default function App() {
       }
     });
     return mappingSave.current;
+  }
+
+  function applyLoadedMappings(result: ModelMappings) {
+    let changed = false;
+    const settings = extension_settings.memu;
+    if (settings) {
+      for (const [role, value] of Object.entries({ other_apps: result.base_model, ...result.step_models })) {
+        const choices = role === 'other_apps' ? settings : settings.advancedMapping;
+        const key = role === 'other_apps' ? 'base_model' : role;
+        const remembered = choices?.[key];
+        if (value && remembered && remembered.source !== 'config' && mappingChoice(role, value)?.source === 'config') {
+          choices[key] = { source: 'config', hand_edited: true };
+          changed = true;
+        }
+      }
+    }
+    mappingState.current = result;
+    setMappings(result);
+    if (changed) void saveSettings();
   }
 
   function relationshipIdentityCurrent(): boolean {
@@ -412,20 +431,47 @@ export default function App() {
         let saving;
         if (selection && identity(selection) !== identity(previous)) {
           previous = selection;
-          saving = syncNativeMappings(selection);
+          saving = syncModelMappings('st_native');
         }
         nativeTransition.current = false;
         if (!saving) void (mappingState.current ? refreshProfiles() : loadModelMappings());
       }, 200);
     };
+    const profileUpdated = (_old: unknown, profile: { id: string }) => {
+      void syncModelMappings('configured', profile.id);
+      previous = nativeModelSelection();
+    };
+    const credentialsChanged = () => { void syncModelMappings('credentials'); };
+    const profileDeleted = async (profile: { id: string }) => {
+      const settings = extension_settings.memu;
+      if (!settings) { changed(); return; }
+      if (settings.base_model?.source === 'configured' && settings.base_model.profile_id === profile.id) settings.base_model = { source: 'config' };
+      for (const [step, choice] of Object.entries(settings.advancedMapping || {}) as [string, StepChoice][]) {
+        if ('source' in choice && choice.source === 'configured' && choice.profile_id === profile.id) delete settings.advancedMapping[step];
+      }
+      if (settings.srmm?.source === 'configured' && settings.srmm.profile_id === profile.id) {
+        settings.srmm = { source: 'st_native' };
+        setSrmm(settings.srmm);
+        const saving = syncModelMappings('srmm');
+        if (saving) await saving; else await saveSettings();
+      } else await saveSettings();
+      changed();
+    };
     const visible = () => { if (document.visibilityState === 'visible') changed(); };
     for (const event of events) st.eventSource.on(event, changed);
+    st.eventSource.on(st.event_types.CONNECTION_PROFILE_UPDATED, profileUpdated);
+    st.eventSource.on(st.event_types.CONNECTION_PROFILE_DELETED, profileDeleted);
+    const credentialEvents = [st.event_types.SECRET_WRITTEN, st.event_types.SECRET_EDITED, st.event_types.SECRET_ROTATED, st.event_types.SECRET_DELETED];
+    for (const event of credentialEvents) st.eventSource.on(event, credentialsChanged);
     window.addEventListener('focus', changed);
     document.addEventListener('visibilitychange', visible);
     return () => {
       window.clearTimeout(timer);
       nativeTransition.current = false;
       for (const event of events) st.eventSource.removeListener(event, changed);
+      st.eventSource.removeListener(st.event_types.CONNECTION_PROFILE_UPDATED, profileUpdated);
+      st.eventSource.removeListener(st.event_types.CONNECTION_PROFILE_DELETED, profileDeleted);
+      for (const event of credentialEvents) st.eventSource.removeListener(event, credentialsChanged);
       window.removeEventListener('focus', changed);
       document.removeEventListener('visibilitychange', visible);
     };
@@ -509,46 +555,54 @@ export default function App() {
   const activeSteps = { ...mappings?.step_models, ...pendingMappings.current.step_models };
   const hasAdvancedMapping = Object.values(activeSteps).some(value => !!value);
 
-  function choiceForConnection(value: string | ModelMappings['base_model'] | undefined): StepChoice | undefined {
-    if (!value) return { source: 'config' };
-    if (typeof value === 'string') return { model: value };
-    return value.profile_id ? { source: 'configured', profile_id: value.profile_id } : undefined;
-  }
-
-  function mappingChoice(role: string, value: string | ModelMappings['base_model'] | undefined): StepChoice | undefined {
+  function mappingChoice(role: string, value: string | ModelMappings['base_model'] | undefined): SrmmChoice | { source: 'srmm' } {
     const remembered = role === 'other_apps' ? extension_settings.memu?.base_model : extension_settings.memu?.advancedMapping?.[role];
-    if (role === 'other_apps' && remembered?.source === 'config') return remembered;
     if (value && typeof value === 'object' && remembered) {
       if (remembered.source === 'st_native' && value.native_match) return remembered;
+      if (remembered.source === 'srmm' && value.srmm_match) return remembered;
       if (remembered.source === 'configured' && value.profile_ids?.includes(remembered.profile_id)) return remembered;
     }
-    return choiceForConnection(value);
+    return { source: 'config' };
   }
 
-  function syncNativeMappings(selection: ModelSelection) {
+  function syncModelMappings(source: 'st_native' | 'configured' | 'srmm' | 'config' | 'credentials', profileId?: string, patch: ModelMappingPatch = {}) {
     const current = mappingState.current;
     if (!current) return;
-    const patch: ModelMappingPatch = {};
+    const selection = nativeModelSelection();
     const pending = pendingMappings.current;
-    if (extension_settings.memu?.base_model?.source === 'st_native'
-      && (pending.base_model?.source === 'st_native' || current.base_model.native_match)) {
-      patch.base_model = { source: 'st_native', native: selection };
-    }
+    const eligible = (choice: StepChoice | undefined, value: unknown, queued?: StepChoice | null) => {
+      if (!choice || !('source' in choice) || !value || typeof value !== 'object') return false;
+      const connection = value as ModelMappings['base_model'];
+      const matches = choice.source === 'st_native' ? connection.native_match
+        : choice.source === 'srmm' ? connection.srmm_match
+        : choice.source === 'configured' && connection.profile_ids?.includes(choice.profile_id!);
+      const explicit = queued && 'source' in queued && queued.source === choice.source
+        && (choice.source !== 'configured' || (queued.source === 'configured' && queued.profile_id === choice.profile_id));
+      const ref = choice.source === 'srmm' ? srmmChoice() : choice;
+      const affected = (source === 'srmm' && choice.source === 'srmm')
+        || (choice.source === 'srmm' && ref.source === 'config' && !!patch.base_model)
+        || (source === 'credentials' && (ref.source === 'st_native' || ref.source === 'configured'))
+        || (ref.source === 'st_native' && (source === 'st_native' || (source === 'configured' && selection?.profile_id === profileId)))
+        || (ref.source === 'configured' && source === 'configured' && ref.profile_id === profileId);
+      return !!(affected && (matches || explicit));
+    };
+    const base = extension_settings.memu?.base_model as StepChoice | undefined;
+    if (eligible(base, current.base_model, pending.base_model)) patch.base_model = stepRequest(base!) as NonNullable<ModelMappingPatch['base_model']>;
     for (const [step, value] of Object.entries({ ...current.step_models, ...pending.step_models })) {
-      if (!value || typeof value !== 'object' || extension_settings.memu?.advancedMapping?.[step]?.source !== 'st_native') continue;
-      const choice = pending.step_models?.[step];
-      if ((choice && 'source' in choice && choice.source === 'st_native') || ('native_match' in value && value.native_match)) {
-        (patch.step_models ??= {})[step] = { source: 'st_native', native: selection };
+      const choice = extension_settings.memu?.advancedMapping?.[step];
+      if (eligible(choice, value, pending.step_models?.[step])) {
+        const request = stepRequest(choice);
+        if (request !== undefined) (patch.step_models ??= {})[step] = request;
       }
     }
     if (patch.base_model || patch.step_models) return changeModelMappings(patch);
   }
 
-  function stepRequest(choice: StepChoice): NonNullable<ModelMappingPatch['step_models']>[string] {
+  function stepRequest(choice: StepChoice): NonNullable<ModelMappingPatch['step_models']>[string] | undefined {
     if (!('source' in choice)) return choice;
+    if (choice.source === 'config') return;
     if (choice.source === 'srmm') return { source: 'srmm', srmm: srmmRequest() };
-    const resolved = { ...choice, native: nativeModelSelection() };
-    return resolved.source === 'config' ? null : resolved;
+    return { ...choice, native: nativeModelSelection() };
   }
 
   async function toggleAdvancedMapping(enabled: boolean) {
@@ -559,7 +613,11 @@ export default function App() {
       extension_settings.memu ??= {};
       if (enabled) {
         const retained: Record<string, StepChoice> = extension_settings.memu.advancedMapping || {};
-        const rows = Object.fromEntries(Object.entries(retained).map(([step, choice]) => [step, stepRequest(choice)]));
+        const rows: NonNullable<ModelMappingPatch['step_models']> = {};
+        for (const [step, choice] of Object.entries(retained)) {
+          const request = stepRequest(choice);
+          if (request !== undefined) rows[step] = request;
+        }
         setAdvancedOpen(true);
         if (Object.keys(rows).length) changeModelMappings({ step_models: rows });
       } else {
@@ -568,7 +626,7 @@ export default function App() {
           for (const [step, value] of Object.entries(mappings.step_models)) {
             if (step in (pendingMappings.current.step_models || {})) continue;
             const choice = mappingChoice(step, value);
-            if (choice) retained[step] = choice; else delete retained[step];
+            if (choice.source !== 'config' || retained[step]?.source !== 'config') retained[step] = choice;
           }
           extension_settings.memu.advancedMapping = retained;
           await changeModelMappings({ step_models: Object.fromEntries(Object.keys(activeSteps).map(step => [step, null])) });
@@ -588,8 +646,9 @@ export default function App() {
       : pending ? 'source' in pending ? { source: pending.source, ...('profile_id' in pending ? { profile_id: pending.profile_id } : {}) } : pending
       : mappingChoice(role, active) ?? (role === 'other_apps' ? { source: 'config' } : undefined);
     const value = current ? JSON.stringify(current) : 'hand-configured';
-    const choices = [{ value: JSON.stringify({ source: 'config' }), label: `default (config.json: ${mappings?.base_model?.chat_model || 'unconfigured'})`, disabled: false }];
-    if (!['srmm', 'other_apps'].includes(role)) choices.push({ value: JSON.stringify({ source: 'srmm' }), label: 'default (SRMM)', disabled: false });
+    const configuredModel = typeof active === 'string' ? active : active?.chat_model || mappings?.base_model?.chat_model;
+    const choices = [{ value: JSON.stringify({ source: 'config' }), label: `default (config.json: ${configuredModel || 'unconfigured'})`, disabled: false }];
+    if (role !== 'srmm') choices.push({ value: JSON.stringify({ source: 'srmm' }), label: 'default (SRMM)', disabled: false });
     const native = nativeSelection;
     choices.push({ value: JSON.stringify({ source: 'st_native' }), label: `default (SillyTavern selected: ${native?.provider || 'none'} ${native?.model || ''})`, disabled: !native });
     for (const provider of mappings?.providers || []) {
@@ -608,14 +667,20 @@ export default function App() {
         if (role === 'srmm') {
           extension_settings.memu.srmm = choice;
           setSrmm(choice as SrmmChoice);
-          await saveSettings();
+          const saving = syncModelMappings('srmm');
+          if (saving) await saving; else await saveSettings();
         } else if (role === 'other_apps') {
           extension_settings.memu.base_model = choice;
-          if ('source' in choice && choice.source !== 'srmm') changeModelMappings({ base_model: { ...choice, native: nativeModelSelection() } });
+          if ('source' in choice && choice.source === 'config') await saveSettings();
+          else await syncModelMappings('config', undefined, { base_model: stepRequest(choice) as NonNullable<ModelMappingPatch['base_model']> });
         } else {
           extension_settings.memu.advancedMapping ??= {};
           extension_settings.memu.advancedMapping[role] = choice;
-          await changeModelMappings({ step_models: { [role]: stepRequest(choice) } });
+          if ('source' in choice && choice.source === 'config') await saveSettings();
+          else {
+            const request = stepRequest(choice);
+            if (request !== undefined) await changeModelMappings({ step_models: { [role]: request } });
+          }
         }
       } catch (error) { setConfigStatus('error'); setSwitchError(String(error)); }
     }}>{choices.map(choice => <option key={choice.value} value={choice.value} disabled={choice.disabled}>{choice.label}</option>)}</select>;
@@ -630,7 +695,7 @@ export default function App() {
   }
 
   function renderMemuSwitch(id: string, onCard = false) {
-    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap', marginBottom: onCard ? 0 : '0.33lh' }}>
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, whiteSpace: 'nowrap', marginBottom: onCard ? 0 : '0.66lh' }}>
       {onCard && <span>Enable memU:</span>}
       <button id={id} type="button" role="switch" className="memu-toggle" aria-label="memU"
         aria-checked={memuActive && !copiedChat}
@@ -651,12 +716,12 @@ export default function App() {
   }
 
 
-  const stepLabels: Array<{ step: string; label: string; hint: string }> = [
-    { step: 'preprocess', label: 'Preprocess', hint: 'Raw multimodal → concise text' },
-    { step: 'memory_extract', label: 'Memory Extract', hint: 'Text → memory items' },
-    { step: 'category_update', label: 'Category Update', hint: 'Update category summary' },
-    { step: 'reflection', label: 'Reflection', hint: 'Decide what to retrieve / reflect' },
-    { step: 'consolidation', label: 'Consolidation', hint: 'Weekly reflection — edges, intentions, diary' },
+  const stepLabels: Array<{ step: string; label: string }> = [
+    { step: 'preprocess', label: 'multimodal memory' },
+    { step: 'memory_extract', label: 'memory atom' },
+    { step: 'category_update', label: 'category dossiers' },
+    { step: 'reflection', label: 'memory retrieval' },
+    { step: 'consolidation', label: 'weekly reflection' },
   ];
 
   function handleOverrideSummarizerChange(e: ChangeEvent<HTMLInputElement>) {
@@ -835,9 +900,11 @@ export default function App() {
   return (
     <>
                 <style>{`
+                  .memu-ext-settings .fa-info-circle, .memu-card-controls .fa-info-circle { position: relative; top: -0.12em; }
+                  .memu-checkbox-target { display: inline-flex; flex: 0 0 auto; width: auto; padding: 3px; margin: -3px; cursor: pointer; }
                   .memu-toggle { width: 44px; height: 24px; padding: 3px; border: 0; border-radius: 20px; background: #52616c; cursor: pointer; }
                   .memu-toggle span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #eef8ff; }
-                  .memu-toggle[aria-checked="true"] { background: #7dcaf7; }
+                  .memu-toggle[aria-checked="true"] { background: #5bb5e8; }
                   .memu-toggle[aria-checked="true"] span { transform: translateX(20px); }
                   .memu-toggle:disabled { opacity: .5; cursor: default; }
                   #form_create:not([actiontype="editcharacter"]) .memu-card-controls { display: none !important; }
@@ -928,12 +995,12 @@ export default function App() {
                   >
                     Stop
                   </button>
-                    <label className="checkbox_label expander" htmlFor="auto_start_server" style={{ margin: 0 }}>
-                      <input id="auto_start_server" type="checkbox" className="checkbox"
+                    <div className="checkbox_label expander" style={{ margin: 0 }}>
+                      <label className="memu-checkbox-target"><input id="auto_start_server" type="checkbox" className="checkbox" aria-label="Auto Start"
                         checked={pluginConfig?.autoStartWithSillyTavern === true}
-                        onChange={event => updatePluginConfig({ autoStartWithSillyTavern: event.target.checked })} />
+                        onChange={event => updatePluginConfig({ autoStartWithSillyTavern: event.target.checked })} /></label>
                       <span>Auto Start</span>
-                    </label>
+                    </div>
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -981,27 +1048,29 @@ export default function App() {
                 <h4 style={sectionTitleStyle}>Model Mapping</h4>
 
 
-                <label className="checkbox_label expander" htmlFor="use_claude_code">
-                  <input id="use_claude_code" type="checkbox" className="checkbox" checked={mappings?.claude_code === true} disabled={!mappings} onChange={event => changeModelMappings({ claude_code: event.target.checked })} />
+                <div className="checkbox_label expander" style={{ marginTop: '0.5lh', marginBottom: '0.83lh' }}>
+                  <label className="memu-checkbox-target"><input id="use_claude_code" type="checkbox" className="checkbox" aria-label="Use Claude Code" checked={mappings?.claude_code === true} disabled={!mappings} onChange={event => changeModelMappings({ claude_code: event.target.checked })} /></label>
                   <span>Use Claude Code</span>
-                  <i id="memu-agentic-settings-info" className="fa-solid fa-info-circle" title="The Soul's scheduled agentic turns use mcp-memu-server/config.json." style={{ opacity: 0.8 }} />
-                </label>
+                  <i id="memu-agentic-settings-info" className="fa-solid fa-info-circle" title="Agentic turns more limited without Claude Code" style={{ opacity: 0.8 }} />
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>)</label>
+                  <label>SillyTavern Replies (<span style={{ color: '#7dcaf7' }}>SRMM</span>) <i id="memu-srmm-config-info" className="fa-solid fa-info-circle" title="No effect on config.json" style={{ opacity: 0.8 }} /></label>
                   {renderModelPicker('srmm')}
                 </div>
                 {!mappings?.claude_code && <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>Other OpenAlma App Replies <i id="memu-iris-model-info" className="fa-solid fa-info-circle" title="Except the Iris voice model" style={{ opacity: 0.8 }} />
-                    {mappings?.base_model.chat_model && !mappings.base_model.profile_id && !mappings.base_model.native_match && <i id="memu-other-apps-config-info" className="fa-solid fa-info-circle" title="Hand configured config.json" style={{ opacity: 0.8, color: '#ef4444' }} />}
+                  <label style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>Other OpenAlma App Replies
+                    {mappings?.base_model.chat_model && (!extension_settings.memu?.base_model || extension_settings.memu.base_model.hand_edited) && <i id="memu-other-apps-config-info" className="fa-solid fa-info-circle" title="Hand configured config.json" style={{ opacity: 0.8, color: '#ef4444' }} />}
                   </label>
                   {renderModelPicker('other_apps')}
                   </div>
-                  <label className="checkbox_label expander" style={{ marginTop: '0.5lh', marginBottom: '0.5lh' }}><input id="advanced_mapping" type="checkbox" className="checkbox" checked={hasAdvancedMapping || advancedOpen} disabled={!mappings} onChange={event => void toggleAdvancedMapping(event.target.checked)} /><span>Advanced Mapping</span></label>
+                  <div className="checkbox_label expander" style={{ marginTop: '0.5lh', marginBottom: '0.5lh' }}><label className="memu-checkbox-target"><input id="advanced_mapping" type="checkbox" className="checkbox" aria-label="Advanced Mapping" checked={hasAdvancedMapping || advancedOpen} disabled={!mappings} onChange={event => void toggleAdvancedMapping(event.target.checked)} /></label><span>Advanced Mapping</span></div>
                   {(hasAdvancedMapping || advancedOpen) && <div id="memu-advanced-mapping" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {stepLabels.map(s => (
                       <div key={s.step} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <label>{s.label} <span style={{ opacity: 0.7 }}>— {s.hint}</span></label>
+                        <label>{s.label}
+                          {mappings?.step_models[s.step] && (!extension_settings.memu?.advancedMapping?.[s.step] || extension_settings.memu.advancedMapping[s.step].hand_edited) && <i id={`memu-${s.step}-config-info`} className="fa-solid fa-info-circle" title="Hand configured config.json" style={{ opacity: 0.8, color: '#ef4444', marginLeft: 6 }} />}
+                        </label>
                         {renderModelPicker(s.step)}
                       </div>
                     ))}
@@ -1022,68 +1091,68 @@ export default function App() {
                 </div>
               )}
 
-              <label
+              <div
                 className="checkbox_label expander"
-                htmlFor="override_summarizer"
                 style={{ opacity: currentCharacter ? 1 : 0.5 }}
               >
-                <input
+                <label className="memu-checkbox-target"><input
                   id="override_summarizer"
+                  aria-label="Override Summarizer"
                   type="checkbox"
                   className="checkbox"
                   checked={overrideSummarizer}
                   onChange={handleOverrideSummarizerChange}
                   disabled={!currentCharacter || !memuActive || copiedChat}
-                />
+                /></label>
                 <span>Override Summarizer</span>
                 <i
                   className="fa-solid fa-info-circle"
                   title="Per character. If checked: replace SillyTavern's summary message with memU's summary. If unchecked: add memU summary alongside it."
                   style={{ opacity: 0.8 }}
                 />
-              </label>
+              </div>
 
-              <label
+              <div
                 className="checkbox_label expander"
-                htmlFor="import_lorebooks"
                 style={{ opacity: currentCharacter ? 1 : 0.5 }}
               >
-                <input
+                <label className="memu-checkbox-target"><input
                   id="import_lorebooks"
+                  aria-label="Import Lorebooks"
                   type="checkbox"
                   className="checkbox"
                   checked={importLorebooks}
                   onChange={handleImportLorebooksChange}
                   disabled={!currentCharacter || !memuActive || copiedChat}
-                />
+                /></label>
                 <span>Import Lorebooks</span>
                 <i
                   className="fa-solid fa-info-circle"
                   title="Per character. Publish memU category summaries as SillyTavern lorebooks (named memU - <Character> - <Category>) so you can browse them in the World Info panel. Unchecking deletes the memU-managed lorebooks for this character."
                   style={{ opacity: 0.8 }}
                 />
-              </label>
+              </div>
 
-              <label
+              <div
                 className="checkbox_label expander"
-                htmlFor="mental_health_addon"
                 style={{ opacity: currentCharacter ? 1 : 0.5 }}
               >
-                <input
+                <label className="memu-checkbox-target"><input
                   id="mental_health_addon"
+                  aria-label="Mental Health Addon"
                   type="checkbox"
                   className="checkbox"
                   checked={mentalHealthAddon}
                   onChange={handleMentalHealthAddonChange}
                   disabled={!currentCharacter || !memuActive || copiedChat}
-                />
+                /></label>
                 <span>Mental Health Addon</span>
                 <i
                   className="fa-solid fa-info-circle"
                   title="Per character. Enable the mental-health sidecar: when the soul's retrieval router detects an MH theme, it pulls from a curated procedural-memory store alongside regular memories."
                   style={{ opacity: 0.8 }}
                 />
-              </label>
+              </div>
 
               <div style={{ opacity: currentCharacter && currentUserId ? 1 : 0.5, display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

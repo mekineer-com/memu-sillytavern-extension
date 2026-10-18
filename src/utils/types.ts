@@ -24,10 +24,10 @@ export type ModelSelection = { profile_id: string; provider: string; model: stri
 export type SrmmChoice = { source: 'config' | 'st_native' | 'configured'; profile_id?: string };
 export type SrmmRequest = SrmmChoice & { native: ModelSelection | null };
 export type StepChoice = SrmmChoice | { source: 'srmm' } | { model: string };
-export type ModelConnection = { provider: string; base_url: string; chat_model: string; context_window_tokens?: number; max_tokens?: number; profile_id?: string; profile_ids?: string[]; native_match?: boolean };
+export type ModelConnection = { provider: string; base_url: string; chat_model: string; context_window_tokens?: number; max_tokens?: number; profile_ids?: string[]; native_match?: boolean; srmm_match?: boolean };
 export type ModelMappingPatch = {
   claude_code?: boolean;
-  base_model?: SrmmRequest;
+  base_model?: SrmmRequest | { source: 'srmm'; srmm: SrmmRequest };
   step_models?: Record<string, SrmmRequest | { source: 'srmm'; srmm: SrmmRequest } | ModelSelection | { model: string } | null>;
 };
 export type ModelMappings = {
